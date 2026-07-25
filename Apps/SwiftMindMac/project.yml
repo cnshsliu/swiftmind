@@ -8,6 +8,8 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
+    # Optional: set DEVELOPMENT_TEAM when enabling iCloud / App Store signing.
+    # DEVELOPMENT_TEAM: ""
 packages:
   SwiftMind:
     path: ../../

@@ -8,11 +8,14 @@ struct ContentView: View {
     @State private var inspectorPresented = true
     @State private var searchQuery = ""
     @State private var palettePresented = false
+    @State private var mapTitleDraft = ""
     @FocusState private var searchFocused: Bool
 
     init(document: Binding<SwiftMindFileDocument>) {
         self._document = document
-        _session = StateObject(wrappedValue: DocumentSession(map: document.wrappedValue.map))
+        let map = document.wrappedValue.map
+        _session = StateObject(wrappedValue: DocumentSession(map: map))
+        _mapTitleDraft = State(initialValue: map.title)
     }
 
     var body: some View {
@@ -20,9 +23,16 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("SwiftMind")
                     .font(.headline)
-                Text(session.store.map.title)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                TextField("Map Title", text: $mapTitleDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitMapTitle() }
+                    .onChange(of: mapTitleDraft) { _, newValue in
+                        // Apply when the draft diverges from the store (typing commits live so
+                        // the document title stays in sync; SetMapTitleCommand supports undo).
+                        if newValue != session.store.map.title {
+                            session.apply(SetMapTitleCommand(newTitle: newValue))
+                        }
+                    }
                 Divider()
                 SearchBarView(
                     session: session,
@@ -58,6 +68,14 @@ struct ContentView: View {
         .frame(minWidth: 720, minHeight: 420)
         .onChange(of: session.revision) { _, _ in
             document.map = session.exportMap()
+            let title = session.store.map.title
+            if mapTitleDraft != title {
+                mapTitleDraft = title
+            }
+        }
+        .onChange(of: document.map.id) { _, _ in
+            session.syncFromDocument(document.map)
+            mapTitleDraft = document.map.title
         }
         .sheet(isPresented: $palettePresented) {
             CommandPaletteView(session: session, isPresented: $palettePresented)
@@ -97,6 +115,12 @@ struct ContentView: View {
         }
         .focusedSceneValue(\.documentSession, session)
         .focusedSceneValue(\.presentCommandPalette, $palettePresented)
+    }
+
+    private func commitMapTitle() {
+        let trimmed = mapTitleDraft
+        guard trimmed != session.store.map.title else { return }
+        session.apply(SetMapTitleCommand(newTitle: trimmed))
     }
 }
 

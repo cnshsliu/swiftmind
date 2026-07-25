@@ -80,4 +80,15 @@ final class CommandBusTests: XCTestCase {
         try bus.undo(on: &map)
         XCTAssertEqual(map.root.children.map(\.id), [a, c])
     }
+
+    func testSetMapTitleUndoRedo() throws {
+        var map = MindMap.makeEmpty(title: "Original")
+        let bus = CommandBus()
+        try bus.execute(SetMapTitleCommand(newTitle: "Renamed"), on: &map)
+        XCTAssertEqual(map.title, "Renamed")
+        try bus.undo(on: &map)
+        XCTAssertEqual(map.title, "Original")
+        try bus.redo(on: &map)
+        XCTAssertEqual(map.title, "Renamed")
+    }
 }
