@@ -250,6 +250,12 @@ struct MapCanvasView: View {
             .focused($editFieldFocused)
             .onSubmit { commitEdit() }
             .onExitCommand { cancelEdit() }
+            .onChange(of: editFieldFocused) { _, focused in
+                // Click away / focus leaves the field → save (same as outline).
+                if !focused, editingNodeID != nil {
+                    commitEdit()
+                }
+            }
             .onAppear {
                 editFieldFocused = true
             }
@@ -299,6 +305,10 @@ struct MapCanvasView: View {
         // Slightly higher threshold reduces accidental reparent when intending a tap.
         DragGesture(minimumDistance: 6)
             .onChanged { value in
+                // Starting a drag ends in-place edit (save first).
+                if editingNodeID != nil, dragNodeID == nil, !isPanning {
+                    commitEdit()
+                }
                 if dragNodeID == nil && !isPanning {
                     let mods = NSEvent.modifierFlags
                     // Space or ⌘+drag: always pan (even starting on a node).
@@ -410,8 +420,21 @@ struct MapCanvasView: View {
     private func tapSelectGesture(snapshot: MapSnapshot) -> some Gesture {
         SpatialTapGesture()
             .onEnded { event in
-                // Don't steal focus from the edit field with a stray single-tap under it.
-                if editingNodeID != nil { return }
+                // Tap outside the editor commits; then apply selection.
+                if editingNodeID != nil {
+                    let editFrame: CGRect? = {
+                        guard let id = editingNodeID,
+                              let visual = snapshot.nodes.first(where: { $0.id == id }) else {
+                            return nil
+                        }
+                        return viewFrame(for: visual.frame, viewSize: canvasSize)
+                    }()
+                    if let editFrame, editFrame.insetBy(dx: -4, dy: -4).contains(event.location) {
+                        // Tap still inside the field — keep editing.
+                        return
+                    }
+                    commitEdit()
+                }
                 if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
                     session.select(id)
                 }
@@ -421,6 +444,9 @@ struct MapCanvasView: View {
     private func doubleTapEditGesture(snapshot: MapSnapshot) -> some Gesture {
         SpatialTapGesture(count: 2)
             .onEnded { event in
+                if editingNodeID != nil {
+                    commitEdit()
+                }
                 beginEdit(at: event.location, snapshot: snapshot)
             }
     }
