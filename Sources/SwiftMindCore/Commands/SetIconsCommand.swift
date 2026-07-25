@@ -1,10 +1,10 @@
 public final class SetIconsCommand: MapCommand {
     public let name = "SetIcons"
     public let nodeID: NodeID
-    public let icons: [IconRef]
-    private var old: [IconRef]?
+    public let icons: [NodeIcon]
+    private var old: [NodeIcon]?
 
-    public init(nodeID: NodeID, icons: [IconRef]) {
+    public init(nodeID: NodeID, icons: [NodeIcon]) {
         self.nodeID = nodeID
         self.icons = icons
     }

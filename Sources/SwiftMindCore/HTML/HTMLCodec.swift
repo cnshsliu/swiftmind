@@ -338,13 +338,13 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 positionPin = Point2D(x: x, y: y)
             }
 
-            var icons: [IconRef] = []
+            var icons: [NodeIcon] = []
             if let iconsAttr = attributeDict["data-icons"], !iconsAttr.isEmpty {
                 icons = iconsAttr
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
-                    .map { IconRef(id: String($0)) }
+                    .map { NodeIcon(id: String($0)) }
             }
 
             let node = Node(

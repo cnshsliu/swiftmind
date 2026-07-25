@@ -5,6 +5,10 @@ public struct LayoutConfig: Equatable, Sendable {
     public var nodeHeight: Double = 32
     public var charWidth: Double = 8
     public var paddingX: Double = 12
+    /// Width reserved per displayed icon (matches canvas `iconSlot`).
+    public var iconSlotWidth: Double = 14
+    /// Extra horizontal room for note / pin corner badges.
+    public var badgeReserve: Double = 12
 
     public init() {}
 
@@ -14,7 +18,9 @@ public struct LayoutConfig: Equatable, Sendable {
         minNodeWidth: Double = 48,
         nodeHeight: Double = 32,
         charWidth: Double = 8,
-        paddingX: Double = 12
+        paddingX: Double = 12,
+        iconSlotWidth: Double = 14,
+        badgeReserve: Double = 12
     ) {
         self.horizontalGap = horizontalGap
         self.verticalGap = verticalGap
@@ -22,5 +28,7 @@ public struct LayoutConfig: Equatable, Sendable {
         self.nodeHeight = nodeHeight
         self.charWidth = charWidth
         self.paddingX = paddingX
+        self.iconSlotWidth = iconSlotWidth
+        self.badgeReserve = badgeReserve
     }
 }

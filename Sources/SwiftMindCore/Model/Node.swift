@@ -3,7 +3,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     public var text: String
     public var noteMarkdown: String
     public var links: [NodeLink]
-    public var icons: [IconRef]
+    public var icons: [NodeIcon]
     public var isFolded: Bool
     public var side: NodeSide
     public var style: NodeStyle
@@ -15,7 +15,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         text: String,
         noteMarkdown: String = "",
         links: [NodeLink] = [],
-        icons: [IconRef] = [],
+        icons: [NodeIcon] = [],
         isFolded: Bool = false,
         side: NodeSide = .auto,
         style: NodeStyle = .default,

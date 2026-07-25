@@ -41,7 +41,19 @@ public struct LayoutEngine: Sendable {
 
     private func measure(_ node: Node) -> (width: Double, height: Double) {
         let cw = max(config.charWidth, node.style.fontSize * 0.55)
-        let width = max(config.minNodeWidth, Double(node.text.count) * cw + config.paddingX * 2)
+        let textWidth = Double(node.text.count) * cw
+        let iconCount = min(3, node.icons.count)
+        let iconWidth = iconCount == 0
+            ? 0
+            : Double(iconCount) * config.iconSlotWidth + 4
+        // Corner badges (note / pin) need a little horizontal breathing room.
+        var badgeWidth = 0.0
+        if !node.noteMarkdown.isEmpty { badgeWidth += config.badgeReserve }
+        if node.positionPin != nil { badgeWidth += config.badgeReserve * 0.5 }
+        let width = max(
+            config.minNodeWidth,
+            textWidth + iconWidth + badgeWidth + config.paddingX * 2
+        )
         let height = max(config.nodeHeight, node.style.fontSize + 16)
         return (width, height)
     }

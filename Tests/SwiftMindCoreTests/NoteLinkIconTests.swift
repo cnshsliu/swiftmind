@@ -16,11 +16,11 @@ final class NoteLinkIconTests: XCTestCase {
         XCTAssertEqual(url, NodeLink.url(URL(string: "https://example.com")!))
     }
 
-    func testIconRefBuiltin() {
-        let icon = IconRef.builtin("flag")
+    func testNodeIconBuiltin() {
+        let icon = NodeIcon.builtin("flag")
         XCTAssertEqual(icon.id, "flag")
-        XCTAssertTrue(IconRef.catalog.contains(where: { $0.id == "check" }))
-        XCTAssertTrue(IconRef.catalog.contains(where: { $0.id == "flag" }))
+        XCTAssertTrue(NodeIcon.catalog.contains(where: { $0.id == "check" }))
+        XCTAssertTrue(NodeIcon.catalog.contains(where: { $0.id == "flag" }))
     }
 
     func testSetNoteUndo() throws {

@@ -66,8 +66,20 @@ xcodebuild -scheme SwiftMindMac -destination 'platform=macOS' CODE_SIGN_IDENTITY
 ### How to use pin
 
 1. Select a node and choose **Pin** (⇧⌘P, toolbar, or palette).
-2. On the map canvas, **Option+drag** a pinned node to reposition.
+2. On the map canvas, **Option+drag** a node to place/move a pin.
 3. **Unpin** clears the free position so auto layout owns it again.
+
+### Canvas gestures (polish)
+
+| Gesture | Action |
+|---------|--------|
+| Drag **empty** / **root** | Pan |
+| **Space+drag** or **⌘+drag** | Pan (even over a node) |
+| Drag **non-root node** onto another | Reparent (ghost + orange target) |
+| **Option+drag** node | Pin at release point |
+| Pinch | Zoom |
+| Double-click node | Rename |
+| Click node | Select |
 
 ### Multi-window check
 

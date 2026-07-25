@@ -13,13 +13,15 @@ struct MapCanvasView: View {
     @State private var panBase: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
 
-    // MARK: Drag reparent / pin
+    // MARK: Drag reparent / pin / pan
     @State private var dragNodeID: NodeID?
     @State private var isPanning = false
     /// Option+drag pin mode (vs reparent).
     @State private var isPinDragging = false
     @State private var dropTargetID: NodeID?
     @State private var dragCurrentLocation: CGPoint?
+    /// Live map-space position while reparent-dragging (ghost).
+    @State private var reparentGhostCenter: CGPoint?
 
     // MARK: In-place edit
     @State private var editingNodeID: NodeID?
@@ -139,7 +141,7 @@ struct MapCanvasView: View {
                 var x = rect.minX + 6
                 let midY = rect.midY
                 for iconID in iconIDs {
-                    let symbol = SwiftMindCore.IconRef.sfSymbolNames[iconID] ?? "questionmark"
+                    let symbol = NodeIcon.sfSymbolNames[iconID] ?? "questionmark"
                     let badge = Text(Image(systemName: symbol))
                         .font(.system(size: Self.badgeFontSize))
                         .foregroundColor(textColor.opacity(0.9))
@@ -195,12 +197,29 @@ struct MapCanvasView: View {
         if isPinDragging,
            let loc = dragCurrentLocation,
            scale > 0 {
-            let mapX = (loc.x - size.width / 2 - offset.width) / scale
-            let mapY = (loc.y - size.height / 2 - offset.height) / scale
+            let mapPt = mapPoint(from: loc, viewSize: size)
             let pinPreview = Text(Image(systemName: "pin.fill"))
                 .font(.system(size: 14))
                 .foregroundColor(.orange)
-            context.draw(pinPreview, at: CGPoint(x: mapX, y: mapY), anchor: .center)
+            context.draw(pinPreview, at: mapPt, anchor: .center)
+        }
+
+        // Ghost while reparent-dragging (shows where the node “is”).
+        if !isPinDragging,
+           let ghost = reparentGhostCenter,
+           let dragID = dragNodeID,
+           let visual = snapshot.nodes.first(where: { $0.id == dragID }) {
+            let gw = visual.frame.width
+            let gh = visual.frame.height
+            let ghostRect = CGRect(
+                x: ghost.x - gw / 2,
+                y: ghost.y - gh / 2,
+                width: gw,
+                height: gh
+            )
+            let ghostPath = Path(roundedRect: ghostRect, cornerRadius: 8)
+            context.stroke(ghostPath, with: .color(Color.accentColor.opacity(0.7)), lineWidth: 1.5 / scale)
+            context.fill(ghostPath, with: .color(Color.accentColor.opacity(0.12)))
         }
     }
 
@@ -272,21 +291,29 @@ struct MapCanvasView: View {
 
     // MARK: - Gestures
 
-    /// Single drag: Option+node → pin; node hit → reparent; empty → pan.
+    /// Drag rules (M2 polish):
+    /// - **Space held** or start on empty / root → pan canvas
+    /// - **Option + node** → pin at release location
+    /// - **Node (non-root)** → reparent onto drop target (orange highlight + ghost)
     private func combinedDragGesture(snapshot: MapSnapshot) -> some Gesture {
-        DragGesture(minimumDistance: 4)
+        // Slightly higher threshold reduces accidental reparent when intending a tap.
+        DragGesture(minimumDistance: 6)
             .onChanged { value in
-                // First change: classify start location.
                 if dragNodeID == nil && !isPanning {
-                    let optionHeld = NSEvent.modifierFlags.contains(.option)
-                    if let id = hitTest(value.startLocation, snapshot: snapshot, viewSize: canvasSize) {
+                    let mods = NSEvent.modifierFlags
+                    // Space or ⌘+drag: always pan (even starting on a node).
+                    let forcePan = isSpaceKeyDown() || mods.contains(.command)
+                    let optionHeld = mods.contains(.option)
+
+                    if forcePan {
+                        isPanning = true
+                        panBase = offset
+                    } else if let id = hitTest(value.startLocation, snapshot: snapshot, viewSize: canvasSize) {
                         if optionHeld {
-                            // Option+drag: pin (root allowed).
                             dragNodeID = id
                             isPinDragging = true
                             session.select(id)
                         } else if id == session.store.map.root.id {
-                            // Do not reparent the root; treat as pan instead.
                             isPanning = true
                             panBase = offset
                         } else {
@@ -307,13 +334,18 @@ struct MapCanvasView: View {
                     )
                 } else if dragNodeID != nil {
                     dragCurrentLocation = value.location
+                    let mapPt = mapPoint(from: value.location, viewSize: canvasSize)
                     if isPinDragging {
                         dropTargetID = nil
-                    } else if let hit = hitTest(value.location, snapshot: snapshot, viewSize: canvasSize),
-                              hit != dragNodeID {
-                        dropTargetID = hit
+                        reparentGhostCenter = nil
                     } else {
-                        dropTargetID = nil
+                        reparentGhostCenter = mapPt
+                        if let hit = hitTest(value.location, snapshot: snapshot, viewSize: canvasSize),
+                           hit != dragNodeID {
+                            dropTargetID = hit
+                        } else {
+                            dropTargetID = nil
+                        }
                     }
                 }
             }
@@ -322,6 +354,7 @@ struct MapCanvasView: View {
                     dragNodeID = nil
                     dropTargetID = nil
                     dragCurrentLocation = nil
+                    reparentGhostCenter = nil
                     isPanning = false
                     isPinDragging = false
                     panBase = offset
@@ -334,7 +367,7 @@ struct MapCanvasView: View {
                     session.apply(
                         SetPinCommand(
                             nodeID: dragID,
-                            positionPin: Point2D(x: mapPt.x, y: mapPt.y)
+                            positionPin: Point2D(x: Double(mapPt.x), y: Double(mapPt.y))
                         )
                     )
                     return
@@ -342,11 +375,9 @@ struct MapCanvasView: View {
 
                 guard let target = hitTest(value.location, snapshot: snapshot, viewSize: canvasSize),
                       target != dragID else {
-                    // Empty release or self — cancel.
                     return
                 }
 
-                // Append as last child of the drop target. Invalid self/descendant throws — ignore.
                 let index: Int
                 if let parent = session.store.map.node(id: target) {
                     index = parent.children.count
@@ -357,6 +388,12 @@ struct MapCanvasView: View {
                     MoveNodeCommand(nodeID: dragID, newParentID: target, index: index)
                 )
             }
+    }
+
+    /// True while space is physically held (for pan-over-node).
+    private func isSpaceKeyDown() -> Bool {
+        // kVK_Space = 0x31
+        CGEventSource.keyState(.combinedSessionState, key: 0x31)
     }
 
     private var magnifyGesture: some Gesture {

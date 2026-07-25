@@ -18,6 +18,18 @@ final class PinLayoutTests: XCTestCase {
         XCTAssertTrue(v.isPinned)
     }
 
+    func testMeasureWidensForIconsAndNote() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        let a = NodeID(rawValue: "n_a")
+        try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: a, text: "A", side: .right), on: &map)
+        let before = LayoutEngine().layout(map: map).nodes.first { $0.id == a }!.frame.width
+        try bus.execute(SetIconsCommand(nodeID: a, icons: [.builtin("flag"), .builtin("star")]), on: &map)
+        try bus.execute(SetNoteCommand(nodeID: a, noteMarkdown: "note"), on: &map)
+        let after = LayoutEngine().layout(map: map).nodes.first { $0.id == a }!.frame.width
+        XCTAssertGreaterThan(after, before)
+    }
+
     func testUnpinReturnsToAutoLayoutSide() throws {
         var map = MindMap.makeEmpty(title: "T")
         let bus = CommandBus()

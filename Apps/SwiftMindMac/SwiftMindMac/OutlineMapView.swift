@@ -18,6 +18,7 @@ struct OutlineRow: View {
     let node: Node
     @ObservedObject var session: DocumentSession
     @State private var draftText: String
+    @FocusState private var titleFocused: Bool
 
     init(node: Node, session: DocumentSession) {
         self.node = node
@@ -49,8 +50,15 @@ struct OutlineRow: View {
             HStack(spacing: 8) {
                 TextField("Title", text: $draftText)
                     .textFieldStyle(.plain)
+                    .focused($titleFocused)
                     .onSubmit(commitText)
                     .onExitCommand(perform: revertText)
+                    .onChange(of: titleFocused) { _, focused in
+                        // Commit when leaving the field (click away), not only Return.
+                        if !focused {
+                            commitText()
+                        }
+                    }
 
                 if !node.children.isEmpty {
                     Text("\(node.children.count)")
@@ -73,7 +81,8 @@ struct OutlineRow: View {
             }
         }
         .onChange(of: node.text) { _, newValue in
-            if draftText != newValue {
+            // Don't clobber in-progress typing while focused.
+            if !titleFocused, draftText != newValue {
                 draftText = newValue
             }
         }

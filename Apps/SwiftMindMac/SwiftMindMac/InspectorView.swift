@@ -108,12 +108,12 @@ struct InspectorView: View {
 
                 Section("Icons") {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 28))], spacing: 8) {
-                        ForEach(SwiftMindCore.IconRef.catalog) { icon in
+                        ForEach(NodeIcon.catalog) { icon in
                             let on = node.icons.contains(icon)
                             Button {
                                 toggleIcon(icon, on: node)
                             } label: {
-                                Image(systemName: SwiftMindCore.IconRef.sfSymbolNames[icon.id] ?? "questionmark")
+                                Image(systemName: NodeIcon.sfSymbolNames[icon.id] ?? "questionmark")
                                     .font(.title3)
                                     .symbolVariant(on ? .fill : .none)
                                     .foregroundStyle(on ? Color.accentColor : Color.secondary)
@@ -335,7 +335,7 @@ struct InspectorView: View {
 
     // MARK: - Icons
 
-    private func toggleIcon(_ icon: SwiftMindCore.IconRef, on node: Node) {
+    private func toggleIcon(_ icon: NodeIcon, on node: Node) {
         var icons = node.icons
         if let idx = icons.firstIndex(of: icon) {
             icons.remove(at: idx)
