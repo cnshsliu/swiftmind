@@ -1,0 +1,33 @@
+name: SwiftMindMac
+options:
+  bundleIdPrefix: app.swiftmind
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+packages:
+  SwiftMind:
+    path: ../../
+targets:
+  SwiftMindMac:
+    type: application
+    platform: macOS
+    sources:
+      - SwiftMindMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.swiftmind.mac
+        PRODUCT_NAME: SwiftMind
+        INFOPLIST_FILE: SwiftMindMac/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SwiftMindMac/SwiftMindMac.entitlements
+        GENERATE_INFOPLIST_FILE: false
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        COMBINE_HIDPI_IMAGES: true
+    dependencies:
+      - package: SwiftMind
+        product: SwiftMindCore
+    scheme:
+      testTargets: []
