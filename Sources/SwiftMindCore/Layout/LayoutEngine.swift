@@ -1,0 +1,116 @@
+public struct LayoutEngine: Sendable {
+    public var config: LayoutConfig
+
+    public init(config: LayoutConfig = LayoutConfig()) {
+        self.config = config
+    }
+
+    public func layout(map: MindMap, selection: SelectionState = SelectionState()) -> MapSnapshot {
+        var nodes: [NodeVisual] = []
+        var edges: [EdgeVisual] = []
+        let rootSize = measure(map.root)
+        let rootFrame = Rect2D(
+            x: -rootSize.width / 2,
+            y: -rootSize.height / 2,
+            width: rootSize.width,
+            height: rootSize.height
+        )
+        appendNode(map.root, frame: rootFrame, depth: 0, selection: selection, into: &nodes)
+        placeChildren(
+            of: map.root,
+            parentFrame: rootFrame,
+            depth: 1,
+            selection: selection,
+            nodes: &nodes,
+            edges: &edges
+        )
+        let bounds = nodes.map(\.frame).reduce(rootFrame) { $0.union($1) }.inset(by: -40)
+        return MapSnapshot(nodes: nodes, edges: edges, bounds: bounds)
+    }
+
+    private func measure(_ node: Node) -> (width: Double, height: Double) {
+        let cw = max(config.charWidth, node.style.fontSize * 0.55)
+        let width = max(config.minNodeWidth, Double(node.text.count) * cw + config.paddingX * 2)
+        let height = max(config.nodeHeight, node.style.fontSize + 16)
+        return (width, height)
+    }
+
+    private func resolvedSide(_ node: Node, index: Int) -> NodeSide {
+        if node.side != .auto { return node.side }
+        return index % 2 == 0 ? .right : .left
+    }
+
+    private func subtreeHeight(_ node: Node) -> Double {
+        let selfH = measure(node).height
+        guard !node.isFolded, !node.children.isEmpty else { return selfH }
+        let kids = node.children.map { subtreeHeight($0) }.reduce(0, +)
+            + Double(max(0, node.children.count - 1)) * config.verticalGap
+        return max(selfH, kids)
+    }
+
+    private func placeChildren(
+        of parent: Node,
+        parentFrame: Rect2D,
+        depth: Int,
+        selection: SelectionState,
+        nodes: inout [NodeVisual],
+        edges: inout [EdgeVisual]
+    ) {
+        guard !parent.isFolded else { return }
+        let totalH = subtreeHeight(parent)
+        var cursorY = parentFrame.midY - totalH / 2
+        for (index, child) in parent.children.enumerated() {
+            let side = resolvedSide(child, index: index)
+            let size = measure(child)
+            let blockH = subtreeHeight(child)
+            let centerY = cursorY + blockH / 2
+            let x: Double
+            if side == .left {
+                x = parentFrame.x - config.horizontalGap - size.width
+            } else {
+                x = parentFrame.x + parentFrame.width + config.horizontalGap
+            }
+            let frame = Rect2D(x: x, y: centerY - size.height / 2, width: size.width, height: size.height)
+            appendNode(child, frame: frame, depth: depth, selection: selection, into: &nodes)
+            let from = Point2D(
+                x: side == .left ? parentFrame.x : parentFrame.x + parentFrame.width,
+                y: parentFrame.midY
+            )
+            let to = Point2D(
+                x: side == .left ? frame.x + frame.width : frame.x,
+                y: frame.midY
+            )
+            edges.append(EdgeVisual(from: parent.id, to: child.id, fromPoint: from, toPoint: to))
+            placeChildren(
+                of: child,
+                parentFrame: frame,
+                depth: depth + 1,
+                selection: selection,
+                nodes: &nodes,
+                edges: &edges
+            )
+            cursorY += blockH + config.verticalGap
+        }
+    }
+
+    private func appendNode(
+        _ node: Node,
+        frame: Rect2D,
+        depth: Int,
+        selection: SelectionState,
+        into nodes: inout [NodeVisual]
+    ) {
+        nodes.append(
+            NodeVisual(
+                id: node.id,
+                text: node.text,
+                frame: frame,
+                style: node.style,
+                depth: depth,
+                side: node.side,
+                isFolded: node.isFolded,
+                isSelected: selection.selectedIDs.contains(node.id)
+            )
+        )
+    }
+}
