@@ -39,4 +39,49 @@ final class HTMLCodecTests: XCTestCase {
     func testDecodeRejectsUnknownDocument() {
         XCTAssertThrowsError(try HTMLCodec.decode("<html><body>hi</body></html>"))
     }
+
+    func testEncodeWithSkinEmbedsReadOnlyCSS() throws {
+        let map = MindMap.makeEmpty(title: "Skin Check")
+        let html = try HTMLCodec.encode(map, includeSkin: true)
+        XCTAssertTrue(html.contains("<style>"))
+        XCTAssertTrue(html.contains(".node-title"))
+        XCTAssertTrue(html.contains(".swiftmind-map"))
+        XCTAssertTrue(html.contains("list-style: none"))
+    }
+
+    func testGoldenFixtureDecodesAndMatchesStructure() throws {
+        let url = try XCTUnwrap(
+            Bundle.module.url(
+                forResource: "minimal",
+                withExtension: "swiftmind.html",
+                subdirectory: "Fixtures"
+            )
+        )
+        let html = try String(contentsOf: url, encoding: .utf8)
+
+        // Browser skin present for manual open verification.
+        XCTAssertTrue(html.contains("<style>"))
+        XCTAssertTrue(html.contains(".node-title"))
+        XCTAssertTrue(html.contains("Central Idea"))
+        XCTAssertTrue(html.contains("Alpha"))
+        XCTAssertTrue(html.contains("Beta"))
+        XCTAssertTrue(html.contains("Gamma"))
+
+        let decoded = try HTMLCodec.decode(html)
+        XCTAssertEqual(decoded.title, "Minimal Map")
+        XCTAssertEqual(decoded.id, "m_minimal_fixture")
+        XCTAssertEqual(decoded.root.id.rawValue, "n_root")
+        XCTAssertEqual(decoded.root.text, "Central Idea")
+        XCTAssertEqual(decoded.root.children.count, 2)
+        XCTAssertEqual(decoded.root.children[0].text, "Alpha")
+        XCTAssertEqual(decoded.root.children[0].side, .right)
+        XCTAssertEqual(decoded.root.children[0].children[0].text, "Beta")
+        XCTAssertEqual(decoded.root.children[1].text, "Gamma")
+        XCTAssertEqual(decoded.root.children[1].side, .left)
+
+        // Re-encode with skin should keep round-trippable structure.
+        let reencoded = try HTMLCodec.encode(decoded, includeSkin: true)
+        let again = try HTMLCodec.decode(reencoded)
+        XCTAssertEqual(again, decoded)
+    }
 }
