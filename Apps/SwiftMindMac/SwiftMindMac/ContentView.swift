@@ -4,6 +4,7 @@ import SwiftMindCore
 struct ContentView: View {
     @Binding var document: SwiftMindFileDocument
     @StateObject private var session: DocumentSession
+    @State private var inspectorPresented = true
 
     init(document: Binding<SwiftMindFileDocument>) {
         self._document = document
@@ -56,42 +57,26 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 640, minHeight: 420)
+        .frame(minWidth: 720, minHeight: 420)
         .onChange(of: session.revision) { _, _ in
             document.map = session.exportMap()
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
+            EditorToolbar(session: session)
+            ToolbarItem(placement: .automatic) {
                 Button {
-                    addChild()
+                    inspectorPresented.toggle()
                 } label: {
-                    Label("Add Child", systemImage: "plus.circle")
+                    Label("Inspector", systemImage: "sidebar.trailing")
                 }
-                .help("Add a child under the selected node")
-                .disabled(session.store.selection.primary == nil)
-
-                Button {
-                    session.undo()
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                }
-                .disabled(!session.canUndo)
-
-                Button {
-                    session.redo()
-                } label: {
-                    Label("Redo", systemImage: "arrow.uturn.forward")
-                }
-                .disabled(!session.canRedo)
+                .help("Toggle style inspector")
             }
         }
-    }
-
-    private func addChild() {
-        guard let parentID = session.store.selection.primary else { return }
-        session.apply(
-            InsertChildCommand(parentID: parentID, text: "New Idea")
-        )
+        .inspector(isPresented: $inspectorPresented) {
+            InspectorView(session: session)
+                .inspectorColumnWidth(min: 220, ideal: 260, max: 360)
+        }
+        .focusedSceneValue(\.documentSession, session)
     }
 }
 

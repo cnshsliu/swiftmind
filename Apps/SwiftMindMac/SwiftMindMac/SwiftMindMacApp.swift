@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftMindCore
 
 @main
 struct SwiftMindMacApp: App {
@@ -7,7 +8,88 @@ struct SwiftMindMacApp: App {
             ContentView(document: file.$document)
         }
         .commands {
-            CommandGroup(replacing: .undoRedo) { } // wire later via environment
+            // Replace system undo/redo with session-backed history.
+            CommandGroup(replacing: .undoRedo) {
+                SessionUndoRedoCommands()
+            }
+
+            CommandMenu("Node") {
+                SessionNodeCommands()
+            }
         }
+    }
+}
+
+// MARK: - App menu commands (bound via FocusedValues)
+
+private struct SessionUndoRedoCommands: View {
+    @FocusedValue(\.documentSession) private var session
+
+    var body: some View {
+        Button("Undo") {
+            session?.undo()
+        }
+        .keyboardShortcut("z", modifiers: .command)
+        .disabled(!(session?.canUndo ?? false))
+
+        Button("Redo") {
+            session?.redo()
+        }
+        .keyboardShortcut("z", modifiers: [.command, .shift])
+        .disabled(!(session?.canRedo ?? false))
+    }
+}
+
+private struct SessionNodeCommands: View {
+    @FocusedValue(\.documentSession) private var session
+
+    private var canAddSibling: Bool {
+        guard let session,
+              let primary = session.store.selection.primary else { return false }
+        return primary != session.store.map.root.id
+    }
+
+    private var canDelete: Bool {
+        guard let session else { return false }
+        let root = session.store.map.root.id
+        return session.store.selection.selectedIDs.contains { $0 != root }
+    }
+
+    var body: some View {
+        Button("Add Child") {
+            guard let session else { return }
+            let parent = session.store.selection.primary ?? session.store.map.root.id
+            session.apply(InsertChildCommand(parentID: parent, text: "New Idea", side: .auto))
+        }
+        .keyboardShortcut("t", modifiers: .command)
+        .disabled(session == nil)
+
+        Button("Add Sibling") {
+            guard let session,
+                  let primary = session.store.selection.primary,
+                  primary != session.store.map.root.id else { return }
+            session.apply(InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto))
+        }
+        .keyboardShortcut("t", modifiers: [.command, .shift])
+        .disabled(!canAddSibling)
+
+        Button("Delete") {
+            guard let session else { return }
+            let root = session.store.map.root.id
+            let ids = session.store.selection.selectedIDs.filter { $0 != root }
+            guard !ids.isEmpty else { return }
+            session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
+        }
+        .keyboardShortcut(.delete, modifiers: [])
+        .disabled(!canDelete)
+
+        Button("Toggle Fold") {
+            guard let session,
+                  let primary = session.store.selection.primary,
+                  let node = session.store.map.node(id: primary) else { return }
+            session.apply(SetFoldedCommand(nodeID: primary, isFolded: !node.isFolded))
+        }
+        .keyboardShortcut(".", modifiers: .command)
+        .disabled(session?.store.selection.primary == nil)
     }
 }
