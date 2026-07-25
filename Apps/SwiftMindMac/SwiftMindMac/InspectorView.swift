@@ -16,6 +16,9 @@ struct InspectorView: View {
     @State private var hasFill: Bool = false
     /// Tracks which node the local drafts currently mirror (avoids fighting live edits).
     @State private var boundNodeID: NodeID?
+    /// Last model values we pushed into drafts; if draft still equals these, it is not dirty.
+    @State private var lastSyncedTitle: String = ""
+    @State private var lastSyncedNote: String = ""
     /// Suppresses command dispatch while drafts are loaded from the model.
     @State private var isSyncing = false
 
@@ -190,28 +193,41 @@ struct InspectorView: View {
 
     // MARK: - Sync
 
-    /// Pull model → drafts when selection changes or after external edits.
+    /// Pull model → drafts when selection changes or after external edits
+    /// (canvas rename, outline, undo). Keep dirty inspector drafts until Apply.
     private func syncFromSelection(force: Bool) {
         guard let node = primaryNode else {
             boundNodeID = nil
+            lastSyncedTitle = ""
+            lastSyncedNote = ""
             return
         }
-        // Refresh drafts when primary changes or forced; keep in-progress typing otherwise.
-        if force || boundNodeID != node.id {
+
+        let selectionChanged = boundNodeID != node.id
+        isSyncing = true
+        defer { isSyncing = false }
+
+        if force || selectionChanged {
             boundNodeID = node.id
-            isSyncing = true
             titleDraft = node.text
             noteDraft = node.noteMarkdown
+            lastSyncedTitle = node.text
+            lastSyncedNote = node.noteMarkdown
             urlDraft = ""
             applyStyleToDrafts(node.style)
-            isSyncing = false
-        } else if titleDraft == node.text {
-            // Same node, title not dirty — still refresh style from model (e.g. undo).
-            // Note draft keeps the title-style pattern: only reloaded on selection change.
-            isSyncing = true
-            applyStyleToDrafts(node.style)
-            isSyncing = false
+            return
         }
+
+        // Same node: refresh non-dirty fields so canvas/outline renames show up.
+        if titleDraft == lastSyncedTitle {
+            titleDraft = node.text
+            lastSyncedTitle = node.text
+        }
+        if noteDraft == lastSyncedNote {
+            noteDraft = node.noteMarkdown
+            lastSyncedNote = node.noteMarkdown
+        }
+        applyStyleToDrafts(node.style)
     }
 
     private func applyStyleToDrafts(_ style: NodeStyle) {
@@ -238,12 +254,14 @@ struct InspectorView: View {
         let trimmed = titleDraft
         guard trimmed != node.text else { return }
         session.apply(SetTextCommand(nodeID: id, newText: trimmed))
+        lastSyncedTitle = trimmed
     }
 
     private func commitNote(for id: NodeID) {
         guard let node = session.store.map.node(id: id) else { return }
         guard noteDraft != node.noteMarkdown else { return }
         session.apply(SetNoteCommand(nodeID: id, noteMarkdown: noteDraft))
+        lastSyncedNote = noteDraft
     }
 
     private func commitStyleIfUser(for id: NodeID) {
