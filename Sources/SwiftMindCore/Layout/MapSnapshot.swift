@@ -42,6 +42,12 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
     public var side: NodeSide
     public var isFolded: Bool
     public var isSelected: Bool
+    /// True when the source node has non-empty note markdown (canvas badge).
+    public var hasNote: Bool
+    /// Icon catalog ids for canvas badges (order matches node.icons).
+    public var iconIDs: [String]
+    /// True when the source node has a position pin.
+    public var isPinned: Bool
 
     public init(
         id: NodeID,
@@ -51,7 +57,10 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         depth: Int,
         side: NodeSide,
         isFolded: Bool,
-        isSelected: Bool
+        isSelected: Bool,
+        hasNote: Bool = false,
+        iconIDs: [String] = [],
+        isPinned: Bool = false
     ) {
         self.id = id
         self.text = text
@@ -61,6 +70,9 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         self.side = side
         self.isFolded = isFolded
         self.isSelected = isSelected
+        self.hasNote = hasNote
+        self.iconIDs = iconIDs
+        self.isPinned = isPinned
     }
 }
 
