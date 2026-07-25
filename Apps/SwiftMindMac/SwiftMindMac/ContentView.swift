@@ -5,6 +5,8 @@ struct ContentView: View {
     @Binding var document: SwiftMindFileDocument
     @StateObject private var session: DocumentSession
     @State private var inspectorPresented = true
+    @State private var searchQuery = ""
+    @FocusState private var searchFocused: Bool
 
     init(document: Binding<SwiftMindFileDocument>) {
         self._document = document
@@ -20,21 +22,15 @@ struct ContentView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Divider()
-                Text("Nodes")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                Text(session.store.map.root.text)
-                    .lineLimit(3)
-                if let primary = session.store.selection.primary {
-                    Text("Selected: \(primary.rawValue)")
-                        .font(.caption2)
-                        .foregroundStyle(.quaternary)
-                        .lineLimit(1)
-                }
+                SearchBarView(
+                    session: session,
+                    query: $searchQuery,
+                    isSearchFocused: $searchFocused
+                )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding()
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 240)
         } detail: {
             VStack(spacing: 0) {
                 Picker("View", selection: $session.viewMode) {
@@ -63,6 +59,15 @@ struct ContentView: View {
         }
         .toolbar {
             EditorToolbar(session: session)
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    searchFocused = true
+                } label: {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                .keyboardShortcut("f", modifiers: .command)
+                .help("Focus search (⌘F)")
+            }
             ToolbarItem(placement: .automatic) {
                 Button {
                     inspectorPresented.toggle()
