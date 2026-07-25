@@ -91,5 +91,43 @@ private struct SessionNodeCommands: View {
         }
         .keyboardShortcut(".", modifiers: .command)
         .disabled(session?.store.selection.primary == nil)
+
+        Divider()
+
+        Button(pinMenuTitle) {
+            togglePin()
+        }
+        .keyboardShortcut("p", modifiers: [.command, .shift])
+        .disabled(session?.store.selection.primary == nil)
+    }
+
+    private var pinMenuTitle: String {
+        guard let session,
+              let primary = session.store.selection.primary,
+              let node = session.store.map.node(id: primary),
+              node.positionPin != nil else {
+            return "Pin"
+        }
+        return "Unpin"
+    }
+
+    private func togglePin() {
+        guard let session,
+              let primary = session.store.selection.primary else { return }
+        if let node = session.store.map.node(id: primary), node.positionPin != nil {
+            session.apply(SetPinCommand(nodeID: primary, positionPin: nil))
+            return
+        }
+        let snapshot = session.store.snapshot()
+        if let visual = snapshot.nodes.first(where: { $0.id == primary }) {
+            session.apply(
+                SetPinCommand(
+                    nodeID: primary,
+                    positionPin: Point2D(x: visual.frame.midX, y: visual.frame.midY)
+                )
+            )
+        } else {
+            session.apply(SetPinCommand(nodeID: primary, positionPin: .zero))
+        }
     }
 }

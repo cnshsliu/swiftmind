@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftMindCore
 
-/// Primary editor actions for the mind map (structure + undo).
+/// Primary editor actions for the mind map (structure + undo + pin).
 /// Keyboard shortcuts are declared on app `Commands` (see SwiftMindMacApp);
 /// toolbar buttons mirror the same actions for discoverability.
 struct EditorToolbar: ToolbarContent {
@@ -35,6 +35,16 @@ struct EditorToolbar: ToolbarContent {
         return node.isFolded
     }
 
+    private var canPin: Bool {
+        primary != nil
+    }
+
+    private var primaryIsPinned: Bool {
+        guard let primary,
+              let node = session.store.map.node(id: primary) else { return false }
+        return node.positionPin != nil
+    }
+
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Button(action: addChild) {
@@ -64,6 +74,16 @@ struct EditorToolbar: ToolbarContent {
             }
             .help(primaryIsFolded ? "Unfold selected node (⌘.)" : "Fold selected node (⌘.)")
             .disabled(!canToggleFold)
+
+            Button(action: togglePin) {
+                Label(
+                    primaryIsPinned ? "Unpin" : "Pin",
+                    systemImage: primaryIsPinned ? "pin.slash" : "pin"
+                )
+            }
+            .help(primaryIsPinned ? "Unpin selected node (⇧⌘P)" : "Pin selected node at current layout (⇧⌘P)")
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(!canPin)
 
             Button(action: { session.undo() }) {
                 Label("Undo", systemImage: "arrow.uturn.backward")
@@ -105,5 +125,26 @@ struct EditorToolbar: ToolbarContent {
         guard let primary,
               let node = session.store.map.node(id: primary) else { return }
         session.apply(SetFoldedCommand(nodeID: primary, isFolded: !node.isFolded))
+    }
+
+    /// Pin uses the current snapshot frame mid-point; unpin clears the pin.
+    private func togglePin() {
+        guard let primary else { return }
+        if primaryIsPinned {
+            session.apply(SetPinCommand(nodeID: primary, positionPin: nil))
+            return
+        }
+        let snapshot = session.store.snapshot()
+        guard let visual = snapshot.nodes.first(where: { $0.id == primary }) else {
+            // Fallback: pin at origin if layout has no frame yet.
+            session.apply(SetPinCommand(nodeID: primary, positionPin: .zero))
+            return
+        }
+        session.apply(
+            SetPinCommand(
+                nodeID: primary,
+                positionPin: Point2D(x: visual.frame.midX, y: visual.frame.midY)
+            )
+        )
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftMindCore
+import AppKit
 
 struct MapCanvasView: View {
     @ObservedObject var session: DocumentSession
@@ -12,9 +13,11 @@ struct MapCanvasView: View {
     @State private var panBase: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
 
-    // MARK: Drag reparent
+    // MARK: Drag reparent / pin
     @State private var dragNodeID: NodeID?
     @State private var isPanning = false
+    /// Option+drag pin mode (vs reparent).
+    @State private var isPinDragging = false
     @State private var dropTargetID: NodeID?
     @State private var dragCurrentLocation: CGPoint?
 
@@ -25,6 +28,8 @@ struct MapCanvasView: View {
 
     private static let minScale: CGFloat = 0.25
     private static let maxScale: CGFloat = 3
+    private static let badgeFontSize: CGFloat = 11
+    private static let iconSlot: CGFloat = 14
 
     var body: some View {
         // Depend on revision so layout redraws after store mutations.
@@ -97,7 +102,7 @@ struct MapCanvasView: View {
                 context.fill(path, with: .color(Color(nsColor: .controlBackgroundColor)))
             }
 
-            let isDropTarget = dropTargetID == node.id
+            let isDropTarget = dropTargetID == node.id && !isPinDragging
             let strokeColor: Color
             if isDropTarget {
                 strokeColor = .orange
@@ -123,16 +128,79 @@ struct MapCanvasView: View {
                 green: node.style.textGreen,
                 blue: node.style.textBlue
             )
+
+            // Icons (up to 3) left of title; shrink text frame.
+            let iconIDs = Array(node.iconIDs.prefix(3))
+            let iconStripWidth = iconIDs.isEmpty
+                ? 0
+                : CGFloat(iconIDs.count) * Self.iconSlot + 4
+
+            if !iconIDs.isEmpty {
+                var x = rect.minX + 6
+                let midY = rect.midY
+                for iconID in iconIDs {
+                    let symbol = SwiftMindCore.IconRef.sfSymbolNames[iconID] ?? "questionmark"
+                    let badge = Text(Image(systemName: symbol))
+                        .font(.system(size: Self.badgeFontSize))
+                        .foregroundColor(textColor.opacity(0.9))
+                    context.draw(badge, at: CGPoint(x: x + Self.iconSlot / 2, y: midY), anchor: .center)
+                    x += Self.iconSlot
+                }
+            }
+
             // Hide label while editing this node (overlay TextField shows it).
             if editingNodeID != node.id {
+                let textRect = rect.insetBy(dx: 6, dy: 4)
+                let adjustedTextRect = CGRect(
+                    x: textRect.minX + iconStripWidth,
+                    y: textRect.minY,
+                    width: max(0, textRect.width - iconStripWidth),
+                    height: textRect.height
+                )
                 let text = Text(node.text)
                     .font(.system(
                         size: node.style.fontSize,
                         weight: node.style.isBold ? .bold : .regular
                     ))
                     .foregroundColor(textColor)
-                context.draw(text, in: rect.insetBy(dx: 6, dy: 4))
+                context.draw(text, in: adjustedTextRect)
             }
+
+            // Note glyph — top-right of frame.
+            if node.hasNote {
+                let noteBadge = Text(Image(systemName: "note.text"))
+                    .font(.system(size: Self.badgeFontSize))
+                    .foregroundColor(.secondary)
+                context.draw(
+                    noteBadge,
+                    at: CGPoint(x: rect.maxX - 4, y: rect.minY + 4),
+                    anchor: .topTrailing
+                )
+            }
+
+            // Pin badge — top-left of frame.
+            if node.isPinned {
+                let pinBadge = Text(Image(systemName: "pin.fill"))
+                    .font(.system(size: Self.badgeFontSize))
+                    .foregroundColor(.orange)
+                context.draw(
+                    pinBadge,
+                    at: CGPoint(x: rect.minX + 4, y: rect.minY + 4),
+                    anchor: .topLeading
+                )
+            }
+        }
+
+        // Live pin preview while Option+dragging.
+        if isPinDragging,
+           let loc = dragCurrentLocation,
+           scale > 0 {
+            let mapX = (loc.x - size.width / 2 - offset.width) / scale
+            let mapY = (loc.y - size.height / 2 - offset.height) / scale
+            let pinPreview = Text(Image(systemName: "pin.fill"))
+                .font(.system(size: 14))
+                .foregroundColor(.orange)
+            context.draw(pinPreview, at: CGPoint(x: mapX, y: mapY), anchor: .center)
         }
     }
 
@@ -204,19 +272,26 @@ struct MapCanvasView: View {
 
     // MARK: - Gestures
 
-    /// Single drag: node hit → reparent gesture; empty → pan. Distinguishes pan vs node drag at begin.
+    /// Single drag: Option+node → pin; node hit → reparent; empty → pan.
     private func combinedDragGesture(snapshot: MapSnapshot) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
                 // First change: classify start location.
                 if dragNodeID == nil && !isPanning {
+                    let optionHeld = NSEvent.modifierFlags.contains(.option)
                     if let id = hitTest(value.startLocation, snapshot: snapshot, viewSize: canvasSize) {
-                        // Do not reparent the root; treat as pan instead.
-                        if id == session.store.map.root.id {
+                        if optionHeld {
+                            // Option+drag: pin (root allowed).
+                            dragNodeID = id
+                            isPinDragging = true
+                            session.select(id)
+                        } else if id == session.store.map.root.id {
+                            // Do not reparent the root; treat as pan instead.
                             isPanning = true
                             panBase = offset
                         } else {
                             dragNodeID = id
+                            isPinDragging = false
                             session.select(id)
                         }
                     } else {
@@ -232,8 +307,10 @@ struct MapCanvasView: View {
                     )
                 } else if dragNodeID != nil {
                     dragCurrentLocation = value.location
-                    if let hit = hitTest(value.location, snapshot: snapshot, viewSize: canvasSize),
-                       hit != dragNodeID {
+                    if isPinDragging {
+                        dropTargetID = nil
+                    } else if let hit = hitTest(value.location, snapshot: snapshot, viewSize: canvasSize),
+                              hit != dragNodeID {
                         dropTargetID = hit
                     } else {
                         dropTargetID = nil
@@ -246,14 +323,26 @@ struct MapCanvasView: View {
                     dropTargetID = nil
                     dragCurrentLocation = nil
                     isPanning = false
+                    isPinDragging = false
                     panBase = offset
                 }
 
                 guard let dragID = dragNodeID else { return }
 
+                if isPinDragging {
+                    let mapPt = mapPoint(from: value.location, viewSize: canvasSize)
+                    session.apply(
+                        SetPinCommand(
+                            nodeID: dragID,
+                            positionPin: Point2D(x: mapPt.x, y: mapPt.y)
+                        )
+                    )
+                    return
+                }
+
                 guard let target = hitTest(value.location, snapshot: snapshot, viewSize: canvasSize),
                       target != dragID else {
-                    // Empty release or self — cancel (no pin in M1).
+                    // Empty release or self — cancel.
                     return
                 }
 
@@ -299,10 +388,20 @@ struct MapCanvasView: View {
             }
     }
 
-    // MARK: - Hit testing
+    // MARK: - Hit testing / coordinates
 
-    /// Convert a view-space tap into map coordinates by inverting the
-    /// canvas transform (center + pan, then scale), then test node frames
+    /// Convert a view-space point into map coordinates by inverting the
+    /// canvas transform (center + pan, then scale).
+    private func mapPoint(from location: CGPoint, viewSize: CGSize) -> CGPoint {
+        guard viewSize.width > 0, viewSize.height > 0, scale > 0 else {
+            return .zero
+        }
+        let mapX = (location.x - viewSize.width / 2 - offset.width) / scale
+        let mapY = (location.y - viewSize.height / 2 - offset.height) / scale
+        return CGPoint(x: mapX, y: mapY)
+    }
+
+    /// Convert a view-space tap into map coordinates, then test node frames
     /// back-to-front so later-drawn nodes win.
     private func hitTest(
         _ location: CGPoint,
@@ -311,8 +410,9 @@ struct MapCanvasView: View {
     ) -> NodeID? {
         guard viewSize.width > 0, viewSize.height > 0, scale > 0 else { return nil }
 
-        let mapX = (location.x - viewSize.width / 2 - offset.width) / scale
-        let mapY = (location.y - viewSize.height / 2 - offset.height) / scale
+        let pt = mapPoint(from: location, viewSize: viewSize)
+        let mapX = Double(pt.x)
+        let mapY = Double(pt.y)
 
         for node in snapshot.nodes.reversed() {
             let f = node.frame
