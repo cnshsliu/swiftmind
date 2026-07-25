@@ -52,7 +52,7 @@ struct ContentView: View {
                 case .outline:
                     OutlineMapView(session: session)
                 case .map:
-                    mapPlaceholder
+                    MapCanvasView(session: session)
                 }
             }
         }
@@ -85,23 +85,6 @@ struct ContentView: View {
                 .disabled(!session.canRedo)
             }
         }
-    }
-
-    private var mapPlaceholder: some View {
-        VStack(spacing: 12) {
-            Text(session.store.map.title)
-                .font(.title2)
-            Text(session.store.map.root.text)
-                .font(.title3)
-                .foregroundStyle(.secondary)
-            Text("Map canvas placeholder")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            Text("Switch to Outline to edit the tree")
-                .font(.caption2)
-                .foregroundStyle(.quaternary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func addChild() {
