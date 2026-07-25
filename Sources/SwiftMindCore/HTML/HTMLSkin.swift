@@ -31,6 +31,18 @@ enum HTMLSkin {
       border: 1px solid #e5e5ea;
       font-weight: 500;
     }
+    /* Share/view skin: reveal notes that stay hidden for app parse. */
+    .node-note[hidden] {
+      display: block !important;
+      opacity: 0.75;
+      font-size: 0.9em;
+      margin: 0.25rem 0 0.25rem 0.5rem;
+      white-space: pre-wrap;
+      color: #3a3a3c;
+    }
+    .node-links[hidden] {
+      display: none !important;
+    }
     """
 
     static func headFragment(includeSkin: Bool) -> String {

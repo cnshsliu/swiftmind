@@ -84,4 +84,63 @@ final class HTMLCodecTests: XCTestCase {
         let again = try HTMLCodec.decode(reencoded)
         XCTAssertEqual(again, decoded)
     }
+
+    func testRoundTripNoteLinksIconsPin() throws {
+        var map = MindMap.makeEmpty(title: "N")
+        let bus = CommandBus()
+        let child = NodeID(rawValue: "n_c")
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: child, text: "C", side: .right),
+            on: &map
+        )
+        try bus.execute(SetNoteCommand(nodeID: child, noteMarkdown: "line1\n**bold**"), on: &map)
+        try bus.execute(
+            SetLinksCommand(nodeID: child, links: [
+                .url(URL(string: "https://example.com")!),
+                .node(map.root.id),
+            ]),
+            on: &map
+        )
+        try bus.execute(SetIconsCommand(nodeID: child, icons: [.builtin("star")]), on: &map)
+        try bus.execute(SetPinCommand(nodeID: child, positionPin: Point2D(x: 10, y: 20)), on: &map)
+
+        let html = try HTMLCodec.encode(map, includeSkin: true)
+        XCTAssertTrue(html.contains("node-note"))
+        XCTAssertTrue(html.contains("data-icons=\"star\""))
+        XCTAssertTrue(html.contains("data-pin-x"))
+        XCTAssertTrue(html.contains("data-schema=\"1\""))
+        XCTAssertTrue(html.contains(".node-note[hidden]"))
+
+        let decoded = try HTMLCodec.decode(html)
+        let n = try XCTUnwrap(decoded.node(id: child))
+        XCTAssertEqual(n.noteMarkdown, "line1\n**bold**")
+        XCTAssertEqual(n.links.count, 2)
+        XCTAssertEqual(n.links[0], .url(URL(string: "https://example.com")!))
+        XCTAssertEqual(n.links[1], .node(map.root.id))
+        XCTAssertEqual(n.icons.map(\.id), ["star"])
+        XCTAssertEqual(n.positionPin?.x ?? -1, 10, accuracy: 0.001)
+        XCTAssertEqual(n.positionPin?.y ?? -1, 20, accuracy: 0.001)
+        // Root (no M2 fields written) still defaults.
+        XCTAssertEqual(decoded.root.noteMarkdown, "")
+        XCTAssertTrue(decoded.root.links.isEmpty)
+        XCTAssertTrue(decoded.root.icons.isEmpty)
+        XCTAssertNil(decoded.root.positionPin)
+    }
+
+    func testLegacyM1HTMLStillDecodes() throws {
+        let url = try XCTUnwrap(
+            Bundle.module.url(
+                forResource: "minimal",
+                withExtension: "swiftmind.html",
+                subdirectory: "Fixtures"
+            )
+        )
+        let map = try HTMLCodec.decode(String(contentsOf: url, encoding: .utf8))
+        XCTAssertFalse(map.root.text.isEmpty)
+        XCTAssertEqual(map.root.noteMarkdown, "")
+        XCTAssertTrue(map.root.links.isEmpty)
+        XCTAssertTrue(map.root.icons.isEmpty)
+        XCTAssertNil(map.root.positionPin)
+        XCTAssertEqual(map.root.children.count, 2)
+    }
 }

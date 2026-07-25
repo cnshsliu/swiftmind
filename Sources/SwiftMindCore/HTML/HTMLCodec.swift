@@ -94,10 +94,41 @@ public enum HTMLCodec {
         out += " data-bold=\"\(node.style.isBold ? "true" : "false")\""
         out += " data-text-color=\"\(escapeAttribute(colorHex(red: node.style.textRed, green: node.style.textGreen, blue: node.style.textBlue)))\""
         out += " data-fill-color=\"\(escapeAttribute(fill))\""
+        if let pin = node.positionPin {
+            out += " data-pin-x=\"\(formatNumber(pin.x))\""
+            out += " data-pin-y=\"\(formatNumber(pin.y))\""
+        }
+        if !node.icons.isEmpty {
+            let ids = node.icons.map(\.id).joined(separator: ",")
+            out += " data-icons=\"\(escapeAttribute(ids))\""
+        }
         out += ">\n"
 
         out += pad + "  "
         out += "<span class=\"node-title\">\(escapeText(node.text))</span>\n"
+
+        if !node.noteMarkdown.isEmpty {
+            out += pad + "  "
+            // hidden="hidden" keeps the document well-formed XML for XMLParser.
+            out += "<div class=\"node-note\" hidden=\"hidden\">\(escapeText(node.noteMarkdown))</div>\n"
+        }
+
+        if !node.links.isEmpty {
+            out += pad + "  <ul class=\"node-links\" hidden=\"hidden\">\n"
+            for link in node.links {
+                out += pad + "    <li"
+                switch link {
+                case .url(let url):
+                    out += " data-link-kind=\"url\""
+                    out += " data-href=\"\(escapeAttribute(url.absoluteString))\""
+                case .node(let nodeID):
+                    out += " data-link-kind=\"node\""
+                    out += " data-node-ref=\"\(escapeAttribute(nodeID.rawValue))\""
+                }
+                out += "></li>\n"
+            }
+            out += pad + "  </ul>\n"
+        }
 
         if !node.children.isEmpty {
             out += pad + "  <ul>\n"
@@ -196,8 +227,18 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var nodeStack: [Node] = []
     private var capturingTitle = false
     private var capturingNodeTitle = false
+    private var capturingNote = false
+    /// True while inside `<ul class="node-links">` so link `<li>`s are not tree nodes.
+    private var inLinksList = false
     private var titleBuffer = ""
     private var nodeTitleBuffer = ""
+    private var noteBuffer = ""
+
+    private static func classTokens(_ attributeDict: [String: String]) -> [String] {
+        (attributeDict["class"] ?? "")
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+    }
 
     func parser(
         _ parser: XMLParser,
@@ -210,9 +251,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
 
         switch name {
         case "article":
-            let classes = (attributeDict["class"] ?? "")
-                .split(whereSeparator: { $0.isWhitespace })
-                .map(String.init)
+            let classes = Self.classTokens(attributeDict)
             if classes.contains("swiftmind-map") {
                 foundSwiftMindArticle = true
                 mapID = attributeDict["data-map-id"]
@@ -230,8 +269,35 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
             capturingTitle = true
             titleBuffer = ""
 
+        case "ul":
+            guard foundSwiftMindArticle else { return }
+            let classes = Self.classTokens(attributeDict)
+            if classes.contains("node-links") {
+                inLinksList = true
+            }
+
         case "li":
             guard foundSwiftMindArticle else { return }
+
+            // Link list items: parse attrs onto current node; never push tree nodes.
+            if inLinksList {
+                guard !nodeStack.isEmpty else { return }
+                let kind = attributeDict["data-link-kind"] ?? ""
+                switch kind {
+                case "url":
+                    if let href = attributeDict["data-href"], let url = URL(string: href) {
+                        nodeStack[nodeStack.count - 1].links.append(.url(url))
+                    }
+                case "node":
+                    if let ref = attributeDict["data-node-ref"], !ref.isEmpty {
+                        nodeStack[nodeStack.count - 1].links.append(.node(NodeID(rawValue: ref)))
+                    }
+                default:
+                    break
+                }
+                return
+            }
+
             guard let idRaw = attributeDict["data-node-id"], !idRaw.isEmpty else {
                 deferredError = .parseFailed("li missing data-node-id")
                 parser.abortParsing()
@@ -266,24 +332,49 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 fillBlue: fillB
             )
 
+            var positionPin: Point2D?
+            if let px = attributeDict["data-pin-x"], let py = attributeDict["data-pin-y"],
+               let x = Double(px), let y = Double(py) {
+                positionPin = Point2D(x: x, y: y)
+            }
+
+            var icons: [IconRef] = []
+            if let iconsAttr = attributeDict["data-icons"], !iconsAttr.isEmpty {
+                icons = iconsAttr
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { IconRef(id: String($0)) }
+            }
+
             let node = Node(
                 id: NodeID(rawValue: idRaw),
                 text: "",
+                noteMarkdown: "",
+                links: [],
+                icons: icons,
                 isFolded: folded,
                 side: side,
                 style: style,
+                positionPin: positionPin,
                 children: []
             )
             nodeStack.append(node)
 
         case "span":
-            guard foundSwiftMindArticle else { return }
-            let classes = (attributeDict["class"] ?? "")
-                .split(whereSeparator: { $0.isWhitespace })
-                .map(String.init)
+            guard foundSwiftMindArticle, !inLinksList else { return }
+            let classes = Self.classTokens(attributeDict)
             if classes.contains("node-title") {
                 capturingNodeTitle = true
                 nodeTitleBuffer = ""
+            }
+
+        case "div":
+            guard foundSwiftMindArticle, !inLinksList else { return }
+            let classes = Self.classTokens(attributeDict)
+            if classes.contains("node-note") {
+                capturingNote = true
+                noteBuffer = ""
             }
 
         default:
@@ -297,6 +388,9 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
         }
         if capturingNodeTitle {
             nodeTitleBuffer += string
+        }
+        if capturingNote {
+            noteBuffer += string
         }
     }
 
@@ -321,8 +415,27 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 }
             }
 
+        case "div":
+            if capturingNote {
+                capturingNote = false
+                if !nodeStack.isEmpty {
+                    nodeStack[nodeStack.count - 1].noteMarkdown = noteBuffer
+                }
+            }
+
+        case "ul":
+            // Leaving a links list (flat; no nested node-links).
+            if inLinksList {
+                inLinksList = false
+            }
+
         case "li":
-            guard foundSwiftMindArticle, !nodeStack.isEmpty else { return }
+            guard foundSwiftMindArticle else { return }
+            // Link items were never pushed onto the node stack.
+            if inLinksList {
+                return
+            }
+            guard !nodeStack.isEmpty else { return }
             let finished = nodeStack.removeLast()
             if nodeStack.isEmpty {
                 rootNode = finished
