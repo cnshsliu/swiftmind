@@ -3,9 +3,11 @@ import SwiftMindCore
 
 struct ContentView: View {
     @Binding var document: SwiftMindFileDocument
+    /// Per-window session: each ContentView owns its own store/undo stack.
     @StateObject private var session: DocumentSession
     @State private var inspectorPresented = true
     @State private var searchQuery = ""
+    @State private var palettePresented = false
     @FocusState private var searchFocused: Bool
 
     init(document: Binding<SwiftMindFileDocument>) {
@@ -57,8 +59,20 @@ struct ContentView: View {
         .onChange(of: session.revision) { _, _ in
             document.map = session.exportMap()
         }
+        .sheet(isPresented: $palettePresented) {
+            CommandPaletteView(session: session, isPresented: $palettePresented)
+        }
         .toolbar {
             EditorToolbar(session: session)
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    palettePresented = true
+                } label: {
+                    Label("Command Palette", systemImage: "command")
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                .help("Command palette (⌘K)")
+            }
             ToolbarItem(placement: .automatic) {
                 Button {
                     searchFocused = true
@@ -82,6 +96,7 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 220, ideal: 260, max: 360)
         }
         .focusedSceneValue(\.documentSession, session)
+        .focusedSceneValue(\.presentCommandPalette, $palettePresented)
     }
 }
 

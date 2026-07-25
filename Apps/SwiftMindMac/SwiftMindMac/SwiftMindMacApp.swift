@@ -13,6 +13,10 @@ struct SwiftMindMacApp: App {
                 SessionUndoRedoCommands()
             }
 
+            CommandGroup(after: .sidebar) {
+                SessionCommandPaletteCommands()
+            }
+
             CommandMenu("Node") {
                 SessionNodeCommands()
             }
@@ -37,6 +41,18 @@ private struct SessionUndoRedoCommands: View {
         }
         .keyboardShortcut("z", modifiers: [.command, .shift])
         .disabled(!(session?.canRedo ?? false))
+    }
+}
+
+private struct SessionCommandPaletteCommands: View {
+    @FocusedValue(\.presentCommandPalette) private var presentCommandPalette
+
+    var body: some View {
+        Button("Command Palette…") {
+            presentCommandPalette?.wrappedValue = true
+        }
+        .keyboardShortcut("k", modifiers: .command)
+        .disabled(presentCommandPalette == nil)
     }
 }
 
