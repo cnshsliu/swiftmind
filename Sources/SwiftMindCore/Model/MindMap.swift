@@ -36,6 +36,20 @@ public struct MindMap: Equatable, Sendable, Codable {
         Self.update(id: id, in: &root, body)
     }
 
+    public func parentID(of id: NodeID) -> NodeID? {
+        parentID(of: id, in: root, parent: nil)
+    }
+
+    private func parentID(of id: NodeID, in node: Node, parent: NodeID?) -> NodeID? {
+        if node.id == id { return parent }
+        for child in node.children {
+            if let found = parentID(of: id, in: child, parent: node.id) {
+                return found
+            }
+        }
+        return nil
+    }
+
     private func find(id: NodeID, in node: Node) -> Node? {
         if node.id == id { return node }
         for child in node.children {
