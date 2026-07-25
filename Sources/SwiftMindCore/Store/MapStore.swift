@@ -3,10 +3,15 @@ public final class MapStore {
     public private(set) var selection: SelectionState
     public private(set) var revision: UInt64 = 0
     private let bus = CommandBus()
+    private let layoutEngine = LayoutEngine()
 
     public init(map: MindMap) {
         self.map = map
         self.selection = SelectionState(selectedIDs: [map.root.id], primary: map.root.id)
+    }
+
+    public func snapshot() -> MapSnapshot {
+        layoutEngine.layout(map: map, selection: selection)
     }
 
     public func select(_ id: NodeID, additive: Bool = false) {

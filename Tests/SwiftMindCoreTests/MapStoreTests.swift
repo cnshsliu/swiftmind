@@ -13,4 +13,13 @@ final class MapStoreTests: XCTestCase {
         try store.undo()
         XCTAssertTrue(store.map.root.children.isEmpty)
     }
+
+    func testSnapshotMarksSelection() {
+        let store = MapStore(map: MindMap.makeEmpty(title: "T"))
+        let root = store.map.root.id
+        store.select(root)
+        let snapshot = store.snapshot()
+        XCTAssertTrue(snapshot.nodes.first { $0.id == root }!.isSelected)
+        XCTAssertEqual(snapshot.nodes.count, 1)
+    }
 }
