@@ -6,10 +6,9 @@ struct OutlineMapView: View {
 
     var body: some View {
         List {
-            OutlineRow(node: session.store.map.root, session: session)
+            OutlineRow(node: session.store.map.root, session: session, depth: 0)
         }
         .listStyle(.sidebar)
-        // Force tree refresh when commands mutate the store.
         .id(session.revision)
     }
 }
@@ -17,12 +16,14 @@ struct OutlineMapView: View {
 struct OutlineRow: View {
     let node: Node
     @ObservedObject var session: DocumentSession
+    let depth: Int
     @State private var draftText: String
     @FocusState private var titleFocused: Bool
 
-    init(node: Node, session: DocumentSession) {
+    init(node: Node, session: DocumentSession, depth: Int) {
         self.node = node
         self.session = session
+        self.depth = depth
         _draftText = State(initialValue: node.text)
     }
 
@@ -44,36 +45,50 @@ struct OutlineRow: View {
     var body: some View {
         DisclosureGroup(isExpanded: isExpanded) {
             ForEach(node.children) { child in
-                OutlineRow(node: child, session: session)
+                OutlineRow(node: child, session: session, depth: depth + 1)
             }
         } label: {
             HStack(spacing: 8) {
+                if !node.icons.isEmpty {
+                    HStack(spacing: 2) {
+                        ForEach(Array(node.icons.prefix(3))) { icon in
+                            Image(systemName: NodeIcon.sfSymbolNames[icon.id] ?? "circle")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 TextField("Title", text: $draftText)
                     .textFieldStyle(.plain)
+                    .font(depth == 0 ? .body.weight(.semibold) : .body)
                     .focused($titleFocused)
                     .onSubmit(commitText)
                     .onExitCommand(perform: revertText)
                     .onChange(of: titleFocused) { _, focused in
-                        // Commit when leaving the field (click away), not only Return.
-                        if !focused {
-                            commitText()
-                        }
+                        if !focused { commitText() }
                     }
+
+                if !node.noteMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Image(systemName: "note.text")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
 
                 if !node.children.isEmpty {
                     Text("\(node.children.count)")
-                        .font(.caption2)
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Color.secondary.opacity(0.12)))
                 }
             }
-            .padding(.vertical, 2)
-            .padding(.horizontal, 4)
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
             .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
             )
             .contentShape(Rectangle())
             .onTapGesture {
@@ -81,7 +96,6 @@ struct OutlineRow: View {
             }
         }
         .onChange(of: node.text) { _, newValue in
-            // Don't clobber in-progress typing while focused.
             if !titleFocused, draftText != newValue {
                 draftText = newValue
             }
@@ -99,3 +113,4 @@ struct OutlineRow: View {
         draftText = node.text
     }
 }
+

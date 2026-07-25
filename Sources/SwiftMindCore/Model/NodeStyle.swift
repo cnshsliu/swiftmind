@@ -29,6 +29,18 @@ public struct NodeStyle: Equatable, Sendable, Codable {
         self.fillBlue = fillBlue
     }
 
-    public static let rootDefault = NodeStyle(fontSize: 22, isBold: true)
+    /// Root: confident accent fill + light text (readable in light and dark chrome).
+    public static let rootDefault = NodeStyle(
+        fontSize: 22,
+        isBold: true,
+        textRed: 1,
+        textGreen: 1,
+        textBlue: 1,
+        fillRed: 0.18,
+        fillGreen: 0.42,
+        fillBlue: 0.92
+    )
+
+    /// Body nodes: pure black text is treated as theme-adaptive on the canvas.
     public static let `default` = NodeStyle()
 }

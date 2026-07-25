@@ -21,6 +21,7 @@ struct InspectorView: View {
     @State private var lastSyncedNote: String = ""
     /// Suppresses command dispatch while drafts are loaded from the model.
     @State private var isSyncing = false
+    @FocusState private var titleFocused: Bool
 
     private var primaryID: NodeID? {
         session.store.selection.primary
@@ -36,7 +37,12 @@ struct InspectorView: View {
             if let node = primaryNode {
                 Section("Node") {
                     TextField("Title", text: $titleDraft)
+                        .font(.body.weight(.medium))
+                        .focused($titleFocused)
                         .onSubmit { commitTitle(for: node.id) }
+                        .onChange(of: titleFocused) { _, focused in
+                            if !focused { commitTitle(for: node.id) }
+                        }
 
                     Button("Apply Title") {
                         commitTitle(for: node.id)

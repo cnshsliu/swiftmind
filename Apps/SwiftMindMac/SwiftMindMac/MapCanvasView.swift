@@ -62,7 +62,7 @@ struct MapCanvasView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(Theme.canvasBackground)
         .clipped()
         .accessibilityLabel("Mind map canvas")
         // Cancel in-place edit if selection/model removes the node.
@@ -81,10 +81,18 @@ struct MapCanvasView: View {
         context.scaleBy(x: scale, y: scale)
 
         for edge in snapshot.edges {
+            let from = CGPoint(x: edge.fromPoint.x, y: edge.fromPoint.y)
+            let to = CGPoint(x: edge.toPoint.x, y: edge.toPoint.y)
             var path = Path()
-            path.move(to: CGPoint(x: edge.fromPoint.x, y: edge.fromPoint.y))
-            path.addLine(to: CGPoint(x: edge.toPoint.x, y: edge.toPoint.y))
-            context.stroke(path, with: .color(.secondary), lineWidth: 1.5 / scale)
+            path.move(to: from)
+            // Soft cubic connectors (mind-map taste, not rigid lines).
+            let midX = (from.x + to.x) / 2
+            path.addCurve(
+                to: to,
+                control1: CGPoint(x: midX, y: from.y),
+                control2: CGPoint(x: midX, y: to.y)
+            )
+            context.stroke(path, with: .color(Theme.edgeStroke), lineWidth: 1.6 / scale)
         }
 
         for node in snapshot.nodes {
@@ -94,42 +102,40 @@ struct MapCanvasView: View {
                 width: node.frame.width,
                 height: node.frame.height
             )
-            let path = Path(roundedRect: rect, cornerRadius: 8)
+            let corner: CGFloat = node.depth == 0 ? 12 : 8
+            let path = Path(roundedRect: rect, cornerRadius: corner)
 
-            if let fr = node.style.fillRed,
-               let fg = node.style.fillGreen,
-               let fb = node.style.fillBlue {
-                context.fill(path, with: .color(Color(red: fr, green: fg, blue: fb)))
+            if let fill = node.style.canvasFillColor {
+                context.fill(path, with: .color(fill))
             } else {
-                context.fill(path, with: .color(Color(nsColor: .controlBackgroundColor)))
+                context.fill(path, with: .color(Theme.nodeDefaultFill))
             }
 
             let isDropTarget = dropTargetID == node.id && !isPinDragging
             let strokeColor: Color
             if isDropTarget {
-                strokeColor = .orange
+                strokeColor = Theme.dropTarget
             } else if node.isSelected {
-                strokeColor = .accentColor
+                strokeColor = Theme.selectionStroke
+            } else if node.depth == 0 {
+                strokeColor = Color.accentColor.opacity(0.35)
             } else {
-                strokeColor = Color.secondary.opacity(0.5)
+                strokeColor = Color.secondary.opacity(0.35)
             }
-            let strokeWidth = (isDropTarget || node.isSelected ? 2.5 : 1.0) / scale
+            let strokeWidth = (isDropTarget || node.isSelected ? 2.5 : (node.depth == 0 ? 1.5 : 1.0)) / scale
             context.stroke(path, with: .color(strokeColor), lineWidth: strokeWidth)
 
             if isDropTarget {
-                context.fill(path, with: .color(Color.orange.opacity(0.15)))
+                context.fill(path, with: .color(Theme.dropTarget.opacity(0.14)))
             }
 
             // Dim the node being dragged slightly.
             if dragNodeID == node.id {
-                context.fill(path, with: .color(Color.accentColor.opacity(0.12)))
+                context.fill(path, with: .color(Color.accentColor.opacity(0.10)))
             }
 
-            let textColor = Color(
-                red: node.style.textRed,
-                green: node.style.textGreen,
-                blue: node.style.textBlue
-            )
+            // Theme-aware text: pure black defaults follow system primary (light/dark).
+            let textColor = node.style.canvasTextColor
 
             // Icons (up to 3) left of title; shrink text frame.
             let iconIDs = Array(node.iconIDs.prefix(3))
@@ -172,7 +178,7 @@ struct MapCanvasView: View {
             if node.hasNote {
                 let noteBadge = Text(Image(systemName: "note.text"))
                     .font(.system(size: Self.badgeFontSize))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Theme.badgeMuted)
                 context.draw(
                     noteBadge,
                     at: CGPoint(x: rect.maxX - 4, y: rect.minY + 4),
@@ -184,11 +190,23 @@ struct MapCanvasView: View {
             if node.isPinned {
                 let pinBadge = Text(Image(systemName: "pin.fill"))
                     .font(.system(size: Self.badgeFontSize))
-                    .foregroundColor(.orange)
+                    .foregroundColor(Theme.pinAccent)
                 context.draw(
                     pinBadge,
                     at: CGPoint(x: rect.minX + 4, y: rect.minY + 4),
                     anchor: .topLeading
+                )
+            }
+
+            // Folded chevron hint (children hidden).
+            if node.isFolded {
+                let foldBadge = Text(Image(systemName: "chevron.right.circle.fill"))
+                    .font(.system(size: Self.badgeFontSize))
+                    .foregroundColor(Color.accentColor.opacity(0.85))
+                context.draw(
+                    foldBadge,
+                    at: CGPoint(x: rect.maxX - 4, y: rect.maxY - 4),
+                    anchor: .bottomTrailing
                 )
             }
         }
