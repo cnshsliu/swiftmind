@@ -22,4 +22,19 @@ final class MapStoreTests: XCTestCase {
         XCTAssertTrue(snapshot.nodes.first { $0.id == root }!.isSelected)
         XCTAssertEqual(snapshot.nodes.count, 1)
     }
+
+    func testSelectDoesNotBumpContentRevision() throws {
+        let store = MapStore(map: MindMap.makeEmpty(title: "T"))
+        let root = store.map.root.id
+        try store.dispatch(InsertChildCommand(parentID: root, text: "A", side: .right))
+        let contentBefore = store.contentRevision
+        let child = store.map.root.children[0].id
+        let frameBefore = store.snapshot().nodes.first { $0.id == child }!.frame
+        store.select(child)
+        XCTAssertEqual(store.contentRevision, contentBefore)
+        XCTAssertGreaterThan(store.selectionRevision, 0)
+        let frameAfter = store.snapshot().nodes.first { $0.id == child }!.frame
+        XCTAssertEqual(frameBefore, frameAfter)
+        XCTAssertTrue(store.snapshot().nodes.first { $0.id == child }!.isSelected)
+    }
 }

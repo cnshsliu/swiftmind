@@ -53,7 +53,8 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: session.toast?.id)
-        .onChange(of: session.revision) { _, _ in
+        // Only content edits dirty the document — selection must stay free.
+        .onChange(of: session.contentRevision) { _, _ in
             document.map = session.exportMap()
             let title = session.store.map.title
             if !mapTitleFocused, mapTitleDraft != title {

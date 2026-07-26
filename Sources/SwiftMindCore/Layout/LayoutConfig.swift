@@ -1,20 +1,19 @@
 public struct LayoutConfig: Equatable, Sendable {
-    public var horizontalGap: Double = 48
-    public var verticalGap: Double = 16
+    public var horizontalGap: Double = 56
+    /// Vertical gap between sibling blocks on the same side.
+    public var verticalGap: Double = 28
     public var minNodeWidth: Double = 48
     public var nodeHeight: Double = 32
     public var charWidth: Double = 8
     public var paddingX: Double = 12
-    /// Width reserved per displayed icon (matches canvas `iconSlot`).
     public var iconSlotWidth: Double = 14
-    /// Extra horizontal room for note / pin corner badges.
     public var badgeReserve: Double = 12
 
     public init() {}
 
     public init(
-        horizontalGap: Double = 48,
-        verticalGap: Double = 16,
+        horizontalGap: Double = 56,
+        verticalGap: Double = 28,
         minNodeWidth: Double = 48,
         nodeHeight: Double = 32,
         charWidth: Double = 8,

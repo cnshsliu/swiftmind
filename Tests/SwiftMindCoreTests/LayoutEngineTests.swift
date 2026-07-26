@@ -19,6 +19,45 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.edges.count, 2)
     }
 
+    func testLeftAndRightPackIndependentlyWithoutStealingVerticalSlots() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        // Three right + three left — each side should stack tightly, not share one cursor.
+        for i in 0..<3 {
+            try bus.execute(
+                InsertChildCommand(parentID: map.root.id, text: "R\(i)", side: .right),
+                on: &map
+            )
+        }
+        for i in 0..<3 {
+            try bus.execute(
+                InsertChildCommand(parentID: map.root.id, text: "L\(i)", side: .left),
+                on: &map
+            )
+        }
+
+        let snap = LayoutEngine().layout(map: map)
+        let rights = snap.nodes.filter { $0.text.hasPrefix("R") }.sorted { $0.frame.midY < $1.frame.midY }
+        let lefts = snap.nodes.filter { $0.text.hasPrefix("L") }.sorted { $0.frame.midY < $1.frame.midY }
+        XCTAssertEqual(rights.count, 3)
+        XCTAssertEqual(lefts.count, 3)
+
+        // Same-side siblings: monotonic Y and no overlap.
+        for i in 0..<(rights.count - 1) {
+            XCTAssertLessThan(rights[i].frame.y + rights[i].frame.height, rights[i + 1].frame.y + 0.5)
+        }
+        for i in 0..<(lefts.count - 1) {
+            XCTAssertLessThan(lefts[i].frame.y + lefts[i].frame.height, lefts[i + 1].frame.y + 0.5)
+        }
+
+        // Both columns roughly centered on root midY (independent packing).
+        let rootMid = snap.nodes.first { $0.id == map.root.id }!.frame.midY
+        let rightSpanMid = (rights.first!.frame.midY + rights.last!.frame.midY) / 2
+        let leftSpanMid = (lefts.first!.frame.midY + lefts.last!.frame.midY) / 2
+        XCTAssertEqual(rightSpanMid, rootMid, accuracy: 8)
+        XCTAssertEqual(leftSpanMid, rootMid, accuracy: 8)
+    }
+
     func testFoldedHidesDescendants() throws {
         var map = MindMap.makeEmpty(title: "T")
         let bus = CommandBus()
@@ -37,5 +76,17 @@ final class LayoutEngineTests: XCTestCase {
         sel.select(map.root.id)
         let snapshot = LayoutEngine().layout(map: map, selection: sel)
         XCTAssertTrue(snapshot.nodes.first { $0.id == map.root.id }!.isSelected)
+    }
+
+    func testSelectionOverlayDoesNotMoveFrames() {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try! bus.execute(InsertChildCommand(parentID: map.root.id, text: "A", side: .right), on: &map)
+        let base = LayoutEngine().layout(map: map)
+        var sel = SelectionState()
+        sel.select(map.root.children[0].id)
+        let overlaid = base.applying(selection: sel)
+        XCTAssertEqual(base.nodes.map(\.frame), overlaid.nodes.map(\.frame))
+        XCTAssertTrue(overlaid.nodes.first { $0.text == "A" }!.isSelected)
     }
 }

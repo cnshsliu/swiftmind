@@ -1,3 +1,5 @@
+/// Mind-map layout: **left and right sides pack independently** so siblings
+/// no longer share one vertical cursor (which caused chaotic fan-out).
 public struct LayoutEngine: Sendable {
     public var config: LayoutConfig
 
@@ -8,10 +10,10 @@ public struct LayoutEngine: Sendable {
     public func layout(map: MindMap, selection: SelectionState = SelectionState()) -> MapSnapshot {
         var nodes: [NodeVisual] = []
         var edges: [EdgeVisual] = []
+
         let rootSize = measure(map.root)
         let rootFrame: Rect2D
         if let pin = map.root.positionPin {
-            // Pinned: frame center at pin coordinates.
             rootFrame = Rect2D(
                 x: pin.x - rootSize.width / 2,
                 y: pin.y - rootSize.height / 2,
@@ -26,7 +28,8 @@ public struct LayoutEngine: Sendable {
                 height: rootSize.height
             )
         }
-        appendNode(map.root, frame: rootFrame, depth: 0, selection: selection, into: &nodes)
+
+        appendNode(map.root, frame: rootFrame, depth: 0, side: .auto, selection: selection, into: &nodes)
         placeChildren(
             of: map.root,
             parentFrame: rootFrame,
@@ -35,18 +38,18 @@ public struct LayoutEngine: Sendable {
             nodes: &nodes,
             edges: &edges
         )
+
         let bounds = nodes.map(\.frame).reduce(rootFrame) { $0.union($1) }.inset(by: -40)
         return MapSnapshot(nodes: nodes, edges: edges, bounds: bounds)
     }
 
+    // MARK: - Measure
+
     private func measure(_ node: Node) -> (width: Double, height: Double) {
         let cw = max(config.charWidth, node.style.fontSize * 0.55)
-        let textWidth = Double(node.text.count) * cw
+        let textWidth = Double(max(1, node.text.count)) * cw
         let iconCount = min(3, node.icons.count)
-        let iconWidth = iconCount == 0
-            ? 0
-            : Double(iconCount) * config.iconSlotWidth + 4
-        // Corner badges (note / pin) need a little horizontal breathing room.
+        let iconWidth = iconCount == 0 ? 0 : Double(iconCount) * config.iconSlotWidth + 4
         var badgeWidth = 0.0
         if !node.noteMarkdown.isEmpty { badgeWidth += config.badgeReserve }
         if node.positionPin != nil { badgeWidth += config.badgeReserve * 0.5 }
@@ -58,21 +61,52 @@ public struct LayoutEngine: Sendable {
         return (width, height)
     }
 
-    private func resolvedSide(_ node: Node, index: Int) -> NodeSide {
-        if node.side != .auto { return node.side }
-        return index % 2 == 0 ? .right : .left
+    /// Side used for layout: explicit side wins; `.auto` balanced by subtree weight.
+    private func assignSides(_ children: [Node]) -> [(Node, NodeSide)] {
+        var rightWeight = 0.0
+        var leftWeight = 0.0
+        var result: [(Node, NodeSide)] = []
+        result.reserveCapacity(children.count)
+
+        for child in children {
+            let side: NodeSide
+            if child.side == .left || child.side == .right {
+                side = child.side
+            } else {
+                // Balance auto children onto the lighter side (by subtree height).
+                side = leftWeight <= rightWeight ? .right : .left
+            }
+            let w = subtreeHeight(child)
+            if side == .left {
+                leftWeight += w
+            } else {
+                rightWeight += w
+            }
+            result.append((child, side))
+        }
+        return result
     }
 
-    /// Height of this node's auto-layout block. Pinned children do not consume stack slots.
+    /// Height of auto-layout block on one side (pinned kids excluded from stack).
     private func subtreeHeight(_ node: Node) -> Double {
         let selfH = measure(node).height
         guard !node.isFolded else { return selfH }
         let autoKids = node.children.filter { $0.positionPin == nil }
         guard !autoKids.isEmpty else { return selfH }
-        let kids = autoKids.map { subtreeHeight($0) }.reduce(0, +)
-            + Double(max(0, autoKids.count - 1)) * config.verticalGap
-        return max(selfH, kids)
+        // For height estimate, take max of left/right columns of this node.
+        let assigned = assignSides(autoKids)
+        let leftH = columnHeight(assigned.filter { $0.1 == .left }.map(\.0))
+        let rightH = columnHeight(assigned.filter { $0.1 == .right }.map(\.0))
+        return max(selfH, max(leftH, rightH))
     }
+
+    private func columnHeight(_ nodes: [Node]) -> Double {
+        guard !nodes.isEmpty else { return 0 }
+        return nodes.map { subtreeHeight($0) }.reduce(0, +)
+            + Double(max(0, nodes.count - 1)) * config.verticalGap
+    }
+
+    // MARK: - Place
 
     private func placeChildren(
         of parent: Node,
@@ -84,58 +118,91 @@ public struct LayoutEngine: Sendable {
     ) {
         guard !parent.isFolded else { return }
 
-        // Auto stack ignores pinned siblings so they pack as if pins were absent.
-        let autoChildren = parent.children.filter { $0.positionPin == nil }
-        let totalH: Double
-        if autoChildren.isEmpty {
-            totalH = 0
-        } else {
-            totalH = autoChildren.map { subtreeHeight($0) }.reduce(0, +)
-                + Double(max(0, autoChildren.count - 1)) * config.verticalGap
-        }
+        let assigned = assignSides(parent.children)
+        let lefts = assigned.filter { $0.1 == .left }
+        let rights = assigned.filter { $0.1 == .right }
+
+        packColumn(
+            lefts.map(\.0),
+            side: .left,
+            parent: parent,
+            parentFrame: parentFrame,
+            depth: depth,
+            selection: selection,
+            nodes: &nodes,
+            edges: &edges
+        )
+        packColumn(
+            rights.map(\.0),
+            side: .right,
+            parent: parent,
+            parentFrame: parentFrame,
+            depth: depth,
+            selection: selection,
+            nodes: &nodes,
+            edges: &edges
+        )
+
+        // Pinned children still render (may also appear in left/right lists — place once).
+        // assignSides includes all children; pinned are placed in packColumn with pin branch.
+    }
+
+    private func packColumn(
+        _ children: [Node],
+        side: NodeSide,
+        parent: Node,
+        parentFrame: Rect2D,
+        depth: Int,
+        selection: SelectionState,
+        nodes: inout [NodeVisual],
+        edges: inout [EdgeVisual]
+    ) {
+        let auto = children.filter { $0.positionPin == nil }
+        let pinned = children.filter { $0.positionPin != nil }
+
+        let totalH = columnHeight(auto)
         var cursorY = parentFrame.midY - totalH / 2
 
-        for (index, child) in parent.children.enumerated() {
-            let side = resolvedSide(child, index: index)
+        for child in auto {
             let size = measure(child)
-            let frame: Rect2D
-            if let pin = child.positionPin {
-                // Frame center at (pin.x, pin.y); does not advance auto-stack cursor.
-                frame = Rect2D(
-                    x: pin.x - size.width / 2,
-                    y: pin.y - size.height / 2,
-                    width: size.width,
-                    height: size.height
-                )
+            let blockH = subtreeHeight(child)
+            let centerY = cursorY + blockH / 2
+            let x: Double
+            if side == .left {
+                x = parentFrame.x - config.horizontalGap - size.width
             } else {
-                let blockH = subtreeHeight(child)
-                let centerY = cursorY + blockH / 2
-                let x: Double
-                if side == .left {
-                    x = parentFrame.x - config.horizontalGap - size.width
-                } else {
-                    x = parentFrame.x + parentFrame.width + config.horizontalGap
-                }
-                frame = Rect2D(
-                    x: x,
-                    y: centerY - size.height / 2,
-                    width: size.width,
-                    height: size.height
-                )
-                cursorY += blockH + config.verticalGap
+                x = parentFrame.x + parentFrame.width + config.horizontalGap
             }
+            let frame = Rect2D(
+                x: x,
+                y: centerY - size.height / 2,
+                width: size.width,
+                height: size.height
+            )
+            appendNode(child, frame: frame, depth: depth, side: side, selection: selection, into: &nodes)
+            appendEdge(from: parent, parentFrame: parentFrame, to: child, frame: frame, side: side, edges: &edges)
+            placeChildren(
+                of: child,
+                parentFrame: frame,
+                depth: depth + 1,
+                selection: selection,
+                nodes: &nodes,
+                edges: &edges
+            )
+            cursorY += blockH + config.verticalGap
+        }
 
-            appendNode(child, frame: frame, depth: depth, selection: selection, into: &nodes)
-            let from = Point2D(
-                x: side == .left ? parentFrame.x : parentFrame.x + parentFrame.width,
-                y: parentFrame.midY
+        for child in pinned {
+            let size = measure(child)
+            let pin = child.positionPin!
+            let frame = Rect2D(
+                x: pin.x - size.width / 2,
+                y: pin.y - size.height / 2,
+                width: size.width,
+                height: size.height
             )
-            let to = Point2D(
-                x: side == .left ? frame.x + frame.width : frame.x,
-                y: frame.midY
-            )
-            edges.append(EdgeVisual(from: parent.id, to: child.id, fromPoint: from, toPoint: to))
-            // Children of pinned nodes still place relative to the pinned parent frame.
+            appendNode(child, frame: frame, depth: depth, side: side, selection: selection, into: &nodes)
+            appendEdge(from: parent, parentFrame: parentFrame, to: child, frame: frame, side: side, edges: &edges)
             placeChildren(
                 of: child,
                 parentFrame: frame,
@@ -147,10 +214,30 @@ public struct LayoutEngine: Sendable {
         }
     }
 
+    private func appendEdge(
+        from parent: Node,
+        parentFrame: Rect2D,
+        to child: Node,
+        frame: Rect2D,
+        side: NodeSide,
+        edges: inout [EdgeVisual]
+    ) {
+        let fromPt = Point2D(
+            x: side == .left ? parentFrame.x : parentFrame.x + parentFrame.width,
+            y: parentFrame.midY
+        )
+        let toPt = Point2D(
+            x: side == .left ? frame.x + frame.width : frame.x,
+            y: frame.midY
+        )
+        edges.append(EdgeVisual(from: parent.id, to: child.id, fromPoint: fromPt, toPoint: toPt))
+    }
+
     private func appendNode(
         _ node: Node,
         frame: Rect2D,
         depth: Int,
+        side: NodeSide,
         selection: SelectionState,
         into nodes: inout [NodeVisual]
     ) {
@@ -161,7 +248,7 @@ public struct LayoutEngine: Sendable {
                 frame: frame,
                 style: node.style,
                 depth: depth,
-                side: node.side,
+                side: side,
                 isFolded: node.isFolded,
                 isSelected: selection.selectedIDs.contains(node.id),
                 hasNote: !node.noteMarkdown.isEmpty,

@@ -102,4 +102,15 @@ public struct MapSnapshot: Equatable, Sendable {
         self.edges = edges
         self.bounds = bounds
     }
+
+    /// Cheap selection overlay — does not recompute geometry.
+    public func applying(selection: SelectionState) -> MapSnapshot {
+        let selected = selection.selectedIDs
+        let updated = nodes.map { node in
+            var copy = node
+            copy.isSelected = selected.contains(node.id)
+            return copy
+        }
+        return MapSnapshot(nodes: updated, edges: edges, bounds: bounds)
+    }
 }

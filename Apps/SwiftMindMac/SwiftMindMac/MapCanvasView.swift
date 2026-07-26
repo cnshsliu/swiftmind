@@ -47,8 +47,9 @@ struct MapCanvasView: View {
     }
 
     var body: some View {
-        // Depend on revision so layout redraws after store mutations.
-        let _ = session.revision
+        // Content + selection ticks (selection does not rebuild geometry).
+        let _ = session.contentRevision
+        let _ = session.selectionRevision
         let snapshot = session.store.snapshot()
 
         GeometryReader { geo in
@@ -63,10 +64,16 @@ struct MapCanvasView: View {
                 .onChange(of: geo.size) { _, newSize in
                     canvasSize = newSize
                 }
+                // High-priority tap for snappy selection; drag only after real movement.
+                .highPriorityGesture(tapSelectGesture(snapshot: snapshot))
                 .gesture(combinedDragGesture(snapshot: snapshot))
                 .simultaneousGesture(magnifyGesture)
+                // Edit: Return while selected, or slow double-click (after select).
+                .onKeyPress(.return) {
+                    beginEditSelected(snapshot: snapshot)
+                    return .handled
+                }
                 .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
-                .gesture(tapSelectGesture(snapshot: snapshot))
 
                 if let editingNodeID,
                    let visual = snapshot.nodes.first(where: { $0.id == editingNodeID }) {
@@ -327,11 +334,21 @@ struct MapCanvasView: View {
         editDraft = visual.text
     }
 
+    private func beginEditSelected(snapshot: MapSnapshot) {
+        guard editingNodeID == nil,
+              let id = session.store.selection.primary,
+              let visual = snapshot.nodes.first(where: { $0.id == id }) else {
+            return
+        }
+        editingNodeID = id
+        editDraft = visual.text
+    }
+
     private func commitEdit() {
         guard let id = editingNodeID else { return }
         let trimmed = editDraft
         if let node = session.store.map.node(id: id), trimmed != node.text {
-            session.apply(SetTextCommand(nodeID: id, newText: trimmed))
+            session.applyQuiet(SetTextCommand(nodeID: id, newText: trimmed))
         }
         editingNodeID = nil
         editFieldFocused = false
@@ -350,8 +367,8 @@ struct MapCanvasView: View {
     /// - **Option + node** → pin at release location
     /// - **Node (non-root)** → reparent onto drop target (orange highlight + ghost)
     private func combinedDragGesture(snapshot: MapSnapshot) -> some Gesture {
-        // Slightly higher threshold reduces accidental reparent when intending a tap.
-        DragGesture(minimumDistance: 6)
+        // Higher threshold so light clicks stay taps (less "sticky" selection).
+        DragGesture(minimumDistance: 12)
             .onChanged { value in
                 // Starting a drag ends in-place edit (save first).
                 if editingNodeID != nil, dragNodeID == nil, !isPanning {
@@ -490,6 +507,7 @@ struct MapCanvasView: View {
     }
 
     private func doubleTapEditGesture(snapshot: MapSnapshot) -> some Gesture {
+        // Prefer Return to edit; double-tap still works but is secondary.
         SpatialTapGesture(count: 2)
             .onEnded { event in
                 if editingNodeID != nil {

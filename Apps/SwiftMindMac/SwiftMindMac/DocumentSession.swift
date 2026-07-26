@@ -3,15 +3,18 @@ import SwiftMindCore
 
 @MainActor
 final class DocumentSession: ObservableObject {
-    /// Core store (not ObservableObject). UI reacts via `revision`.
-    @Published private(set) var store: MapStore
-    /// Mirrors `store.revision` so SwiftUI can observe mutations on the plain `MapStore`.
-    @Published private(set) var revision: UInt64 = 0
+    public private(set) var store: MapStore
+    /// Map structure/content — triggers document dirty sync.
+    @Published private(set) var contentRevision: UInt64 = 0
+    /// Selection-only — redraw selection without rewriting the document.
+    @Published private(set) var selectionRevision: UInt64 = 0
     @Published var viewMode: ViewMode = .map
-    /// Transient chrome message (delete confirmation, command errors).
     @Published private(set) var toast: StatusToast?
 
     private var toastClearTask: Task<Void, Never>?
+
+    /// Back-compat for views that observe a single tick.
+    var revision: UInt64 { contentRevision &+ selectionRevision }
 
     enum ViewMode: String, CaseIterable, Identifiable {
         case map
@@ -28,14 +31,14 @@ final class DocumentSession: ObservableObject {
     }
 
     init(map: MindMap) {
-        let store = MapStore(map: map)
-        self.store = store
-        self.revision = store.revision
+        self.store = MapStore(map: map)
+        self.contentRevision = store.contentRevision
+        self.selectionRevision = store.selectionRevision
     }
 
     func syncFromDocument(_ map: MindMap) {
         store.replaceMap(map)
-        publishRevision()
+        publishContent()
     }
 
     func exportMap() -> MindMap {
@@ -45,18 +48,17 @@ final class DocumentSession: ObservableObject {
     func apply(_ command: any MapCommand) {
         do {
             try store.dispatch(command)
-            publishRevision()
+            publishContent()
             announceSuccess(for: command)
         } catch {
             presentError(error)
         }
     }
 
-    /// Apply without success toast (typing, style sliders).
     func applyQuiet(_ command: any MapCommand) {
         do {
             try store.dispatch(command)
-            publishRevision()
+            publishContent()
         } catch {
             presentError(error)
         }
@@ -65,7 +67,7 @@ final class DocumentSession: ObservableObject {
     func undo() {
         do {
             try store.undo()
-            publishRevision()
+            publishContent()
             showToast("Undid last change", kind: .info)
         } catch {
             presentError(error)
@@ -75,16 +77,18 @@ final class DocumentSession: ObservableObject {
     func redo() {
         do {
             try store.redo()
-            publishRevision()
+            publishContent()
             showToast("Redid last change", kind: .info)
         } catch {
             presentError(error)
         }
     }
 
+    /// Selection only — does not mark the document dirty or relayout geometry.
     func select(_ id: NodeID, additive: Bool = false) {
         store.select(id, additive: additive)
-        publishRevision()
+        selectionRevision = store.selectionRevision
+        objectWillChange.send()
     }
 
     var canUndo: Bool { store.canUndo }
@@ -113,8 +117,6 @@ final class DocumentSession: ObservableObject {
             showToast("Deleted · ⌘Z to undo", kind: .success)
         case "MoveNode":
             showToast("Moved node · ⌘Z to undo", kind: .success)
-        case "InsertChild", "InsertSibling":
-            break // Frequent — no toast (Emil: don't animate/noise keyboard-rate actions)
         default:
             break
         }
@@ -130,8 +132,9 @@ final class DocumentSession: ObservableObject {
         showToast(message, kind: .error, duration: 3.2)
     }
 
-    private func publishRevision() {
-        revision = store.revision
+    private func publishContent() {
+        contentRevision = store.contentRevision
+        selectionRevision = store.selectionRevision
         objectWillChange.send()
     }
 }
