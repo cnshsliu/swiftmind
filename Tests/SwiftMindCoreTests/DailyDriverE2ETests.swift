@@ -86,8 +86,8 @@ final class DailyDriverE2ETests: XCTestCase {
         let map = MindMap.makeEmpty(title: "T")
         XCTAssertEqual(map.root.style.fontSize, 22)
         XCTAssertTrue(map.root.style.isBold)
+        // Sentinel fill so UI can paint live system Accent; light text for contrast.
         XCTAssertNotNil(map.root.style.fillBlue)
-        // Light text on accent root
         XCTAssertGreaterThan(map.root.style.textRed, 0.9)
     }
 }

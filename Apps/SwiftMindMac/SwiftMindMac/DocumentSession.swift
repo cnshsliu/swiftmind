@@ -8,6 +8,10 @@ final class DocumentSession: ObservableObject {
     /// Mirrors `store.revision` so SwiftUI can observe mutations on the plain `MapStore`.
     @Published private(set) var revision: UInt64 = 0
     @Published var viewMode: ViewMode = .map
+    /// Transient chrome message (delete confirmation, command errors).
+    @Published private(set) var toast: StatusToast?
+
+    private var toastClearTask: Task<Void, Never>?
 
     enum ViewMode: String, CaseIterable, Identifiable {
         case map
@@ -42,9 +46,19 @@ final class DocumentSession: ObservableObject {
         do {
             try store.dispatch(command)
             publishRevision()
+            announceSuccess(for: command)
         } catch {
-            // Present alerts later; for M1 log only.
-            print("command failed: \(error)")
+            presentError(error)
+        }
+    }
+
+    /// Apply without success toast (typing, style sliders).
+    func applyQuiet(_ command: any MapCommand) {
+        do {
+            try store.dispatch(command)
+            publishRevision()
+        } catch {
+            presentError(error)
         }
     }
 
@@ -52,8 +66,9 @@ final class DocumentSession: ObservableObject {
         do {
             try store.undo()
             publishRevision()
+            showToast("Undid last change", kind: .info)
         } catch {
-            print("undo failed: \(error)")
+            presentError(error)
         }
     }
 
@@ -61,8 +76,9 @@ final class DocumentSession: ObservableObject {
         do {
             try store.redo()
             publishRevision()
+            showToast("Redid last change", kind: .info)
         } catch {
-            print("redo failed: \(error)")
+            presentError(error)
         }
     }
 
@@ -74,9 +90,61 @@ final class DocumentSession: ObservableObject {
     var canUndo: Bool { store.canUndo }
     var canRedo: Bool { store.canRedo }
 
+    func showToast(_ message: String, kind: StatusToast.Kind = .info, duration: TimeInterval = 2.2) {
+        toastClearTask?.cancel()
+        toast = StatusToast(message: message, kind: kind)
+        toastClearTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            if toast?.message == message {
+                toast = nil
+            }
+        }
+    }
+
+    func dismissToast() {
+        toastClearTask?.cancel()
+        toast = nil
+    }
+
+    private func announceSuccess(for command: any MapCommand) {
+        switch command.name {
+        case "DeleteNodes":
+            showToast("Deleted · ⌘Z to undo", kind: .success)
+        case "MoveNode":
+            showToast("Moved node · ⌘Z to undo", kind: .success)
+        case "InsertChild", "InsertSibling":
+            break // Frequent — no toast (Emil: don't animate/noise keyboard-rate actions)
+        default:
+            break
+        }
+    }
+
+    private func presentError(_ error: Error) {
+        let message: String
+        if let mapError = error as? MapCommandError {
+            message = mapError.userFacingMessage
+        } else {
+            message = error.localizedDescription
+        }
+        showToast(message, kind: .error, duration: 3.2)
+    }
+
     private func publishRevision() {
         revision = store.revision
-        // Ensure views observing `store` also refresh after in-place mutations.
         objectWillChange.send()
+    }
+}
+
+extension MapCommandError {
+    var userFacingMessage: String {
+        switch self {
+        case .nodeNotFound:
+            return "That node is no longer available"
+        case .cannotDeleteRoot:
+            return "Can't delete the central idea"
+        case .invalidParent:
+            return "Can't move a node into its own branch"
+        }
     }
 }

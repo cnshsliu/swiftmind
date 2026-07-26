@@ -4,6 +4,8 @@ import AppKit
 
 struct MapCanvasView: View {
     @ObservedObject var session: DocumentSession
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -32,6 +34,17 @@ struct MapCanvasView: View {
     private static let maxScale: CGFloat = 3
     private static let badgeFontSize: CGFloat = 11
     private static let iconSlot: CGFloat = 14
+    /// Extra hit padding in map space (apple-design: ~hysteresis around targets).
+    private static let hitPadding: Double = 4
+
+    private var selectedAccessibilityValue: String {
+        guard let id = session.store.selection.primary,
+              let node = session.store.map.node(id: id) else {
+            return "No node selected"
+        }
+        let t = node.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "Untitled node selected" : "Selected \(t)"
+    }
 
     var body: some View {
         // Depend on revision so layout redraws after store mutations.
@@ -62,9 +75,11 @@ struct MapCanvasView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.canvasBackground)
+        .background(Theme.canvasStageFill(for: colorScheme))
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Mind map canvas")
+        .accessibilityValue(selectedAccessibilityValue)
         // Cancel in-place edit if selection/model removes the node.
         .onChange(of: session.revision) { _, _ in
             if let editingNodeID,
@@ -92,7 +107,7 @@ struct MapCanvasView: View {
                 control1: CGPoint(x: midX, y: from.y),
                 control2: CGPoint(x: midX, y: to.y)
             )
-            context.stroke(path, with: .color(Theme.edgeStroke), lineWidth: 1.6 / scale)
+            context.stroke(path, with: .color(Theme.edgeStroke(for: colorScheme)), lineWidth: 1.6 / scale)
         }
 
         for node in snapshot.nodes {
@@ -104,6 +119,16 @@ struct MapCanvasView: View {
             )
             let corner: CGFloat = node.depth == 0 ? 12 : 8
             let path = Path(roundedRect: rect, cornerRadius: corner)
+
+            // Soft elevation under selected nodes (craft / depth).
+            if node.isSelected {
+                let shadowRect = rect.offsetBy(dx: 0, dy: 1.5 / scale)
+                let shadowPath = Path(roundedRect: shadowRect, cornerRadius: corner)
+                context.fill(
+                    shadowPath,
+                    with: .color(Color.black.opacity(colorScheme == .dark ? 0.35 : 0.10))
+                )
+            }
 
             if let fill = node.style.canvasFillColor {
                 context.fill(path, with: .color(fill))
@@ -118,24 +143,30 @@ struct MapCanvasView: View {
             } else if node.isSelected {
                 strokeColor = Theme.selectionStroke
             } else if node.depth == 0 {
-                strokeColor = Color.accentColor.opacity(0.35)
+                strokeColor = Color.accentColor.opacity(0.45)
             } else {
-                strokeColor = Color.secondary.opacity(0.35)
+                strokeColor = Color.secondary.opacity(colorScheme == .dark ? 0.45 : 0.32)
             }
-            let strokeWidth = (isDropTarget || node.isSelected ? 2.5 : (node.depth == 0 ? 1.5 : 1.0)) / scale
+            // Selection: thicker ring; also second ring for colorblind-friendly emphasis.
+            let strokeWidth = (isDropTarget || node.isSelected ? 2.75 : (node.depth == 0 ? 1.5 : 1.0)) / scale
             context.stroke(path, with: .color(strokeColor), lineWidth: strokeWidth)
+            if node.isSelected {
+                let outer = Path(roundedRect: rect.insetBy(dx: -3 / scale, dy: -3 / scale), cornerRadius: corner + 2)
+                context.stroke(outer, with: .color(Theme.selectionStroke.opacity(0.25)), lineWidth: 1.0 / scale)
+            }
 
             if isDropTarget {
                 context.fill(path, with: .color(Theme.dropTarget.opacity(0.14)))
             }
 
-            // Dim the node being dragged slightly.
             if dragNodeID == node.id {
                 context.fill(path, with: .color(Color.accentColor.opacity(0.10)))
             }
 
-            // Theme-aware text: pure black defaults follow system primary (light/dark).
-            let textColor = node.style.canvasTextColor
+            let textColor: Color = {
+                if node.style.isRootAccentStyle { return .white }
+                return node.style.canvasTextColor
+            }()
 
             // Icons (up to 3) left of title; shrink text frame.
             let iconIDs = Array(node.iconIDs.prefix(3))
@@ -198,7 +229,6 @@ struct MapCanvasView: View {
                 )
             }
 
-            // Folded chevron hint (children hidden).
             if node.isFolded {
                 let foldBadge = Text(Image(systemName: "chevron.right.circle.fill"))
                     .font(.system(size: Self.badgeFontSize))
@@ -495,10 +525,11 @@ struct MapCanvasView: View {
         let mapX = Double(pt.x)
         let mapY = Double(pt.y)
 
+        let pad = Self.hitPadding
         for node in snapshot.nodes.reversed() {
             let f = node.frame
-            if mapX >= f.x, mapX <= f.x + f.width,
-               mapY >= f.y, mapY <= f.y + f.height {
+            if mapX >= f.x - pad, mapX <= f.x + f.width + pad,
+               mapY >= f.y - pad, mapY <= f.y + f.height + pad {
                 return node.id
             }
         }

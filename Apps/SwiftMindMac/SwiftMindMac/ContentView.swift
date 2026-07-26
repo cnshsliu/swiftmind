@@ -3,13 +3,13 @@ import SwiftMindCore
 
 struct ContentView: View {
     @Binding var document: SwiftMindFileDocument
-    /// Per-window session: each ContentView owns its own store/undo stack.
     @StateObject private var session: DocumentSession
     @State private var inspectorPresented = true
     @State private var searchQuery = ""
     @State private var palettePresented = false
     @State private var mapTitleDraft = ""
     @FocusState private var searchFocused: Bool
+    @FocusState private var mapTitleFocused: Bool
 
     init(document: Binding<SwiftMindFileDocument>) {
         self._document = document
@@ -31,6 +31,11 @@ struct ContentView: View {
         return t.isEmpty ? "(untitled)" : t
     }
 
+    private var isFreshMap: Bool {
+        session.store.map.root.children.isEmpty
+            && session.store.map.root.text == "Central Idea"
+    }
+
     var body: some View {
         NavigationSplitView {
             sidebar
@@ -38,10 +43,20 @@ struct ContentView: View {
             detail
         }
         .frame(minWidth: 780, minHeight: 480)
+        .overlay(alignment: .top) {
+            if let toast = session.toast {
+                StatusToastBanner(toast: toast)
+                    .padding(.top, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onTapGesture { session.dismissToast() }
+                    .zIndex(100)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: session.toast?.id)
         .onChange(of: session.revision) { _, _ in
             document.map = session.exportMap()
             let title = session.store.map.title
-            if mapTitleDraft != title {
+            if !mapTitleFocused, mapTitleDraft != title {
                 mapTitleDraft = title
             }
         }
@@ -56,30 +71,28 @@ struct ContentView: View {
         .toolbar {
             EditorToolbar(session: session)
             ToolbarItem(placement: .automatic) {
-                Button {
-                    palettePresented = true
-                } label: {
-                    Label("Command Palette", systemImage: "command")
+                ControlGroup {
+                    Button {
+                        palettePresented = true
+                    } label: {
+                        Label("Commands", systemImage: "command")
+                    }
+                    .help("Command palette (⌘K)")
+
+                    Button {
+                        searchFocused = true
+                    } label: {
+                        Label("Search", systemImage: "magnifyingglass")
+                    }
+                    .help("Focus search (⌘F)")
+
+                    Button {
+                        inspectorPresented.toggle()
+                    } label: {
+                        Label("Inspector", systemImage: "sidebar.trailing")
+                    }
+                    .help("Toggle inspector")
                 }
-                .keyboardShortcut("k", modifiers: .command)
-                .help("Command palette (⌘K)")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    searchFocused = true
-                } label: {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .keyboardShortcut("f", modifiers: .command)
-                .help("Focus search (⌘F)")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    inspectorPresented.toggle()
-                } label: {
-                    Label("Inspector", systemImage: "sidebar.trailing")
-                }
-                .help("Toggle inspector")
             }
         }
         .inspector(isPresented: $inspectorPresented) {
@@ -88,6 +101,19 @@ struct ContentView: View {
         }
         .focusedSceneValue(\.documentSession, session)
         .focusedSceneValue(\.presentCommandPalette, $palettePresented)
+        // Keyboard shortcuts still registered on app Commands.
+        .background(
+            Button("") { palettePresented = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+        )
+        .background(
+            Button("") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+        )
     }
 
     // MARK: - Sidebar
@@ -103,15 +129,14 @@ struct ContentView: View {
                 TextField("Untitled map", text: $mapTitleDraft)
                     .textFieldStyle(.plain)
                     .font(.title3.weight(.semibold))
+                    .focused($mapTitleFocused)
                     .onSubmit { commitMapTitle() }
-                    .onChange(of: mapTitleDraft) { _, newValue in
-                        if newValue != session.store.map.title {
-                            session.apply(SetMapTitleCommand(newTitle: newValue))
-                        }
+                    .onChange(of: mapTitleFocused) { _, focused in
+                        if !focused { commitMapTitle() }
                     }
             }
 
-            Divider().opacity(0.6)
+            Divider().opacity(0.5)
 
             SearchBarView(
                 session: session,
@@ -121,19 +146,13 @@ struct ContentView: View {
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(nodeCount) nodes")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(selectedLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
+            Text("\(nodeCount) nodes")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.ultraThinMaterial)
+        // Trust system sidebar material — avoid stacking ultraThin on top.
         .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 320)
     }
 
@@ -149,42 +168,56 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 220)
+                .labelsHidden()
+                .accessibilityLabel("View mode")
 
                 Spacer()
-
-                Text(selectedLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.bar)
 
-            Divider().opacity(0.5)
+            Divider().opacity(0.4)
 
-            Group {
-                switch session.viewMode {
-                case .outline:
-                    OutlineMapView(session: session)
-                case .map:
-                    MapCanvasView(session: session)
+            ZStack {
+                Group {
+                    switch session.viewMode {
+                    case .outline:
+                        OutlineMapView(session: session)
+                    case .map:
+                        MapCanvasView(session: session)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if isFreshMap, session.viewMode == .map {
+                    VStack(spacing: 6) {
+                        Text("Start mapping")
+                            .font(.headline)
+                        Text("⌘T add child · Double-click rename · ⌘K commands")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .allowsHitTesting(false)
+                    .offset(y: 120)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Status strip — quiet wayfinding (Apple: status feedback without noise).
-            HStack(spacing: 12) {
-                Label("\(nodeCount) nodes", systemImage: "circle.grid.2x2")
-                if session.store.selection.primary != nil {
-                    Text("·")
-                        .foregroundStyle(.quaternary)
-                    Text(selectedLabel)
-                        .lineLimit(1)
-                }
+            // Single status strip for selection (not repeated in sidebar/header).
+            HStack(spacing: 10) {
+                Label("\(nodeCount)", systemImage: "circle.grid.2x2")
+                    .help("Node count")
+                Text("·")
+                    .foregroundStyle(.quaternary)
+                Text(selectedLabel)
+                    .lineLimit(1)
                 Spacer()
-                Text("Space/⌘ drag pan · ⌥ drag pin · ⌘K palette")
-                    .foregroundStyle(.tertiary)
+                if session.canUndo {
+                    Text("⌘Z undo")
+                        .foregroundStyle(.tertiary)
+                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -197,7 +230,7 @@ struct ContentView: View {
     private func commitMapTitle() {
         let trimmed = mapTitleDraft
         guard trimmed != session.store.map.title else { return }
-        session.apply(SetMapTitleCommand(newTitle: trimmed))
+        session.applyQuiet(SetMapTitleCommand(newTitle: trimmed))
     }
 
     private func countNodes(_ node: Node) -> Int {

@@ -32,13 +32,15 @@ xcodebuild -scheme SwiftMindMac -destination 'platform=macOS' CODE_SIGN_IDENTITY
 - **Basic whole-node styles** (font size, bold, text/fill color) via inspector
 - **HTML save/load** (`.swiftmind.html`) with **read-only browser skin** CSS on save
 
-## Visual polish (night session)
+## Visual polish
 
-- Theme-aware canvas text/fill (dark mode defaults no longer force pure black labels)
-- Soft cubic edge connectors; root node accent fill + light label
-- Sidebar materials, status strip, refined search & ⌘K palette
-- HTML share skin supports `prefers-color-scheme: light dark`
-- End-to-end daily-driver tests in `DailyDriverE2ETests`
+- Theme-aware canvas (dark/light), cubic edges, system **Accent** root node
+- Drop target = accent, pin = orange (semantic split)
+- Slim toolbar; status toast for delete/errors; single status selection strip
+- Map title / inspector title commit on blur (not per-keystroke undo spam)
+- Empty-map coach: `⌘T` / double-click / `⌘K`
+- HTML share skin: `prefers-color-scheme: light dark`
+- E2E: `DailyDriverE2ETests`
 
 ## M2 features (daily driver)
 

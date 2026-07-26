@@ -22,6 +22,7 @@ struct InspectorView: View {
     /// Suppresses command dispatch while drafts are loaded from the model.
     @State private var isSyncing = false
     @FocusState private var titleFocused: Bool
+    @FocusState private var noteFocused: Bool
 
     private var primaryID: NodeID? {
         session.store.selection.primary
@@ -43,22 +44,19 @@ struct InspectorView: View {
                         .onChange(of: titleFocused) { _, focused in
                             if !focused { commitTitle(for: node.id) }
                         }
-
-                    Button("Apply Title") {
-                        commitTitle(for: node.id)
-                    }
-                    .disabled(titleDraft == node.text)
+                    Text("Saves on Return or when you leave the field")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
 
                 Section("Note") {
                     TextEditor(text: $noteDraft)
                         .font(.body)
                         .frame(minHeight: 100)
-
-                    Button("Apply Note") {
-                        commitNote(for: node.id)
-                    }
-                    .disabled(noteDraft == node.noteMarkdown)
+                        .focused($noteFocused)
+                        .onChange(of: noteFocused) { _, focused in
+                            if !focused { commitNote(for: node.id) }
+                        }
 
                     if !noteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        let attr = try? AttributedString(
@@ -259,14 +257,14 @@ struct InspectorView: View {
         guard let node = session.store.map.node(id: id) else { return }
         let trimmed = titleDraft
         guard trimmed != node.text else { return }
-        session.apply(SetTextCommand(nodeID: id, newText: trimmed))
+        session.applyQuiet(SetTextCommand(nodeID: id, newText: trimmed))
         lastSyncedTitle = trimmed
     }
 
     private func commitNote(for id: NodeID) {
         guard let node = session.store.map.node(id: id) else { return }
         guard noteDraft != node.noteMarkdown else { return }
-        session.apply(SetNoteCommand(nodeID: id, noteMarkdown: noteDraft))
+        session.applyQuiet(SetNoteCommand(nodeID: id, noteMarkdown: noteDraft))
         lastSyncedNote = noteDraft
     }
 
@@ -280,7 +278,7 @@ struct InspectorView: View {
         guard let node = session.store.map.node(id: id) else { return }
         let next = styleFromDrafts()
         guard next != node.style else { return }
-        session.apply(SetStyleCommand(nodeID: id, style: next))
+        session.applyQuiet(SetStyleCommand(nodeID: id, style: next))
     }
 
     private func styleFromDrafts() -> NodeStyle {

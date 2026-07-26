@@ -29,16 +29,16 @@ public struct NodeStyle: Equatable, Sendable, Codable {
         self.fillBlue = fillBlue
     }
 
-    /// Root: confident accent fill + light text (readable in light and dark chrome).
+    /// Root: light text; fill is a sentinel so the app can paint system Accent at runtime.
     public static let rootDefault = NodeStyle(
         fontSize: 22,
         isBold: true,
         textRed: 1,
         textGreen: 1,
         textBlue: 1,
-        fillRed: 0.18,
-        fillGreen: 0.42,
-        fillBlue: 0.92
+        fillRed: 0,
+        fillGreen: 0,
+        fillBlue: 1
     )
 
     /// Body nodes: pure black text is treated as theme-adaptive on the canvas.

@@ -1,9 +1,7 @@
 import SwiftUI
 import SwiftMindCore
 
-/// Primary editor actions for the mind map (structure + undo + pin).
-/// Keyboard shortcuts are declared on app `Commands` (see SwiftMindMacApp);
-/// toolbar buttons mirror the same actions for discoverability.
+/// Primary actions only — fold/pin live in Node menu + ⌘K (apple-design: slim chrome).
 struct EditorToolbar: ToolbarContent {
     @ObservedObject var session: DocumentSession
 
@@ -21,28 +19,7 @@ struct EditorToolbar: ToolbarContent {
     }
 
     private var canDelete: Bool {
-        let ids = session.store.selection.selectedIDs
-        return ids.contains { $0 != rootID }
-    }
-
-    private var canToggleFold: Bool {
-        primary != nil
-    }
-
-    private var primaryIsFolded: Bool {
-        guard let primary,
-              let node = session.store.map.node(id: primary) else { return false }
-        return node.isFolded
-    }
-
-    private var canPin: Bool {
-        primary != nil
-    }
-
-    private var primaryIsPinned: Bool {
-        guard let primary,
-              let node = session.store.map.node(id: primary) else { return false }
-        return node.positionPin != nil
+        session.store.selection.selectedIDs.contains { $0 != rootID }
     }
 
     var body: some ToolbarContent {
@@ -50,40 +27,19 @@ struct EditorToolbar: ToolbarContent {
             Button(action: addChild) {
                 Label("Add Child", systemImage: "plus.circle")
             }
-            .help("Add a child under the selection (⌘T)")
+            .help("Add child (⌘T)")
 
             Button(action: addSibling) {
                 Label("Add Sibling", systemImage: "plus.square.on.square")
             }
-            .help("Add a sibling after the selection (⇧⌘T)")
+            .help("Add sibling (⇧⌘T)")
             .disabled(!canAddSibling)
 
             Button(action: deleteSelection) {
                 Label("Delete", systemImage: "trash")
             }
-            .help("Delete selected nodes (cannot delete root)")
+            .help("Delete selection · ⌘Z to undo")
             .disabled(!canDelete)
-
-            Button(action: toggleFold) {
-                Label(
-                    primaryIsFolded ? "Unfold" : "Fold",
-                    systemImage: primaryIsFolded
-                        ? "arrow.up.left.and.arrow.down.right"
-                        : "arrow.down.right.and.arrow.up.left"
-                )
-            }
-            .help(primaryIsFolded ? "Unfold selected node (⌘.)" : "Fold selected node (⌘.)")
-            .disabled(!canToggleFold)
-
-            Button(action: togglePin) {
-                Label(
-                    primaryIsPinned ? "Unpin" : "Pin",
-                    systemImage: primaryIsPinned ? "pin.slash" : "pin"
-                )
-            }
-            .help(primaryIsPinned ? "Unpin selected node (⇧⌘P)" : "Pin selected node at current layout (⇧⌘P)")
-            .keyboardShortcut("p", modifiers: [.command, .shift])
-            .disabled(!canPin)
 
             Button(action: { session.undo() }) {
                 Label("Undo", systemImage: "arrow.uturn.backward")
@@ -98,8 +54,6 @@ struct EditorToolbar: ToolbarContent {
             .disabled(!session.canRedo)
         }
     }
-
-    // MARK: - Actions
 
     private func addChild() {
         let parentID = primary ?? rootID
@@ -119,32 +73,5 @@ struct EditorToolbar: ToolbarContent {
         let ids = session.store.selection.selectedIDs.filter { $0 != rootID }
         guard !ids.isEmpty else { return }
         session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
-    }
-
-    private func toggleFold() {
-        guard let primary,
-              let node = session.store.map.node(id: primary) else { return }
-        session.apply(SetFoldedCommand(nodeID: primary, isFolded: !node.isFolded))
-    }
-
-    /// Pin uses the current snapshot frame mid-point; unpin clears the pin.
-    private func togglePin() {
-        guard let primary else { return }
-        if primaryIsPinned {
-            session.apply(SetPinCommand(nodeID: primary, positionPin: nil))
-            return
-        }
-        let snapshot = session.store.snapshot()
-        guard let visual = snapshot.nodes.first(where: { $0.id == primary }) else {
-            // Fallback: pin at origin if layout has no frame yet.
-            session.apply(SetPinCommand(nodeID: primary, positionPin: .zero))
-            return
-        }
-        session.apply(
-            SetPinCommand(
-                nodeID: primary,
-                positionPin: Point2D(x: visual.frame.midX, y: visual.frame.midY)
-            )
-        )
     }
 }
