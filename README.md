@@ -10,18 +10,23 @@ Architecture: **SwiftMindCore** (model, commands, layout, HTML codec) + **SwiftM
 # Core package unit tests
 swift test
 
-# macOS app (requires Xcode + xcodegen)
-cd Apps/SwiftMindMac && xcodegen generate
-open SwiftMindMac.xcodeproj
+# Kill running app → test → rebuild → relaunch (preferred after code changes)
+./scripts/rerun-mac.sh
+
+# Tests + build only (no launch)
+./scripts/verify.sh
+
+# Open in Xcode (optional)
+cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 ```
 
-Build the app from the command line (unsigned local build):
+| Script | What it does |
+|--------|----------------|
+| `scripts/rerun-mac.sh` | Stop SwiftMind, `swift test`, rebuild, `open` the new `.app` |
+| `scripts/rerun-mac.sh --no-test` | Faster rebuild+relaunch |
+| `scripts/verify.sh` | Automated CI-style gate: tests + build |
 
-```bash
-cd Apps/SwiftMindMac
-xcodegen generate
-xcodebuild -scheme SwiftMindMac -destination 'platform=macOS' CODE_SIGN_IDENTITY=- build
-```
+**Agents / automation:** after UI or app changes, always run `./scripts/rerun-mac.sh` so you never need to manually stop Xcode Run and click the triangle again.
 
 ## M1 features
 
