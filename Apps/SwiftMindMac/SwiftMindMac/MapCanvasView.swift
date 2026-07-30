@@ -31,7 +31,10 @@ struct MapCanvasView: View {
     @FocusState private var editFieldFocused: Bool
     /// Canvas must be key-view focused for Return / Delete to work.
     @FocusState private var canvasFocused: Bool
-
+    /// View-space pointer location for hover → Return selects + edits that node.
+    @State private var hoverLocation: CGPoint?
+    /// Fallback when SwiftUI focus does not deliver key events to the canvas.
+    @State private var keyMonitor: Any?
     private static let minScale: CGFloat = 0.25
     private static let maxScale: CGFloat = 3
     private static let badgeFontSize: CGFloat = 11
@@ -66,6 +69,14 @@ struct MapCanvasView: View {
                 .onChange(of: geo.size) { _, newSize in
                     canvasSize = newSize
                 }
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point):
+                        hoverLocation = point
+                    case .ended:
+                        hoverLocation = nil
+                    }
+                }
                 // High-priority tap for snappy selection; drag only after real movement.
                 .highPriorityGesture(tapSelectGesture(snapshot: snapshot))
                 .gesture(combinedDragGesture(snapshot: snapshot))
@@ -83,7 +94,8 @@ struct MapCanvasView: View {
             .focusEffectDisabled()
             .onKeyPress(.return) {
                 guard editingNodeID == nil else { return .ignored }
-                beginEditSelected(snapshot: snapshot)
+                // Hover target wins: select that node, then edit.
+                beginEditPreferringHover(snapshot: snapshot)
                 return .handled
             }
             .onKeyPress(.delete) {
@@ -115,6 +127,50 @@ struct MapCanvasView: View {
                session.store.map.node(id: editingNodeID) == nil {
                 cancelEdit()
             }
+        }
+        .onAppear { installKeyMonitor() }
+        .onDisappear { removeKeyMonitor() }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
+            guard editingNodeID == nil else { return }
+            beginEditPreferringHover(snapshot: session.store.snapshot())
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasDelete)) { _ in
+            guard editingNodeID == nil else { return }
+            deleteSelectionIfAllowed()
+        }
+    }
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Don't steal keys from real text editing (inspector, outline, map field).
+            if let fr = event.window?.firstResponder, fr is NSTextView || fr is NSTextField {
+                return event
+            }
+            // 36 = Return, 76 = keypad Enter
+            if event.keyCode == 36 || event.keyCode == 76 {
+                DispatchQueue.main.async {
+                    // Pulse triggers onChange → edit under hover / selection.
+                    // (Cannot mutate @State from a stale View copy inside the monitor.)
+                    NotificationCenter.default.post(name: .swiftMindCanvasReturn, object: nil)
+                }
+                return nil
+            }
+            // 51 = delete, 117 = forward delete
+            if event.keyCode == 51 || event.keyCode == 117 {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .swiftMindCanvasDelete, object: nil)
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
         }
     }
 
@@ -159,8 +215,11 @@ struct MapCanvasView: View {
             let corner: CGFloat = node.depth == 0 ? 12 : 8
             let path = Path(roundedRect: rect, cornerRadius: corner)
 
+            // While editing, the TextField draws the only chrome — skip selection rings here.
+            let isEditingThis = editingNodeID == node.id
+
             // Soft elevation under selected nodes (craft / depth).
-            if node.isSelected {
+            if node.isSelected && !isEditingThis {
                 let shadowRect = rect.offsetBy(dx: 0, dy: 1.5 / scale)
                 let shadowPath = Path(roundedRect: shadowRect, cornerRadius: corner)
                 context.fill(
@@ -177,7 +236,10 @@ struct MapCanvasView: View {
 
             let isDropTarget = dropTargetID == node.id && !isPinDragging
             let strokeColor: Color
-            if isDropTarget {
+            if isEditingThis {
+                // Underlay only — no stroke (avoids double border with the editor).
+                strokeColor = Color.clear
+            } else if isDropTarget {
                 strokeColor = Theme.dropTarget
             } else if node.isSelected {
                 strokeColor = Theme.selectionStroke
@@ -186,12 +248,9 @@ struct MapCanvasView: View {
             } else {
                 strokeColor = Color.secondary.opacity(colorScheme == .dark ? 0.45 : 0.32)
             }
-            // Selection: thicker ring; also second ring for colorblind-friendly emphasis.
-            let strokeWidth = (isDropTarget || node.isSelected ? 2.75 : (node.depth == 0 ? 1.5 : 1.0)) / scale
-            context.stroke(path, with: .color(strokeColor), lineWidth: strokeWidth)
-            if node.isSelected {
-                let outer = Path(roundedRect: rect.insetBy(dx: -3 / scale, dy: -3 / scale), cornerRadius: corner + 2)
-                context.stroke(outer, with: .color(Theme.selectionStroke.opacity(0.25)), lineWidth: 1.0 / scale)
+            if !isEditingThis {
+                let strokeWidth = (isDropTarget || node.isSelected ? 2.75 : (node.depth == 0 ? 1.5 : 1.0)) / scale
+                context.stroke(path, with: .color(strokeColor), lineWidth: strokeWidth)
             }
 
             if isDropTarget {
@@ -315,37 +374,41 @@ struct MapCanvasView: View {
     @ViewBuilder
     private func editOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        // Single accent ring only (no inner node stroke + outer selection ring).
         TextField("Title", text: $editDraft)
             .textFieldStyle(.plain)
             .font(.system(
                 size: CGFloat(visual.style.fontSize) * scale,
                 weight: visual.style.isBold ? .bold : .regular
             ))
-            .padding(.horizontal, 6 * scale)
-            .padding(.vertical, 4 * scale)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 10 * scale)
+            .padding(.vertical, 6 * scale)
+            .frame(width: max(frame.width + 8 * scale, 88), height: max(frame.height + 4 * scale, 32))
             .background(
-                RoundedRectangle(cornerRadius: 8 * scale)
+                RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
                     .fill(Color(nsColor: .textBackgroundColor))
-                    .shadow(radius: 2)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8 * scale)
-                    .stroke(Color.accentColor, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 2.5)
             )
-            .frame(width: max(frame.width, 80), height: max(frame.height, 28))
+            .shadow(color: Color.accentColor.opacity(0.25), radius: 4, y: 1)
             .position(x: frame.midX, y: frame.midY)
             .focused($editFieldFocused)
+            .focusEffectDisabled() // system focus ring was the "inner" second border
             .onSubmit { commitEdit() }
             .onExitCommand { cancelEdit() }
             .onChange(of: editFieldFocused) { _, focused in
-                // Click away / focus leaves the field → save (same as outline).
                 if !focused, editingNodeID != nil {
                     commitEdit()
                 }
             }
             .onAppear {
                 canvasFocused = false
-                editFieldFocused = true
+                DispatchQueue.main.async {
+                    editFieldFocused = true
+                }
             }
     }
 
@@ -358,23 +421,39 @@ struct MapCanvasView: View {
     }
 
     private func beginEdit(at location: CGPoint, snapshot: MapSnapshot) {
-        guard let id = hitTest(location, snapshot: snapshot, viewSize: canvasSize),
-              let visual = snapshot.nodes.first(where: { $0.id == id }) else {
+        guard let id = hitTest(location, snapshot: snapshot, viewSize: canvasSize) else {
             return
         }
-        session.select(id)
-        editingNodeID = id
-        editDraft = visual.text
+        beginEdit(nodeID: id, snapshot: snapshot)
+    }
+
+    /// Return: prefer node under pointer; else primary selection.
+    private func beginEditPreferringHover(snapshot: MapSnapshot) {
+        if let hover = hoverLocation,
+           let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
+            beginEdit(nodeID: id, snapshot: snapshot)
+            return
+        }
+        beginEditSelected(snapshot: snapshot)
     }
 
     private func beginEditSelected(snapshot: MapSnapshot) {
+        guard let id = session.store.selection.primary else { return }
+        beginEdit(nodeID: id, snapshot: snapshot)
+    }
+
+    private func beginEdit(nodeID: NodeID, snapshot: MapSnapshot) {
         guard editingNodeID == nil,
-              let id = session.store.selection.primary,
-              let visual = snapshot.nodes.first(where: { $0.id == id }) else {
+              let visual = snapshot.nodes.first(where: { $0.id == nodeID }) else {
             return
         }
-        editingNodeID = id
+        session.select(nodeID)
+        editingNodeID = nodeID
         editDraft = visual.text
+        // Ensure next frame focuses the field.
+        DispatchQueue.main.async {
+            editFieldFocused = true
+        }
     }
 
     private func commitEdit() {
@@ -590,6 +669,11 @@ struct MapCanvasView: View {
         }
         return nil
     }
+}
+
+private extension Notification.Name {
+    static let swiftMindCanvasReturn = Notification.Name("swiftMind.canvas.return")
+    static let swiftMindCanvasDelete = Notification.Name("swiftMind.canvas.delete")
 }
 
 #Preview {
