@@ -56,11 +56,12 @@ struct MapCanvasView: View {
         let _ = session.contentRevision
         let _ = session.selectionRevision
         let snapshot = session.store.snapshot()
+        let hoverID = hoveredNodeID(in: snapshot)
 
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 Canvas { context, size in
-                    draw(snapshot: snapshot, context: &context, size: size)
+                    draw(snapshot: snapshot, hoverID: hoverID, context: &context, size: size)
                 }
                 .contentShape(Rectangle())
                 .onAppear {
@@ -120,6 +121,8 @@ struct MapCanvasView: View {
             if editingNodeID == nil {
                 canvasFocused = true
             }
+            // Keep active node on-screen when selection moves (e.g. ⌘T / ⇧⌘T).
+            ensurePrimaryVisible(animated: !reduceMotion)
         }
         // Cancel in-place edit if selection/model removes the node.
         .onChange(of: session.contentRevision) { _, _ in
@@ -127,6 +130,8 @@ struct MapCanvasView: View {
                session.store.map.node(id: editingNodeID) == nil {
                 cancelEdit()
             }
+            // New/moved nodes change layout — pan so primary stays in view.
+            ensurePrimaryVisible(animated: !reduceMotion)
         }
         .onAppear { installKeyMonitor() }
         .onDisappear { removeKeyMonitor() }
@@ -184,9 +189,75 @@ struct MapCanvasView: View {
         session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
     }
 
+    // MARK: - Hover / visibility
+
+    private func hoveredNodeID(in snapshot: MapSnapshot) -> NodeID? {
+        guard let hover = hoverLocation, canvasSize.width > 0 else { return nil }
+        return hitTest(hover, snapshot: snapshot, viewSize: canvasSize)
+    }
+
+    /// Pan so the primary selection stays inside a comfortable viewport margin.
+    private func ensurePrimaryVisible(animated: Bool) {
+        guard canvasSize.width > 40, canvasSize.height > 40 else { return }
+        guard let primary = session.store.selection.primary else { return }
+        let snapshot = session.store.snapshot()
+        guard let visual = snapshot.nodes.first(where: { $0.id == primary }) else { return }
+
+        let margin: CGFloat = 72
+        let viewFrame = viewFrame(for: visual.frame, viewSize: canvasSize)
+        let bounds = CGRect(
+            x: margin,
+            y: margin,
+            width: canvasSize.width - margin * 2,
+            height: canvasSize.height - margin * 2
+        )
+
+        // Fully inside the safe rect — nothing to do.
+        if bounds.contains(viewFrame) {
+            return
+        }
+
+        // Nudge so the node center sits inside the safe rect (prefer centering if far out).
+        let center = CGPoint(x: viewFrame.midX, y: viewFrame.midY)
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+
+        let farOutside =
+            center.x < -margin || center.x > canvasSize.width + margin
+            || center.y < -margin || center.y > canvasSize.height + margin
+
+        if farOutside {
+            // Center the active node in the viewport.
+            dx = canvasSize.width / 2 - center.x
+            dy = canvasSize.height / 2 - center.y
+        } else {
+            if viewFrame.minX < bounds.minX { dx = bounds.minX - viewFrame.minX }
+            if viewFrame.maxX > bounds.maxX { dx = bounds.maxX - viewFrame.maxX }
+            if viewFrame.minY < bounds.minY { dy = bounds.minY - viewFrame.minY }
+            if viewFrame.maxY > bounds.maxY { dy = bounds.maxY - viewFrame.maxY }
+        }
+
+        guard dx != 0 || dy != 0 else { return }
+
+        let apply = {
+            offset = CGSize(width: offset.width + dx, height: offset.height + dy)
+            panBase = offset
+        }
+        if animated {
+            withAnimation(.easeOut(duration: 0.22)) { apply() }
+        } else {
+            apply()
+        }
+    }
+
     // MARK: - Drawing
 
-    private func draw(snapshot: MapSnapshot, context: inout GraphicsContext, size: CGSize) {
+    private func draw(
+        snapshot: MapSnapshot,
+        hoverID: NodeID?,
+        context: inout GraphicsContext,
+        size: CGSize
+    ) {
         context.translateBy(x: size.width / 2 + offset.width, y: size.height / 2 + offset.height)
         context.scaleBy(x: scale, y: scale)
 
@@ -217,6 +288,7 @@ struct MapCanvasView: View {
 
             // While editing, the TextField draws the only chrome — skip selection rings here.
             let isEditingThis = editingNodeID == node.id
+            let isHovered = hoverID == node.id && !isEditingThis && !node.isSelected
 
             // Soft elevation under selected nodes (craft / depth).
             if node.isSelected && !isEditingThis {
@@ -234,6 +306,11 @@ struct MapCanvasView: View {
                 context.fill(path, with: .color(Theme.nodeDefaultFill))
             }
 
+            // Hover tint on top of default fill (not when selected — selection already clear).
+            if isHovered {
+                context.fill(path, with: .color(Theme.hoverFill))
+            }
+
             let isDropTarget = dropTargetID == node.id && !isPinDragging
             let strokeColor: Color
             if isEditingThis {
@@ -243,13 +320,24 @@ struct MapCanvasView: View {
                 strokeColor = Theme.dropTarget
             } else if node.isSelected {
                 strokeColor = Theme.selectionStroke
+            } else if isHovered {
+                strokeColor = Theme.hoverStroke
             } else if node.depth == 0 {
                 strokeColor = Color.accentColor.opacity(0.45)
             } else {
                 strokeColor = Color.secondary.opacity(colorScheme == .dark ? 0.45 : 0.32)
             }
             if !isEditingThis {
-                let strokeWidth = (isDropTarget || node.isSelected ? 2.75 : (node.depth == 0 ? 1.5 : 1.0)) / scale
+                let strokeWidth: CGFloat
+                if isDropTarget || node.isSelected {
+                    strokeWidth = 2.75 / scale
+                } else if isHovered {
+                    strokeWidth = 2.0 / scale
+                } else if node.depth == 0 {
+                    strokeWidth = 1.5 / scale
+                } else {
+                    strokeWidth = 1.0 / scale
+                }
                 context.stroke(path, with: .color(strokeColor), lineWidth: strokeWidth)
             }
 

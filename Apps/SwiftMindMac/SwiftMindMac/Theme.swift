@@ -37,6 +37,10 @@ enum Theme {
     /// Pin affordance — distinct from drop/selection.
     static var pinAccent: Color { Color.orange }
 
+    /// Hover highlight (not selected).
+    static var hoverFill: Color { Color.accentColor.opacity(0.10) }
+    static var hoverStroke: Color { Color.accentColor.opacity(0.55) }
+
     static var nodeDefaultFill: Color {
         Color(nsColor: .controlBackgroundColor)
     }
