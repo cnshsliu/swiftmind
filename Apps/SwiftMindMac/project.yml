@@ -8,8 +8,6 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    # Optional: set DEVELOPMENT_TEAM when enabling iCloud / App Store signing.
-    # DEVELOPMENT_TEAM: ""
 packages:
   SwiftMind:
     path: ../../
@@ -31,5 +29,39 @@ targets:
     dependencies:
       - package: SwiftMind
         product: SwiftMindCore
-    scheme:
-      testTargets: []
+
+  SwiftMindMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - SwiftMindMacUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.swiftmind.mac.uitests
+        GENERATE_INFOPLIST_FILE: true
+        CODE_SIGN_IDENTITY: "-"
+        TEST_TARGET_NAME: SwiftMindMac
+    dependencies:
+      - target: SwiftMindMac
+
+schemes:
+  SwiftMindMac:
+    build:
+      targets:
+        SwiftMindMac: all
+        SwiftMindMacUITests: [test]
+    run:
+      config: Debug
+      # CRITICAL: must be false. When true, Xcode injects
+      #   -NSDocumentRevisionsDebugMode YES
+      # and DocumentGroup treats "YES" as a file path →
+      #   The document "YES" could not be opened.
+      debugDocumentVersioning: false
+    test:
+      config: Debug
+      targets:
+        - SwiftMindMacUITests
+      gatherCoverageData: false
+    profile:
+      config: Release
+      debugDocumentVersioning: false

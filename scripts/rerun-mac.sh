@@ -84,6 +84,7 @@ fi
 
 echo "==> Generate Xcode project…"
 (cd "$APP_DIR" && xcodegen generate)
+"$ROOT/scripts/patch-xcode-scheme.sh"
 
 echo "==> Build ${SCHEME}…"
 LOG=/tmp/swiftmind-xcodebuild.log

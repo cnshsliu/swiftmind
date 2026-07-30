@@ -3,6 +3,18 @@ import SwiftMindCore
 
 @main
 struct SwiftMindMacApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    init() {
+        // UI tests / automation: skip state restoration noise.
+        if ProcessInfo.processInfo.arguments.contains("-uitesting") {
+            UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+            UserDefaults.standard.set(true, forKey: "ApplePersistenceIgnoreState")
+        }
+        // Never let debugger boolean tokens be treated as open-document paths.
+        UserDefaults.standard.set(false, forKey: "NSDocumentRevisionsDebugMode")
+    }
+
     var body: some Scene {
         DocumentGroup(newDocument: SwiftMindFileDocument()) { file in
             ContentView(document: file.$document)

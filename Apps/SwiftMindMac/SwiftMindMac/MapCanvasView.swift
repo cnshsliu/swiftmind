@@ -113,9 +113,12 @@ struct MapCanvasView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
         .clipped()
-        .accessibilityElement(children: .contain)
+        // children: .ignore so the identifier is discoverable by XCUITest
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Mind map canvas")
+        .accessibilityIdentifier("mapCanvas")
         .accessibilityValue(selectedAccessibilityValue)
+        .accessibilityAddTraits(.updatesFrequently)
         .onChange(of: session.selectionRevision) { _, _ in
             // After click-select, ensure canvas can receive Return/Delete.
             if editingNodeID == nil {

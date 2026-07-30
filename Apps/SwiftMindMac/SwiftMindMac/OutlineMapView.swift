@@ -9,6 +9,7 @@ struct OutlineMapView: View {
             OutlineRow(node: session.store.map.root, session: session, depth: 0)
         }
         .listStyle(.sidebar)
+        .accessibilityIdentifier("outlineList")
         // Intentionally no .id(session.revision): full List remount stole scroll/focus.
         // Rows observe session and refresh via store-driven redraws.
     }

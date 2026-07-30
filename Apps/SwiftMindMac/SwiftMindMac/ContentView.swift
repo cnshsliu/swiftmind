@@ -131,6 +131,8 @@ struct ContentView: View {
                     .textFieldStyle(.plain)
                     .font(.title3.weight(.semibold))
                     .focused($mapTitleFocused)
+                    .accessibilityLabel("Map title")
+                    .accessibilityIdentifier("mapTitleField")
                     .onSubmit { commitMapTitle() }
                     .onChange(of: mapTitleFocused) { _, focused in
                         if !focused { commitMapTitle() }
@@ -171,6 +173,7 @@ struct ContentView: View {
                 .frame(maxWidth: 220)
                 .labelsHidden()
                 .accessibilityLabel("View mode")
+                .accessibilityIdentifier("viewModePicker")
 
                 Spacer()
             }
@@ -210,10 +213,12 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Label("\(nodeCount)", systemImage: "circle.grid.2x2")
                     .help("Node count")
+                    .accessibilityIdentifier("nodeCountLabel")
                 Text("·")
                     .foregroundStyle(.quaternary)
                 Text(selectedLabel)
                     .lineLimit(1)
+                    .accessibilityIdentifier("selectedNodeLabel")
                 Spacer()
                 if session.canUndo {
                     Text("⌘Z undo")
@@ -225,6 +230,7 @@ struct ContentView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.bar)
+            .accessibilityIdentifier("statusStrip")
         }
     }
 

@@ -28,30 +28,35 @@ struct EditorToolbar: ToolbarContent {
                 Label("Add Child", systemImage: "plus.circle")
             }
             .help("Add child (⌘T)")
+            .accessibilityIdentifier("toolbarAddChild")
 
             Button(action: addSibling) {
                 Label("Add Sibling", systemImage: "plus.square.on.square")
             }
             .help("Add sibling (⇧⌘T)")
             .disabled(!canAddSibling)
+            .accessibilityIdentifier("toolbarAddSibling")
 
             Button(action: deleteSelection) {
                 Label("Delete", systemImage: "trash")
             }
             .help("Delete selection · ⌘Z to undo")
             .disabled(!canDelete)
+            .accessibilityIdentifier("toolbarDelete")
 
             Button(action: { session.undo() }) {
                 Label("Undo", systemImage: "arrow.uturn.backward")
             }
             .help("Undo (⌘Z)")
             .disabled(!session.canUndo)
+            .accessibilityIdentifier("toolbarUndo")
 
             Button(action: { session.redo() }) {
                 Label("Redo", systemImage: "arrow.uturn.forward")
             }
             .help("Redo (⇧⌘Z)")
             .disabled(!session.canRedo)
+            .accessibilityIdentifier("toolbarRedo")
         }
     }
 
