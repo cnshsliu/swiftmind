@@ -29,6 +29,8 @@ struct MapCanvasView: View {
     @State private var editingNodeID: NodeID?
     @State private var editDraft: String = ""
     @FocusState private var editFieldFocused: Bool
+    /// Canvas must be key-view focused for Return / Delete to work.
+    @FocusState private var canvasFocused: Bool
 
     private static let minScale: CGFloat = 0.25
     private static let maxScale: CGFloat = 3
@@ -68,17 +70,31 @@ struct MapCanvasView: View {
                 .highPriorityGesture(tapSelectGesture(snapshot: snapshot))
                 .gesture(combinedDragGesture(snapshot: snapshot))
                 .simultaneousGesture(magnifyGesture)
-                // Edit: Return while selected, or slow double-click (after select).
-                .onKeyPress(.return) {
-                    beginEditSelected(snapshot: snapshot)
-                    return .handled
-                }
                 .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
 
                 if let editingNodeID,
                    let visual = snapshot.nodes.first(where: { $0.id == editingNodeID }) {
                     editOverlay(for: visual, viewSize: geo.size)
                 }
+            }
+            // Focus target for keyboard: Return = rename, Delete = remove (non-root).
+            .focusable()
+            .focused($canvasFocused)
+            .focusEffectDisabled()
+            .onKeyPress(.return) {
+                guard editingNodeID == nil else { return .ignored }
+                beginEditSelected(snapshot: snapshot)
+                return .handled
+            }
+            .onKeyPress(.delete) {
+                guard editingNodeID == nil else { return .ignored }
+                deleteSelectionIfAllowed()
+                return .handled
+            }
+            .onKeyPress(.init("\u{7F}")) { // forward delete on some keyboards
+                guard editingNodeID == nil else { return .ignored }
+                deleteSelectionIfAllowed()
+                return .handled
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,13 +103,29 @@ struct MapCanvasView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mind map canvas")
         .accessibilityValue(selectedAccessibilityValue)
+        .onChange(of: session.selectionRevision) { _, _ in
+            // After click-select, ensure canvas can receive Return/Delete.
+            if editingNodeID == nil {
+                canvasFocused = true
+            }
+        }
         // Cancel in-place edit if selection/model removes the node.
-        .onChange(of: session.revision) { _, _ in
+        .onChange(of: session.contentRevision) { _, _ in
             if let editingNodeID,
                session.store.map.node(id: editingNodeID) == nil {
                 cancelEdit()
             }
         }
+    }
+
+    private func deleteSelectionIfAllowed() {
+        let root = session.store.map.root.id
+        let ids = session.store.selection.selectedIDs.filter { $0 != root }
+        guard !ids.isEmpty else {
+            session.showToast("Can't delete the central idea", kind: .error)
+            return
+        }
+        session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
     }
 
     // MARK: - Drawing
@@ -312,6 +344,7 @@ struct MapCanvasView: View {
                 }
             }
             .onAppear {
+                canvasFocused = false
                 editFieldFocused = true
             }
     }
@@ -502,6 +535,10 @@ struct MapCanvasView: View {
                 }
                 if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
                     session.select(id)
+                    canvasFocused = true
+                } else {
+                    // Click empty canvas: keep selection, still take keyboard focus.
+                    canvasFocused = true
                 }
             }
     }
