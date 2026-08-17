@@ -1,0 +1,286 @@
+import Foundation
+import AppKit
+import SwiftUI
+import SwiftMindCore
+import UniformTypeIdentifiers
+
+/// Application shell: startup open (last / new), My Brain vault navigator, map editing + autosave.
+@MainActor
+final class AppModel: ObservableObject {
+    let library = VaultLibrary.shared
+
+    @Published private(set) var mode: VaultLibrary.AppMode = .map
+    @Published private(set) var currentMapURL: URL?
+    @Published private(set) var isBrainMode: Bool = false
+    /// Session for the active surface (brain navigator or map editor).
+    @Published private(set) var session: DocumentSession
+
+    private var accessRoot: URL?
+    private var saveTask: Task<Void, Never>?
+    private var suppressAutosave = false
+    private var didBootstrap = false
+
+    init() {
+        // Placeholder until bootstrap; replaced immediately.
+        session = DocumentSession(map: .makeEmpty(title: "Untitled"))
+    }
+
+    // MARK: - Launch
+
+    /// Call once from the root view: open last map, or create default in ~/Documents/SwiftMind.
+    func bootstrap() {
+        guard !didBootstrap else { return }
+        didBootstrap = true
+        library.ensureDefaultLibraryVault()
+
+        // Prefer last map when valid; else create/open default library map.
+        if let last = library.lastMapURL,
+           FileManager.default.fileExists(atPath: last.path),
+           VaultLibrary.isMindMapFile(last) {
+            openMap(at: last, recordAsLast: true)
+            return
+        }
+
+        do {
+            let url = try VaultLibrary.createEmptyMapIfNeeded(
+                at: VaultLibrary.defaultNewMapURL,
+                title: "Untitled"
+            )
+            openMap(at: url, recordAsLast: true)
+        } catch {
+            // Last resort: in-memory untitled (still no open panel).
+            suppressAutosave = true
+            isBrainMode = false
+            mode = .map
+            currentMapURL = nil
+            session = DocumentSession(map: .makeEmpty(title: "Untitled"))
+            wireSession()
+            suppressAutosave = false
+        }
+    }
+
+    // MARK: - My Brain
+
+    func showBrain() {
+        persistCurrentMapIfNeeded()
+        suppressAutosave = true
+        isBrainMode = true
+        mode = .brain
+        library.lastMode = .brain
+        let map = BrainMapBuilder.build(library: library)
+        session = DocumentSession(map: map)
+        session.isBrainMode = true
+        wireSession()
+        suppressAutosave = false
+    }
+
+    func refreshBrain() {
+        guard isBrainMode else { return }
+        let selected = session.store.selection.primary
+        suppressAutosave = true
+        let map = BrainMapBuilder.build(library: library)
+        session.syncFromDocument(map)
+        if let selected, session.store.map.node(id: selected) != nil {
+            session.select(selected)
+        }
+        suppressAutosave = false
+    }
+
+    // MARK: - Open / create maps
+
+    func openMap(at url: URL, recordAsLast: Bool = true) {
+        persistCurrentMapIfNeeded()
+        releaseAccess()
+
+        accessRoot = library.startAccessingForMap(url)
+
+        do {
+            let data = try Data(contentsOf: url)
+            guard let html = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let map = try HTMLCodec.decode(html)
+            suppressAutosave = true
+            isBrainMode = false
+            mode = .map
+            currentMapURL = url
+            if recordAsLast {
+                library.lastMapURL = url
+                library.lastMode = .map
+            }
+            session = DocumentSession(map: map)
+            session.isBrainMode = false
+            wireSession()
+            suppressAutosave = false
+        } catch {
+            session.showToast("Could not open map: \(error.localizedDescription)", kind: .error)
+            // Fall back to brain if open fails.
+            showBrain()
+        }
+    }
+
+    func createAndOpenMap(in directory: URL? = nil) {
+        let dir = directory ?? VaultLibrary.defaultLibraryDirectory
+        _ = library.startAccessing(dir)
+        let url = VaultLibrary.uniqueMapURL(in: dir, baseName: "Untitled")
+        do {
+            try VaultLibrary.createEmptyMapIfNeeded(at: url, title: "Untitled")
+            openMap(at: url)
+        } catch {
+            session.showToast("Could not create map: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    /// New map in the selected brain folder/vault, or default library.
+    func createMapNearSelection() {
+        if isBrainMode,
+           let id = session.store.selection.primary,
+           let node = session.store.map.node(id: id),
+           let path = BrainMapBuilder.path(of: node) {
+            var dir = URL(fileURLWithPath: path)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue {
+                dir = dir.deletingLastPathComponent()
+            }
+            createAndOpenMap(in: dir)
+            return
+        }
+        createAndOpenMap(in: VaultLibrary.defaultLibraryDirectory)
+    }
+
+    func openMapPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "html") ?? .html,
+            UTType(filenameExtension: "htm") ?? .html,
+        ]
+        panel.message = "Open a SwiftMind map"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                self?.openMap(at: url)
+            }
+        }
+    }
+
+    func addVaultPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder to use as a mindmap vault"
+        panel.prompt = "Add Vault"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.library.addVault(url: url) {
+                    if self.isBrainMode {
+                        self.refreshBrain()
+                    } else {
+                        self.showBrain()
+                    }
+                    self.session.showToast("Vault added: \(url.lastPathComponent)", kind: .success)
+                } else {
+                    self.session.showToast("Could not add vault", kind: .error)
+                }
+            }
+        }
+    }
+
+    func saveCurrentMap() {
+        guard !isBrainMode, let url = currentMapURL else { return }
+        do {
+            let html = try HTMLCodec.encode(session.exportMap(), includeSkin: true)
+            try Data(html.utf8).write(to: url, options: .atomic)
+            library.lastMapURL = url
+        } catch {
+            session.showToast("Save failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    // MARK: - Navigation from brain nodes
+
+    func activateSelection() {
+        guard isBrainMode,
+              let id = session.store.selection.primary,
+              let node = session.store.map.node(id: id) else { return }
+        activate(node: node)
+    }
+
+    func activate(node: Node) {
+        guard let kind = BrainMapBuilder.kind(of: node) else { return }
+        switch kind {
+        case .map:
+            if let path = BrainMapBuilder.path(of: node) {
+                openMap(at: URL(fileURLWithPath: path))
+            }
+        case .folder, .vault:
+            if let path = BrainMapBuilder.path(of: node) {
+                let next = !library.isFolded(path: path)
+                library.setFolded(path: path, folded: next)
+                // Mirror into store then rebuild so layout matches disk fold.
+                session.applyQuiet(SetFoldedCommand(nodeID: node.id, isFolded: next))
+                refreshBrain()
+            }
+        case .brain:
+            break
+        }
+    }
+
+    /// Intercept fold toggles in brain mode so fold state persists by path.
+    func toggleFoldSelection() {
+        guard let id = session.store.selection.primary,
+              let node = session.store.map.node(id: id) else { return }
+        if isBrainMode {
+            if let path = BrainMapBuilder.path(of: node),
+               BrainMapBuilder.kind(of: node) == .folder
+                || BrainMapBuilder.kind(of: node) == .vault {
+                let next = !node.isFolded
+                library.setFolded(path: path, folded: next)
+                refreshBrain()
+                return
+            }
+            return
+        }
+        session.apply(SetFoldedCommand(nodeID: id, isFolded: !node.isFolded))
+    }
+
+    // MARK: - Session wiring
+
+    private func wireSession() {
+        session.onPrimaryActivate = { [weak self] in
+            self?.activateSelection()
+        }
+        session.onContentChanged = { [weak self] in
+            self?.scheduleAutosave()
+        }
+    }
+
+    private func scheduleAutosave() {
+        guard !suppressAutosave, !isBrainMode, currentMapURL != nil else { return }
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self.saveCurrentMap()
+        }
+    }
+
+    private func persistCurrentMapIfNeeded() {
+        saveTask?.cancel()
+        if !isBrainMode, currentMapURL != nil {
+            saveCurrentMap()
+        }
+    }
+
+    private func releaseAccess() {
+        if let accessRoot {
+            library.stopAccessing(accessRoot)
+            self.accessRoot = nil
+        }
+    }
+}

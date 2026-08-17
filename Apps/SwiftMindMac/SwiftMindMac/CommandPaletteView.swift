@@ -88,6 +88,70 @@ enum PaletteBuilder {
             dismiss()
         })
 
+        items.append(PaletteItem(id: "bookmark", title: "Bookmark Selection", subtitle: nil, systemImage: "bookmark") {
+            guard let id = session.store.selection.primary,
+                  let node = session.store.map.node(id: id) else { return }
+            let label = node.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            session.apply(
+                AddBookmarkCommand(
+                    bookmark: Bookmark(nodeID: id, label: label.isEmpty ? "Bookmark" : label)
+                )
+            )
+            dismiss()
+        })
+
+        items.append(PaletteItem(id: "clear-filter", title: "Clear Filter", subtitle: nil, systemImage: "line.3.horizontal.decrease.circle") {
+            session.applyQuiet(SetFilterCommand(filter: nil))
+            dismiss()
+        })
+
+        for (name, _) in session.store.map.styleSheet.styles.sorted(by: { $0.key < $1.key }) {
+            let styleKey = name
+            items.append(
+                PaletteItem(
+                    id: "style-\(styleKey)",
+                    title: "Apply Style: \(styleKey.capitalized)",
+                    subtitle: "Named style",
+                    systemImage: "paintpalette"
+                ) {
+                    guard let id = session.store.selection.primary else { return }
+                    session.applyQuiet(SetStyleNameCommand(nodeID: id, styleName: styleKey))
+                    dismiss()
+                }
+            )
+        }
+
+        items.append(
+            PaletteItem(
+                id: "style-clear",
+                title: "Clear Named Style",
+                subtitle: "Named style",
+                systemImage: "paintbrush"
+            ) {
+                guard let id = session.store.selection.primary else { return }
+                session.applyQuiet(SetStyleNameCommand(nodeID: id, styleName: nil))
+                dismiss()
+            }
+        )
+
+        for bookmark in session.store.map.bookmarks {
+            let bm = bookmark
+            let label = bm.label.isEmpty
+                ? (session.store.map.node(id: bm.nodeID)?.text ?? "Bookmark")
+                : bm.label
+            items.append(
+                PaletteItem(
+                    id: "goto-bookmark-\(bm.id)",
+                    title: "Go to: \(label)",
+                    subtitle: "Bookmark",
+                    systemImage: "bookmark.fill"
+                ) {
+                    session.select(bm.nodeID)
+                    dismiss()
+                }
+            )
+        }
+
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty {
             let nodes = Array(flatten(session.store.map.root).prefix(emptyQueryJumpLimit))

@@ -11,6 +11,13 @@ final class DocumentSession: ObservableObject {
     @Published var viewMode: ViewMode = .map
     @Published private(set) var toast: StatusToast?
 
+    /// True when showing the My Brain vault navigator (not a map file).
+    var isBrainMode: Bool = false
+    /// Double-click / Return activation (open map or toggle folder in brain mode).
+    var onPrimaryActivate: (() -> Void)?
+    /// Fired after content mutations (for autosave).
+    var onContentChanged: (() -> Void)?
+
     private var toastClearTask: Task<Void, Never>?
 
     /// Back-compat for views that observe a single tick.
@@ -136,6 +143,11 @@ final class DocumentSession: ObservableObject {
         contentRevision = store.contentRevision
         selectionRevision = store.selectionRevision
         objectWillChange.send()
+        onContentChanged?()
+    }
+
+    func activatePrimary() {
+        onPrimaryActivate?()
     }
 }
 

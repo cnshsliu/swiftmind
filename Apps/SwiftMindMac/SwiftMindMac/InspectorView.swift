@@ -132,6 +132,27 @@ struct InspectorView: View {
                     }
                 }
 
+                Section("Attributes") {
+                    AttributeInspectorSection(session: session, node: node)
+                }
+
+                Section("Named Style") {
+                    Picker("Style", selection: Binding(
+                        get: { node.styleName ?? "" },
+                        set: { newValue in
+                            let name: String? = newValue.isEmpty ? nil : newValue
+                            guard name != node.styleName else { return }
+                            session.applyQuiet(SetStyleNameCommand(nodeID: node.id, styleName: name))
+                        }
+                    )) {
+                        Text("None").tag("")
+                        ForEach(namedStyleKeys, id: \.self) { key in
+                            Text(key.capitalized).tag(key)
+                        }
+                    }
+                    .accessibilityIdentifier("namedStylePicker")
+                }
+
                 Section("Style") {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -369,7 +390,88 @@ struct InspectorView: View {
 
     // MARK: - Helpers
 
+    private var namedStyleKeys: [String] {
+        session.store.map.styleSheet.styles.keys.sorted()
+    }
+
     private func flatten(_ node: Node) -> [Node] {
         [node] + node.children.flatMap { flatten($0) }
+    }
+}
+
+// MARK: - Attributes
+
+/// Editable name/value rows for the selected node; auto-registers names.
+struct AttributeInspectorSection: View {
+    @ObservedObject var session: DocumentSession
+    let node: Node
+
+    @State private var newName: String = ""
+    @State private var newValue: String = ""
+
+    var body: some View {
+        if node.attributes.isEmpty {
+            Text("No attributes")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        } else {
+            ForEach(node.attributes) { attr in
+                HStack {
+                    Text(attr.name)
+                        .font(.caption.weight(.medium))
+                        .frame(width: 72, alignment: .leading)
+                        .lineLimit(1)
+                    TextField("Value", text: Binding(
+                        get: { attr.value },
+                        set: { newVal in
+                            session.applyQuiet(
+                                UpsertAttributeCommand(
+                                    nodeID: node.id,
+                                    attribute: NodeAttribute(name: attr.name, value: newVal)
+                                )
+                            )
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    Button(role: .destructive) {
+                        removeAttribute(named: attr.name)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+
+        HStack {
+            TextField("Name", text: $newName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("attrNameField")
+            TextField("Value", text: $newValue)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("attrValueField")
+                .onSubmit { addAttribute() }
+            Button("Add") { addAttribute() }
+                .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("addAttributeButton")
+        }
+    }
+
+    private func addAttribute() {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        session.apply(
+            UpsertAttributeCommand(
+                nodeID: node.id,
+                attribute: NodeAttribute(name: name, value: newValue)
+            )
+        )
+        newName = ""
+        newValue = ""
+    }
+
+    private func removeAttribute(named name: String) {
+        let next = node.attributes.filter { $0.name != name }
+        session.apply(SetAttributesCommand(nodeID: node.id, attributes: next))
     }
 }

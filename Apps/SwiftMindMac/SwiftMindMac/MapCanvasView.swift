@@ -60,34 +60,40 @@ struct MapCanvasView: View {
 
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
+                // Drawing only — Canvas path fills are not always hit-testable; text is.
+                // Keep pointer events on a full-size clear layer so hover/tap use the node rect.
                 Canvas { context, size in
                     draw(snapshot: snapshot, hoverID: hoverID, context: &context, size: size)
                 }
-                .contentShape(Rectangle())
-                .onAppear {
-                    canvasSize = geo.size
-                }
-                .onChange(of: geo.size) { _, newSize in
-                    canvasSize = newSize
-                }
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let point):
-                        hoverLocation = point
-                    case .ended:
-                        hoverLocation = nil
+                .allowsHitTesting(false)
+
+                // Full canvas hit surface: hover + gestures use geometric node frames, not glyphs.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let point):
+                            hoverLocation = point
+                        case .ended:
+                            hoverLocation = nil
+                        }
                     }
-                }
-                // High-priority tap for snappy selection; drag only after real movement.
-                .highPriorityGesture(tapSelectGesture(snapshot: snapshot))
-                .gesture(combinedDragGesture(snapshot: snapshot))
-                .simultaneousGesture(magnifyGesture)
-                .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
+                    // High-priority tap for snappy selection; drag only after real movement.
+                    .highPriorityGesture(tapSelectGesture(snapshot: snapshot))
+                    .gesture(combinedDragGesture(snapshot: snapshot))
+                    .simultaneousGesture(magnifyGesture)
+                    .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
 
                 if let editingNodeID,
                    let visual = snapshot.nodes.first(where: { $0.id == editingNodeID }) {
                     editOverlay(for: visual, viewSize: geo.size)
                 }
+            }
+            .onAppear {
+                canvasSize = geo.size
+            }
+            .onChange(of: geo.size) { _, newSize in
+                canvasSize = newSize
             }
             // Focus target for keyboard: Return = rename, Delete = remove (non-root).
             .focusable()
@@ -95,6 +101,15 @@ struct MapCanvasView: View {
             .focusEffectDisabled()
             .onKeyPress(.return) {
                 guard editingNodeID == nil else { return .ignored }
+                if session.isBrainMode {
+                    // Brain: select under pointer, then open map / toggle folder.
+                    if let hover = hoverLocation,
+                       let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
+                        session.select(id)
+                    }
+                    session.activatePrimary()
+                    return .handled
+                }
                 // Hover target wins: select that node, then edit.
                 beginEditPreferringHover(snapshot: snapshot)
                 return .handled
@@ -323,6 +338,8 @@ struct MapCanvasView: View {
                 strokeColor = Theme.dropTarget
             } else if node.isSelected {
                 strokeColor = Theme.selectionStroke
+            } else if node.isHighlighted {
+                strokeColor = Color.yellow.opacity(colorScheme == .dark ? 0.85 : 0.9)
             } else if isHovered {
                 strokeColor = Theme.hoverStroke
             } else if node.depth == 0 {
@@ -334,6 +351,8 @@ struct MapCanvasView: View {
                 let strokeWidth: CGFloat
                 if isDropTarget || node.isSelected {
                     strokeWidth = 2.75 / scale
+                } else if node.isHighlighted {
+                    strokeWidth = 2.4 / scale
                 } else if isHovered {
                     strokeWidth = 2.0 / scale
                 } else if node.depth == 0 {
@@ -342,6 +361,10 @@ struct MapCanvasView: View {
                     strokeWidth = 1.0 / scale
                 }
                 context.stroke(path, with: .color(strokeColor), lineWidth: strokeWidth)
+            }
+
+            if node.isHighlighted && !node.isSelected && !isEditingThis {
+                context.fill(path, with: .color(Color.yellow.opacity(colorScheme == .dark ? 0.12 : 0.18)))
             }
 
             if isDropTarget {
@@ -715,10 +738,18 @@ struct MapCanvasView: View {
 
     private func doubleTapEditGesture(snapshot: MapSnapshot) -> some Gesture {
         // Prefer Return to edit; double-tap still works but is secondary.
+        // In My Brain mode: open map file or fold/unfold vault folder.
         SpatialTapGesture(count: 2)
             .onEnded { event in
                 if editingNodeID != nil {
                     commitEdit()
+                }
+                if session.isBrainMode {
+                    if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
+                        session.select(id)
+                        session.activatePrimary()
+                    }
+                    return
                 }
                 beginEdit(at: event.location, snapshot: snapshot)
             }
@@ -737,8 +768,9 @@ struct MapCanvasView: View {
         return CGPoint(x: mapX, y: mapY)
     }
 
-    /// Convert a view-space tap into map coordinates, then test node frames
-    /// back-to-front so later-drawn nodes win.
+    /// Hit-test the full node rectangle (fill + padding), not just glyph bounds.
+    /// Uses view-space frames so hover/tap match what is drawn under pan/zoom.
+    /// Later-drawn nodes win (front-most).
     private func hitTest(
         _ location: CGPoint,
         snapshot: MapSnapshot,
@@ -746,15 +778,11 @@ struct MapCanvasView: View {
     ) -> NodeID? {
         guard viewSize.width > 0, viewSize.height > 0, scale > 0 else { return nil }
 
-        let pt = mapPoint(from: location, viewSize: viewSize)
-        let mapX = Double(pt.x)
-        let mapY = Double(pt.y)
-
-        let pad = Self.hitPadding
+        // Scale padding with zoom so the affordance stays ~constant in screen space.
+        let pad = CGFloat(Self.hitPadding) * scale
         for node in snapshot.nodes.reversed() {
-            let f = node.frame
-            if mapX >= f.x - pad, mapX <= f.x + f.width + pad,
-               mapY >= f.y - pad, mapY <= f.y + f.height + pad {
+            let frame = viewFrame(for: node.frame, viewSize: viewSize)
+            if frame.insetBy(dx: -pad, dy: -pad).contains(location) {
                 return node.id
             }
         }

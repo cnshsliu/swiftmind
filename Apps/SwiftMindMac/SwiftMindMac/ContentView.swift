@@ -2,8 +2,25 @@ import SwiftUI
 import SwiftMindCore
 
 struct ContentView: View {
-    @Binding var document: SwiftMindFileDocument
-    @StateObject private var session: DocumentSession
+    @ObservedObject var appModel: AppModel
+
+    var body: some View {
+        // Recreate when session instance swaps (brain ↔ map).
+        SessionWorkspace(appModel: appModel, session: appModel.session)
+            .id(ObjectIdentifier(appModel.session))
+            .onReceive(NotificationCenter.default.publisher(for: .swiftMindOpenMapURL)) { note in
+                if let url = note.object as? URL {
+                    appModel.openMap(at: url)
+                }
+            }
+    }
+}
+
+/// Bound to a concrete `DocumentSession` for the lifetime of that session object.
+private struct SessionWorkspace: View {
+    @ObservedObject var appModel: AppModel
+    @ObservedObject var session: DocumentSession
+
     @State private var inspectorPresented = true
     @State private var searchQuery = ""
     @State private var palettePresented = false
@@ -11,11 +28,10 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @FocusState private var mapTitleFocused: Bool
 
-    init(document: Binding<SwiftMindFileDocument>) {
-        self._document = document
-        let map = document.wrappedValue.map
-        _session = StateObject(wrappedValue: DocumentSession(map: map))
-        _mapTitleDraft = State(initialValue: map.title)
+    init(appModel: AppModel, session: DocumentSession) {
+        self.appModel = appModel
+        self.session = session
+        _mapTitleDraft = State(initialValue: session.store.map.title)
     }
 
     private var nodeCount: Int {
@@ -32,8 +48,21 @@ struct ContentView: View {
     }
 
     private var isFreshMap: Bool {
-        session.store.map.root.children.isEmpty
+        !session.isBrainMode
+            && session.store.map.root.children.isEmpty
             && session.store.map.root.text == "Central Idea"
+    }
+
+    private var windowTitle: String {
+        if session.isBrainMode { return "My Brain" }
+        if let url = appModel.currentMapURL {
+            var name = url.lastPathComponent
+            if name.hasSuffix(".swiftmind.html") {
+                name = String(name.dropLast(".swiftmind.html".count))
+            }
+            return name
+        }
+        return session.store.map.title
     }
 
     var body: some View {
@@ -43,6 +72,7 @@ struct ContentView: View {
             detail
         }
         .frame(minWidth: 780, minHeight: 480)
+        .navigationTitle(windowTitle)
         .overlay(alignment: .top) {
             if let toast = session.toast {
                 StatusToastBanner(toast: toast)
@@ -53,24 +83,56 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: session.toast?.id)
-        // Only content edits dirty the document — selection must stay free.
         .onChange(of: session.contentRevision) { _, _ in
-            document.map = session.exportMap()
             let title = session.store.map.title
             if !mapTitleFocused, mapTitleDraft != title {
                 mapTitleDraft = title
             }
-        }
-        .onChange(of: document.map.id) { _, _ in
-            session.syncFromDocument(document.map)
-            mapTitleDraft = document.map.title
         }
         .sheet(isPresented: $palettePresented) {
             CommandPaletteView(session: session, isPresented: $palettePresented)
                 .presentationBackground(.regularMaterial)
         }
         .toolbar {
-            EditorToolbar(session: session)
+            ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    appModel.showBrain()
+                } label: {
+                    Label("My Brain", systemImage: "brain.head.profile")
+                }
+                .help("My Brain — vaults and maps")
+                .accessibilityIdentifier("toolbarMyBrain")
+            }
+
+            if !session.isBrainMode {
+                EditorToolbar(session: session)
+            } else {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        appModel.addVaultPanel()
+                    } label: {
+                        Label("Add Vault", systemImage: "folder.badge.plus")
+                    }
+                    .help("Add a folder as a mindmap vault")
+                    .accessibilityIdentifier("toolbarAddVault")
+
+                    Button {
+                        appModel.createMapNearSelection()
+                    } label: {
+                        Label("New Map", systemImage: "doc.badge.plus")
+                    }
+                    .help("New map in selected vault/folder")
+                    .accessibilityIdentifier("toolbarNewMap")
+
+                    Button {
+                        appModel.activateSelection()
+                    } label: {
+                        Label("Open", systemImage: "arrow.right.circle")
+                    }
+                    .help("Open map or expand folder (Return)")
+                }
+            }
+
             ToolbarItem(placement: .automatic) {
                 ControlGroup {
                     Button {
@@ -102,7 +164,7 @@ struct ContentView: View {
         }
         .focusedSceneValue(\.documentSession, session)
         .focusedSceneValue(\.presentCommandPalette, $palettePresented)
-        // Keyboard shortcuts still registered on app Commands.
+        .focusedSceneValue(\.appModel, appModel)
         .background(
             Button("") { palettePresented = true }
                 .keyboardShortcut("k", modifiers: .command)
@@ -122,41 +184,108 @@ struct ContentView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("MAP")
+                Text(session.isBrainMode ? "MY BRAIN" : "MAP")
                     .font(Theme.sidebarCaption)
                     .foregroundStyle(.secondary)
                     .tracking(0.6)
 
-                TextField("Untitled map", text: $mapTitleDraft)
-                    .textFieldStyle(.plain)
-                    .font(.title3.weight(.semibold))
-                    .focused($mapTitleFocused)
-                    .accessibilityLabel("Map title")
-                    .accessibilityIdentifier("mapTitleField")
-                    .onSubmit { commitMapTitle() }
-                    .onChange(of: mapTitleFocused) { _, focused in
-                        if !focused { commitMapTitle() }
+                if session.isBrainMode {
+                    Text("Vaults & maps")
+                        .font(.title3.weight(.semibold))
+                        .accessibilityIdentifier("mapTitleField")
+                    Text("Double-click a map to open · folders fold")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    TextField("Untitled map", text: $mapTitleDraft)
+                        .textFieldStyle(.plain)
+                        .font(.title3.weight(.semibold))
+                        .focused($mapTitleFocused)
+                        .accessibilityLabel("Map title")
+                        .accessibilityIdentifier("mapTitleField")
+                        .onSubmit { commitMapTitle() }
+                        .onChange(of: mapTitleFocused) { _, focused in
+                            if !focused { commitMapTitle() }
+                        }
+                    if let url = appModel.currentMapURL {
+                        Text(url.path.replacingOccurrences(
+                            of: FileManager.default.homeDirectoryForCurrentUser.path,
+                            with: "~"
+                        ))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
                     }
+                }
             }
 
             Divider().opacity(0.5)
 
-            SearchBarView(
-                session: session,
-                query: $searchQuery,
-                isSearchFocused: $searchFocused
-            )
+            if session.isBrainMode {
+                brainVaultList
+            } else {
+                SearchBarView(
+                    session: session,
+                    query: $searchQuery,
+                    isSearchFocused: $searchFocused
+                )
+
+                Divider().opacity(0.5)
+
+                FilterBarView(session: session)
+
+                Divider().opacity(0.5)
+
+                BookmarksSidebar(session: session)
+            }
 
             Spacer(minLength: 0)
 
-            Text("\(nodeCount) nodes")
+            Text(nodeCountLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Trust system sidebar material — avoid stacking ultraThin on top.
         .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 320)
+    }
+
+    private var brainVaultList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("VAULTS")
+                .font(Theme.sidebarCaption)
+                .foregroundStyle(.secondary)
+                .tracking(0.6)
+
+            if appModel.library.vaultURLs.isEmpty {
+                Text("No vaults yet")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(appModel.library.vaultURLs, id: \.path) { url in
+                    Button {
+                        selectBrainPath(url.path)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.fill")
+                                .foregroundStyle(Color.accentColor)
+                            Text(url.lastPathComponent)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Button {
+                appModel.addVaultPanel()
+            } label: {
+                Label("Add Vault…", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+        }
     }
 
     // MARK: - Detail
@@ -176,6 +305,12 @@ struct ContentView: View {
                 .accessibilityIdentifier("viewModePicker")
 
                 Spacer()
+
+                if session.isBrainMode {
+                    Text("My Brain")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -207,9 +342,24 @@ struct ContentView: View {
                     .allowsHitTesting(false)
                     .offset(y: 120)
                 }
+
+                if session.isBrainMode, session.store.map.root.children.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("Your vaults appear here")
+                            .font(.headline)
+                        Text("Add a vault folder, then double-click maps to open")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Add Vault…") {
+                            appModel.addVaultPanel()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
 
-            // Single status strip for selection (not repeated in sidebar/header).
             HStack(spacing: 10) {
                 Label("\(nodeCount)", systemImage: "circle.grid.2x2")
                     .help("Node count")
@@ -220,7 +370,10 @@ struct ContentView: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("selectedNodeLabel")
                 Spacer()
-                if session.canUndo {
+                if session.isBrainMode {
+                    Text("Return open · ⌘. fold")
+                        .foregroundStyle(.tertiary)
+                } else if session.canUndo {
                     Text("⌘Z undo")
                         .foregroundStyle(.tertiary)
                 }
@@ -234,7 +387,17 @@ struct ContentView: View {
         }
     }
 
+    private var nodeCountLabel: String {
+        let total = nodeCount
+        if session.store.map.activeFilter != nil {
+            let visible = session.store.snapshot().nodes.count
+            return "\(visible)/\(total) nodes"
+        }
+        return "\(total) nodes"
+    }
+
     private func commitMapTitle() {
+        guard !session.isBrainMode else { return }
         let trimmed = mapTitleDraft
         guard trimmed != session.store.map.title else { return }
         session.applyQuiet(SetMapTitleCommand(newTitle: trimmed))
@@ -243,8 +406,17 @@ struct ContentView: View {
     private func countNodes(_ node: Node) -> Int {
         1 + node.children.reduce(0) { $0 + countNodes($1) }
     }
-}
 
-#Preview {
-    ContentView(document: .constant(SwiftMindFileDocument()))
+    private func selectBrainPath(_ path: String) {
+        func find(_ node: Node) -> NodeID? {
+            if BrainMapBuilder.path(of: node) == path { return node.id }
+            for c in node.children {
+                if let id = find(c) { return id }
+            }
+            return nil
+        }
+        if let id = find(session.store.map.root) {
+            session.select(id)
+        }
+    }
 }

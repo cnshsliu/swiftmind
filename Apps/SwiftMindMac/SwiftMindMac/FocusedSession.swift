@@ -9,6 +9,10 @@ private struct PresentCommandPaletteKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+private struct AppModelKey: FocusedValueKey {
+    typealias Value = AppModel
+}
+
 extension FocusedValues {
     var documentSession: DocumentSession? {
         get { self[DocumentSessionKey.self] }
@@ -19,5 +23,10 @@ extension FocusedValues {
     var presentCommandPalette: Binding<Bool>? {
         get { self[PresentCommandPaletteKey.self] }
         set { self[PresentCommandPaletteKey.self] = newValue }
+    }
+
+    var appModel: AppModel? {
+        get { self[AppModelKey.self] }
+        set { self[AppModelKey.self] = newValue }
     }
 }
