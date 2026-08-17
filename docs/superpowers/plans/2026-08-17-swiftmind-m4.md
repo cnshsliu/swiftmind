@@ -104,9 +104,9 @@ Tests/SwiftMindCoreTests/
 
 ### Task 5: Mac UI — inspector
 
-- [ ] Formula section: text field (monospaced), live result, `#ERR` inline with message
-- [ ] Editing dispatches `SetFormulaCommand` (undoable), not direct mutation
-- [ ] Clear button
+- [x] Formula section: text field (monospaced), live result, `#ERR` inline with message
+- [x] Editing dispatches `SetFormulaCommand` (undoable), not direct mutation
+- [x] Clear button
 
 ### Task 6: Mac UI — L0 aggregate picker + badges
 

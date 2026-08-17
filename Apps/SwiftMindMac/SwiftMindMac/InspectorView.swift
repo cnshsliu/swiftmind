@@ -136,6 +136,10 @@ struct InspectorView: View {
                     AttributeInspectorSection(session: session, node: node)
                 }
 
+                Section("Formula") {
+                    FormulaInspectorSection(session: session, node: node)
+                }
+
                 Section("Named Style") {
                     Picker("Style", selection: Binding(
                         get: { node.styleName ?? "" },
@@ -396,6 +400,90 @@ struct InspectorView: View {
 
     private func flatten(_ node: Node) -> [Node] {
         [node] + node.children.flatMap { flatten($0) }
+    }
+}
+
+// MARK: - Formula
+
+/// L1 formula editor: monospaced field, live result, inline #ERR, clear button.
+/// Commits via SetFormulaCommand on Return / focus loss (never per keystroke).
+struct FormulaInspectorSection: View {
+    @ObservedObject var session: DocumentSession
+    let node: Node
+
+    @State private var draft: String = ""
+    /// Which node the draft currently mirrors (avoids fighting live edits).
+    @State private var boundNodeID: NodeID?
+    @FocusState private var fieldFocused: Bool
+
+    /// Live result of the *stored* formula (memoized in the store's engine).
+    private var result: FormulaValue? {
+        session.store.formulaValue(for: node.id)
+    }
+
+    var body: some View {
+        Group {
+            TextField("e.g. sum(children, attr: \"cost\")", text: $draft)
+                .font(.body.monospaced())
+                .focused($fieldFocused)
+                .onSubmit { commit() }
+                .onChange(of: fieldFocused) { _, focused in
+                    if !focused { commit() }
+                }
+                .accessibilityIdentifier("formulaField")
+
+            if let result {
+                HStack {
+                    Text("Result")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(result.displayText)
+                        .font(.caption.monospaced().weight(.medium))
+                        .foregroundStyle(isError(result) ? Color.red : Color.primary)
+                        .lineLimit(2)
+                        .accessibilityIdentifier("formulaResult")
+                }
+            } else {
+                Text("No formula — computed values never modify the map")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if node.formula != nil {
+                Button("Clear Formula", role: .destructive) {
+                    draft = ""
+                    session.applyQuiet(SetFormulaCommand(nodeID: node.id, formula: nil))
+                }
+                .accessibilityIdentifier("clearFormulaButton")
+            }
+        }
+        .onAppear { syncDraft() }
+        .onChange(of: node.id) { _, _ in syncDraft() }
+        .onChange(of: node.formula) { _, newFormula in
+            // External change (undo, palette): refresh only if the user isn't editing.
+            if !fieldFocused, draft != (newFormula ?? "") {
+                draft = newFormula ?? ""
+            }
+        }
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        guard next != node.formula else { return }
+        session.applyQuiet(SetFormulaCommand(nodeID: node.id, formula: next))
+    }
+
+    private func isError(_ value: FormulaValue) -> Bool {
+        if case .error = value { return true }
+        return false
+    }
+
+    private func syncDraft() {
+        guard boundNodeID != node.id else { return }
+        boundNodeID = node.id
+        draft = node.formula ?? ""
     }
 }
 
