@@ -76,10 +76,10 @@ Tests/SwiftMindCoreTests/
 
 ### Task 1: Lexer + parser + AST
 
-- [ ] `FormulaLexer` — numbers, strings, identifiers, operators, keywords (`attr`, `children`, `and`, `or`, `not`, `if`, `true`, `false`)
-- [ ] `FormulaAST` — expression tree with correct precedence (`or` < `and` < comparison < additive < multiplicative < unary < call/atom)
-- [ ] `FormulaParser` — recursive descent; position-annotated errors (`unexpected ")" at 12`)
-- [ ] Lexer/parser unit tests incl. malformed input
+- [x] `FormulaLexer` — numbers, strings, identifiers, operators, keywords (`attr`, `children`, `and`, `or`, `not`, `if`, `true`, `false`)
+- [x] `FormulaAST` — expression tree with correct precedence (`or` < `and` < comparison < additive < multiplicative < unary < call/atom)
+- [x] `FormulaParser` — recursive descent; position-annotated errors (`unexpected ")" at 12`)
+- [x] Lexer/parser unit tests incl. malformed input
 
 ### Task 2: Evaluator
 
