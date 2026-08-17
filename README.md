@@ -2,7 +2,14 @@
 
 Native **macOS** mind mapping in pure Swift. Documents are plain HTML files with the extension **`.swiftmind.html`**: the app reads and writes the map model as nested lists, and the same file opens as a **read-only hierarchy** in any browser (Safari, Chrome, etc.) without SwiftMind installed.
 
-Architecture: **SwiftMindCore** (model, commands, layout, HTML codec) + **SwiftMindMac** (DocumentGroup shell, outline, canvas, inspector).
+Architecture: **SwiftMindCore** (model, commands, layout, HTML codec) + **SwiftMindMac** (WindowGroup shell, My Brain vaults, outline, canvas, inspector).
+
+### Startup & My Brain
+
+- **No Open panel** on launch: reopens the **last map**, or creates `~/Documents/SwiftMind/Untitled.swiftmind.html` and opens it.
+- **My Brain** (toolbar / **⇧⌘B**): mind-map navigator whose root is **My Brain**; **vault folders** you add are first-level children; **subfolders** and **`.swiftmind.html` / `.html` maps** nest underneath.
+- Double-click (or Return) a **map** node to open it; double-click a **folder/vault** to fold/unfold. **Add Vault…** registers more folders (security-scoped bookmarks).
+- Autosave writes the current map file while editing.
 
 ## Develop
 
@@ -95,6 +102,36 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 | Pinch | Zoom |
 | Double-click node | Rename |
 | Click node | Select |
+
+## M3 features (power layer)
+
+- **Attributes** on nodes (`name`/`value` strings) with map-level **attribute registry**
+- **Named styles** (`topic`, `important`, `note`) via style sheet + local style overrides
+- **Filters**: text / `name=value` attribute filter; **Hide** (path-to-root) or **Highlight**
+- **Bookmarks** sidebar + palette actions; jump selects and unfolds ancestors
+- HTML schema **1** additive: `node-attrs`, `attribute-registry`, `bookmarks`, `data-style-name`, filter attrs on `<article>`
+
+### How to use attributes
+
+1. Select a node → inspector **Attributes**.
+2. Enter name/value → **Add** (names auto-register on the map).
+3. Filter with `status=done` in the sidebar filter field.
+
+### How to use filters
+
+1. Sidebar **Filter** field: substring of title/note, or `attr=value`.
+2. Toggle **Hide** vs **Highlight**; clear with ✕.
+3. Status shows visible/highlighted counts; map status strip shows `visible/total`.
+
+### How to use bookmarks
+
+1. Select a node → bookmark button in sidebar, or palette **Bookmark Selection**.
+2. Click a bookmark to jump; ✕ removes it.
+
+### How to use named styles
+
+1. Inspector **Named Style** picker, or palette **Apply Style: …**.
+2. Local Style section still overrides non-default fields (font size, colors, fill).
 
 ### Multi-window check
 
