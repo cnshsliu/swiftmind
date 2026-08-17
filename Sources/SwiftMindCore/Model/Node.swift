@@ -7,6 +7,8 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     public var attributes: [NodeAttribute]
     /// Named style key from `MindMap.styleSheet` (optional).
     public var styleName: String?
+    /// L1 formula source (optional). The computed value is derived, never stored.
+    public var formula: String?
     public var isFolded: Bool
     public var side: NodeSide
     public var style: NodeStyle
@@ -21,6 +23,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         icons: [NodeIcon] = [],
         attributes: [NodeAttribute] = [],
         styleName: String? = nil,
+        formula: String? = nil,
         isFolded: Bool = false,
         side: NodeSide = .auto,
         style: NodeStyle = .default,
@@ -34,6 +37,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.icons = icons
         self.attributes = attributes
         self.styleName = styleName
+        self.formula = formula
         self.isFolded = isFolded
         self.side = side
         self.style = style

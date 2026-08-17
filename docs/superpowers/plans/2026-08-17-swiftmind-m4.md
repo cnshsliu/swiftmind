@@ -90,11 +90,11 @@ Tests/SwiftMindCoreTests/
 
 ### Task 3: Model + command + HTML persistence
 
-- [ ] `Node.formula: String?`
-- [ ] `SetFormulaCommand` (set / clear via nil), undoable
-- [ ] HTML: `data-formula="..."` escaped on encode; decode tolerant of missing attr (legacy files unaffected)
-- [ ] Round-trip test against golden fixture (extended or new fixture node)
-- [ ] Note: encode stores the *source string*, not the computed value — the browser skin shows the formula text, never executes anything (spec §5 security posture)
+- [x] `Node.formula: String?`
+- [x] `SetFormulaCommand` (set / clear via nil), undoable
+- [x] HTML: `data-formula="..."` escaped on encode; decode tolerant of missing attr (legacy files unaffected)
+- [x] Round-trip test against golden fixture (extended or new fixture node)
+- [x] Note: encode stores the *source string*, not the computed value — the browser skin shows the formula text, never executes anything (spec §5 security posture)
 
 ### Task 4: Engine — cache + invalidation
 

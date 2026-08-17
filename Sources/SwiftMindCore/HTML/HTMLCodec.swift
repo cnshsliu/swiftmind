@@ -149,6 +149,10 @@ public enum HTMLCodec {
         if let styleName = node.styleName, !styleName.isEmpty {
             out += " data-style-name=\"\(escapeAttribute(styleName))\""
         }
+        if let formula = node.formula, !formula.isEmpty {
+            // Source string only — the browser skin never executes anything.
+            out += " data-formula=\"\(escapeAttribute(formula))\""
+        }
         out += ">\n"
 
         out += pad + "  "
@@ -472,6 +476,10 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 s.isEmpty ? nil : s
             }
 
+            let formula = attributeDict["data-formula"].flatMap { s in
+                s.isEmpty ? nil : s
+            }
+
             let node = Node(
                 id: NodeID(rawValue: idRaw),
                 text: "",
@@ -480,6 +488,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 icons: icons,
                 attributes: [],
                 styleName: styleName,
+                formula: formula,
                 isFolded: folded,
                 side: side,
                 style: style,
