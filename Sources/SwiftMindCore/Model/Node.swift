@@ -4,6 +4,9 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     public var noteMarkdown: String
     public var links: [NodeLink]
     public var icons: [NodeIcon]
+    public var attributes: [NodeAttribute]
+    /// Named style key from `MindMap.styleSheet` (optional).
+    public var styleName: String?
     public var isFolded: Bool
     public var side: NodeSide
     public var style: NodeStyle
@@ -16,6 +19,8 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         noteMarkdown: String = "",
         links: [NodeLink] = [],
         icons: [NodeIcon] = [],
+        attributes: [NodeAttribute] = [],
+        styleName: String? = nil,
         isFolded: Bool = false,
         side: NodeSide = .auto,
         style: NodeStyle = .default,
@@ -27,10 +32,16 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.noteMarkdown = noteMarkdown
         self.links = links
         self.icons = icons
+        self.attributes = attributes
+        self.styleName = styleName
         self.isFolded = isFolded
         self.side = side
         self.style = style
         self.positionPin = positionPin
         self.children = children
+    }
+
+    public func attributeValue(named name: String) -> String? {
+        attributes.first { $0.name == name }?.value
     }
 }

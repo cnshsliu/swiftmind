@@ -48,6 +48,8 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
     public var iconIDs: [String]
     /// True when the source node has a position pin.
     public var isPinned: Bool
+    /// True when the active filter is in highlight mode and this node matches.
+    public var isHighlighted: Bool
 
     public init(
         id: NodeID,
@@ -60,7 +62,8 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         isSelected: Bool,
         hasNote: Bool = false,
         iconIDs: [String] = [],
-        isPinned: Bool = false
+        isPinned: Bool = false,
+        isHighlighted: Bool = false
     ) {
         self.id = id
         self.text = text
@@ -73,6 +76,7 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         self.hasNote = hasNote
         self.iconIDs = iconIDs
         self.isPinned = isPinned
+        self.isHighlighted = isHighlighted
     }
 }
 

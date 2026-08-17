@@ -17,10 +17,29 @@ public enum HTMLCodec {
         out += HTMLSkin.headFragment(includeSkin: includeSkin)
         out += "</head>\n"
         out += "<body>\n"
-        out += "<article class=\"swiftmind-map\" data-schema=\"\(map.schemaVersion)\" data-map-id=\"\(escapeAttribute(map.id))\">\n"
+        out += "<article class=\"swiftmind-map\" data-schema=\"\(map.schemaVersion)\" data-map-id=\"\(escapeAttribute(map.id))\""
+        if let filter = map.activeFilter {
+            out += " data-filter-mode=\"\(filter.mode.rawValue)\""
+            out += encodeFilterRuleAttributes(filter.rule)
+        }
+        out += ">\n"
         out += "<ul>\n"
         encodeNode(map.root, into: &out, indent: 2)
         out += "</ul>\n"
+        if !map.attributeRegistry.definitions.isEmpty {
+            out += "<section class=\"attribute-registry\" hidden=\"hidden\">\n"
+            for def in map.attributeRegistry.definitions {
+                out += "  <attr data-name=\"\(escapeAttribute(def.name))\" data-type=\"\(def.valueType.rawValue)\"/>\n"
+            }
+            out += "</section>\n"
+        }
+        if !map.bookmarks.isEmpty {
+            out += "<section class=\"bookmarks\" hidden=\"hidden\">\n"
+            for b in map.bookmarks {
+                out += "  <bookmark data-id=\"\(escapeAttribute(b.id))\" data-node=\"\(escapeAttribute(b.nodeID.rawValue))\" data-label=\"\(escapeAttribute(b.label))\"/>\n"
+            }
+            out += "</section>\n"
+        }
         out += "</article>\n"
         out += "</body>\n"
         out += "</html>\n"
@@ -67,12 +86,37 @@ public enum HTMLCodec {
             throw HTMLCodecError.invalidSchema
         }
 
-        return MindMap(
+        var map = MindMap(
             id: mapID,
             title: delegate.title ?? "",
             schemaVersion: schema,
-            root: root
+            root: root,
+            attributeRegistry: delegate.attributeRegistry,
+            styleSheet: .defaultSheet,
+            activeFilter: delegate.activeFilter,
+            bookmarks: delegate.bookmarks
         )
+        // Ensure registry includes any attr names found on nodes.
+        Self.collectAttributeNames(from: root).forEach { map.attributeRegistry.ensureRegistered($0) }
+        return map
+    }
+
+    private static func collectAttributeNames(from node: Node) -> [String] {
+        node.attributes.map(\.name) + node.children.flatMap { collectAttributeNames(from: $0) }
+    }
+
+    private static func encodeFilterRuleAttributes(_ rule: FilterRule) -> String {
+        switch rule {
+        case .textContains(let q):
+            return " data-filter-kind=\"text\" data-filter-query=\"\(escapeAttribute(q))\""
+        case .hasIcon(let id):
+            return " data-filter-kind=\"icon\" data-filter-query=\"\(escapeAttribute(id))\""
+        case .attributeEquals(let name, let value):
+            return " data-filter-kind=\"attr\" data-filter-name=\"\(escapeAttribute(name))\" data-filter-query=\"\(escapeAttribute(value))\""
+        case .and, .or:
+            // Composite rules: persist as text search of first textContains if any (M3 simplified).
+            return " data-filter-kind=\"text\" data-filter-query=\"\""
+        }
     }
 
     // MARK: - Encode helpers
@@ -102,6 +146,9 @@ public enum HTMLCodec {
             let ids = node.icons.map(\.id).joined(separator: ",")
             out += " data-icons=\"\(escapeAttribute(ids))\""
         }
+        if let styleName = node.styleName, !styleName.isEmpty {
+            out += " data-style-name=\"\(escapeAttribute(styleName))\""
+        }
         out += ">\n"
 
         out += pad + "  "
@@ -111,6 +158,14 @@ public enum HTMLCodec {
             out += pad + "  "
             // hidden="hidden" keeps the document well-formed XML for XMLParser.
             out += "<div class=\"node-note\" hidden=\"hidden\">\(escapeText(node.noteMarkdown))</div>\n"
+        }
+
+        if !node.attributes.isEmpty {
+            out += pad + "  <ul class=\"node-attrs\" hidden=\"hidden\">\n"
+            for attr in node.attributes {
+                out += pad + "    <li data-attr-name=\"\(escapeAttribute(attr.name))\" data-attr-value=\"\(escapeAttribute(attr.value))\"></li>\n"
+            }
+            out += pad + "  </ul>\n"
         }
 
         if !node.links.isEmpty {
@@ -223,6 +278,9 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     var title: String?
     var rootNode: Node?
     var deferredError: HTMLCodecError?
+    var attributeRegistry = AttributeRegistry()
+    var activeFilter: MapFilter?
+    var bookmarks: [Bookmark] = []
 
     private var nodeStack: [Node] = []
     private var capturingTitle = false
@@ -230,6 +288,10 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var capturingNote = false
     /// True while inside `<ul class="node-links">` so link `<li>`s are not tree nodes.
     private var inLinksList = false
+    /// True while inside `<ul class="node-attrs">`.
+    private var inAttrsList = false
+    private var inAttributeRegistry = false
+    private var inBookmarksSection = false
     private var titleBuffer = ""
     private var nodeTitleBuffer = ""
     private var noteBuffer = ""
@@ -238,6 +300,26 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
         (attributeDict["class"] ?? "")
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
+    }
+
+    private static func parseFilter(from attributeDict: [String: String]) -> MapFilter? {
+        guard let modeRaw = attributeDict["data-filter-mode"],
+              let mode = FilterMode(rawValue: modeRaw) else {
+            return nil
+        }
+        let kind = attributeDict["data-filter-kind"] ?? "text"
+        let query = attributeDict["data-filter-query"] ?? ""
+        let rule: FilterRule
+        switch kind {
+        case "icon":
+            rule = .hasIcon(query)
+        case "attr":
+            let name = attributeDict["data-filter-name"] ?? ""
+            rule = .attributeEquals(name: name, value: query)
+        default:
+            rule = .textContains(query)
+        }
+        return MapFilter(mode: mode, rule: rule)
     }
 
     func parser(
@@ -263,21 +345,60 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                         parser.abortParsing()
                     }
                 }
+                activeFilter = Self.parseFilter(from: attributeDict)
             }
 
         case "title":
             capturingTitle = true
             titleBuffer = ""
 
+        case "section":
+            guard foundSwiftMindArticle else { return }
+            let classes = Self.classTokens(attributeDict)
+            if classes.contains("attribute-registry") {
+                inAttributeRegistry = true
+            } else if classes.contains("bookmarks") {
+                inBookmarksSection = true
+            }
+
+        case "attr":
+            guard foundSwiftMindArticle, inAttributeRegistry else { return }
+            if let attrName = attributeDict["data-name"], !attrName.isEmpty {
+                let type = AttributeValueType(rawValue: attributeDict["data-type"] ?? "string") ?? .string
+                attributeRegistry.ensureRegistered(attrName, type: type)
+            }
+
+        case "bookmark":
+            guard foundSwiftMindArticle, inBookmarksSection else { return }
+            guard let nodeRef = attributeDict["data-node"], !nodeRef.isEmpty else { return }
+            let id = attributeDict["data-id"] ?? UUID().uuidString
+            let label = attributeDict["data-label"] ?? ""
+            bookmarks.append(
+                Bookmark(id: id, nodeID: NodeID(rawValue: nodeRef), label: label)
+            )
+
         case "ul":
             guard foundSwiftMindArticle else { return }
             let classes = Self.classTokens(attributeDict)
             if classes.contains("node-links") {
                 inLinksList = true
+            } else if classes.contains("node-attrs") {
+                inAttrsList = true
             }
 
         case "li":
             guard foundSwiftMindArticle else { return }
+
+            if inAttrsList {
+                guard !nodeStack.isEmpty else { return }
+                if let attrName = attributeDict["data-attr-name"], !attrName.isEmpty {
+                    let value = attributeDict["data-attr-value"] ?? ""
+                    nodeStack[nodeStack.count - 1].attributes.append(
+                        NodeAttribute(name: attrName, value: value)
+                    )
+                }
+                return
+            }
 
             // Link list items: parse attrs onto current node; never push tree nodes.
             if inLinksList {
@@ -347,12 +468,18 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                     .map { NodeIcon(id: String($0)) }
             }
 
+            let styleName = attributeDict["data-style-name"].flatMap { s in
+                s.isEmpty ? nil : s
+            }
+
             let node = Node(
                 id: NodeID(rawValue: idRaw),
                 text: "",
                 noteMarkdown: "",
                 links: [],
                 icons: icons,
+                attributes: [],
+                styleName: styleName,
                 isFolded: folded,
                 side: side,
                 style: style,
@@ -362,7 +489,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
             nodeStack.append(node)
 
         case "span":
-            guard foundSwiftMindArticle, !inLinksList else { return }
+            guard foundSwiftMindArticle, !inLinksList, !inAttrsList else { return }
             let classes = Self.classTokens(attributeDict)
             if classes.contains("node-title") {
                 capturingNodeTitle = true
@@ -370,7 +497,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
             }
 
         case "div":
-            guard foundSwiftMindArticle, !inLinksList else { return }
+            guard foundSwiftMindArticle, !inLinksList, !inAttrsList else { return }
             let classes = Self.classTokens(attributeDict)
             if classes.contains("node-note") {
                 capturingNote = true
@@ -423,16 +550,21 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 }
             }
 
+        case "section":
+            inAttributeRegistry = false
+            inBookmarksSection = false
+
         case "ul":
-            // Leaving a links list (flat; no nested node-links).
             if inLinksList {
                 inLinksList = false
+            } else if inAttrsList {
+                inAttrsList = false
             }
 
         case "li":
             guard foundSwiftMindArticle else { return }
-            // Link items were never pushed onto the node stack.
-            if inLinksList {
+            // Attr / link items were never pushed onto the node stack.
+            if inLinksList || inAttrsList {
                 return
             }
             guard !nodeStack.isEmpty else { return }

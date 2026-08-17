@@ -5,12 +5,29 @@ public struct MindMap: Equatable, Sendable, Codable {
     public var title: String
     public var schemaVersion: Int
     public var root: Node
+    public var attributeRegistry: AttributeRegistry
+    public var styleSheet: StyleSheet
+    public var activeFilter: MapFilter?
+    public var bookmarks: [Bookmark]
 
-    public init(id: String, title: String, schemaVersion: Int = 1, root: Node) {
+    public init(
+        id: String,
+        title: String,
+        schemaVersion: Int = 1,
+        root: Node,
+        attributeRegistry: AttributeRegistry = AttributeRegistry(),
+        styleSheet: StyleSheet = .defaultSheet,
+        activeFilter: MapFilter? = nil,
+        bookmarks: [Bookmark] = []
+    ) {
         self.id = id
         self.title = title
         self.schemaVersion = schemaVersion
         self.root = root
+        self.attributeRegistry = attributeRegistry
+        self.styleSheet = styleSheet
+        self.activeFilter = activeFilter
+        self.bookmarks = bookmarks
     }
 
     public static func makeEmpty(title: String) -> MindMap {
