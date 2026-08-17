@@ -11,6 +11,7 @@ public final class MapStore {
 
     private let bus = CommandBus()
     private let layoutEngine = LayoutEngine()
+    private var formulaEngine = FormulaEngine()
 
     /// Geometry-only snapshot (selection flags cleared). Invalidated on content change.
     private var cachedGeometry: MapSnapshot?
@@ -60,6 +61,16 @@ public final class MapStore {
 
     public var canUndo: Bool { bus.canUndo }
     public var canRedo: Bool { bus.canRedo }
+
+    /// Computed value of one node's formula (memoized; nil when no formula).
+    public func formulaValue(for id: NodeID) -> FormulaValue? {
+        formulaEngine.result(for: id, in: map)
+    }
+
+    /// Computed values for all nodes with formulas (memoized per subtree).
+    public func formulaResults() -> [NodeID: FormulaValue] {
+        formulaEngine.results(in: map)
+    }
 
     public func replaceMap(_ map: MindMap) {
         self.map = map

@@ -98,10 +98,9 @@ Tests/SwiftMindCoreTests/
 
 ### Task 4: Engine — cache + invalidation
 
-- [ ] `FormulaEngine` in `MapStore`: `results: [NodeID: FormulaValue]`, recomputed lazily
-- [ ] On `contentRevision` bump: recompute formulas on the changed node's ancestor path only; aggregates guarantee no other node can depend on the change (assert with a test: sibling edits don't invalidate)
-- [ ] `snapshot()` exposes computed values alongside `NodeVisual` (badge text)
-- [ ] Depth-guarded recursion (map is a tree, so cycles are structurally impossible — add a test proving ancestor-only dependencies)
+- [x] `FormulaEngine`: memoized results, exposed via `MapStore.formulaValue(for:)` / `formulaResults()`
+- [x] Invalidation: refined design — every DSL feature reads only the node's *own subtree*, so results are memoized against the subtree value and validated by equality. Sibling edits provably don't invalidate; ancestor re-evaluation falls out naturally; undo restores cache hits. No revision keys or changed-node tracking needed. (Supersedes the original ancestor-path plan; `snapshot()` stays geometry-only per the core contract.)
+- [x] Test: sibling edit re-evaluates the ancestor formula but serves the sibling's from cache (`evaluationCount` asserts); cycles structurally impossible (dependencies point down the tree)
 
 ### Task 5: Mac UI — inspector
 
