@@ -83,10 +83,10 @@ Tests/SwiftMindCoreTests/
 
 ### Task 2: Evaluator
 
-- [ ] `FormulaValue` with numeric coercion rules (string→number only if parseable, else error)
-- [ ] `FormulaEvaluator.evaluate(ast, node, map)` — attribute lookup, aggregates over `children`, arithmetic/comparison/boolean, `if`
-- [ ] Division by zero, unknown attribute, wrong arity, type mismatch → `.error`
-- [ ] Unit tests for every DSL production + error case
+- [x] `FormulaValue` with numeric coercion rules (string→number only if parseable, else error)
+- [x] `FormulaEvaluator.evaluate(ast, node)` — attribute lookup, aggregates over `children`, arithmetic/comparison/boolean, `if`
+- [x] Division by zero, unknown attribute, wrong arity, type mismatch → `.error`
+- [x] Unit tests for every DSL production + error case
 
 ### Task 3: Model + command + HTML persistence
 
