@@ -99,6 +99,22 @@ final class AppModel: ObservableObject {
             guard let html = String(data: data, encoding: .utf8) else {
                 throw CocoaError(.fileReadCorruptFile)
             }
+            // Freeplane/FreeMind import: one-way, saved as a sibling .swiftmind.html.
+            if url.pathExtension.lowercased() == "mm" {
+                let imported = try MMImport.importMap(from: html)
+                let dir = url.deletingLastPathComponent()
+                let dest = VaultLibrary.uniqueMapURL(
+                    in: dir,
+                    baseName: url.deletingPathExtension().lastPathComponent
+                )
+                try Data(HTMLCodec.encode(imported, includeSkin: true).utf8).write(to: dest)
+                openMap(at: dest)
+                session.showToast(
+                    "Imported \(url.lastPathComponent) → \(dest.lastPathComponent)",
+                    kind: .success
+                )
+                return
+            }
             let map = try HTMLCodec.decode(html)
             suppressAutosave = true
             isBrainMode = false
@@ -156,8 +172,9 @@ final class AppModel: ObservableObject {
         panel.allowedContentTypes = [
             UTType(filenameExtension: "html") ?? .html,
             UTType(filenameExtension: "htm") ?? .html,
+            UTType(filenameExtension: "mm") ?? .xml,
         ]
-        panel.message = "Open a SwiftMind map"
+        panel.message = "Open a SwiftMind map (or import a Freeplane .mm)"
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in

@@ -105,6 +105,11 @@ enum PaletteBuilder {
             dismiss()
         })
 
+        items.append(PaletteItem(id: "run-script", title: "Run Script…", subtitle: "Sandboxed JS (L3)", systemImage: "play.rectangle") {
+            dismiss()
+            ScriptRunner.runViaOpenPanel(session: session)
+        })
+
         for (name, _) in session.store.map.styleSheet.styles.sorted(by: { $0.key < $1.key }) {
             let styleKey = name
             items.append(
@@ -230,6 +235,7 @@ struct CommandPaletteView: View {
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($queryFocused)
+                    .accessibilityIdentifier("paletteQueryField")
                     .onSubmit { runSelected() }
                     .onChange(of: query) { _, _ in
                         selectedIndex = 0

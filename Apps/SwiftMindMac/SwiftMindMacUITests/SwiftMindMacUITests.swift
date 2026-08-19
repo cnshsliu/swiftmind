@@ -121,6 +121,21 @@ final class SwiftMindMacUITests: XCTestCase {
         )
     }
 
+    func testRunScriptInPalette() throws {
+        app.typeKey("k", modifierFlags: .command)
+        let query = element("paletteQueryField")
+        XCTAssertTrue(query.waitForExistence(timeout: 4), "Palette query field should appear")
+        query.click()
+        query.typeText("run script")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        // Palette rows are Buttons whose AX label merges title + subtitle.
+        let row = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "Run Script"))
+            .firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 3), "Palette should offer Run Script…")
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
     func testFormulaSetAndClear() throws {
         // Root is selected on launch; the inspector is visible by default.
         let field = element("formulaField")

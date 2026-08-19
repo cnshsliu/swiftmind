@@ -107,7 +107,7 @@ struct FilterBarView: View {
                             Text("No attributes in registry")
                         } else {
                             ForEach(names, id: \.self) { name in
-                                Button(name) { applyBulk(.removeAttribute(name)) }
+                                Button(name) { applyBulk(.removeAttribute(name: name)) }
                             }
                         }
                     }
