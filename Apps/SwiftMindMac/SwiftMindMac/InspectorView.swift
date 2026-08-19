@@ -209,6 +209,10 @@ struct InspectorView: View {
                     description: Text("Select a node to edit its title, note, links, icons, and style.")
                 )
             }
+
+            Section("Style Rules") {
+                StyleRulesSection(session: session)
+            }
         }
         .formStyle(.grouped)
         .padding(.top, 4)
@@ -509,6 +513,118 @@ struct FormulaInspectorSection: View {
         guard boundNodeID != node.id else { return }
         boundNodeID = node.id
         draft = node.formula ?? ""
+    }
+}
+
+// MARK: - Style Rules
+
+/// Map-level conditional style rules: "if hasIcon(check) apply note", etc.
+/// Rules layer over the node's named style; local style fields still win.
+struct StyleRulesSection: View {
+    @ObservedObject var session: DocumentSession
+
+    @State private var conditionKind = 0 // 0 = icon, 1 = attribute
+    @State private var selectedIcon = "check"
+    @State private var attrName = ""
+    @State private var attrValue = ""
+    @State private var selectedStyle = "note"
+
+    private var rules: [ConditionalStyleRule] {
+        session.store.map.styleSheet.rules
+    }
+
+    private var styleKeys: [String] {
+        session.store.map.styleSheet.styles.keys.sorted()
+    }
+
+    var body: some View {
+        if rules.isEmpty {
+            Text("No rules — e.g. \"icon check → note\"")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        } else {
+            ForEach(rules) { rule in
+                HStack {
+                    Text(describe(rule))
+                        .font(.caption)
+                        .lineLimit(1)
+                    Spacer()
+                    Button(role: .destructive) {
+                        remove(rule)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+
+        Picker("Condition", selection: $conditionKind) {
+            Text("Has Icon").tag(0)
+            Text("Attribute").tag(1)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("ruleConditionPicker")
+
+        if conditionKind == 0 {
+            Picker("Icon", selection: $selectedIcon) {
+                ForEach(NodeIcon.catalog) { icon in
+                    Label(icon.id, systemImage: NodeIcon.sfSymbolNames[icon.id] ?? "circle")
+                        .tag(icon.id)
+                }
+            }
+        } else {
+            HStack {
+                TextField("Name", text: $attrName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("ruleAttrNameField")
+                TextField("Value", text: $attrValue)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("ruleAttrValueField")
+            }
+        }
+
+        HStack {
+            Picker("Style", selection: $selectedStyle) {
+                ForEach(styleKeys, id: \.self) { key in
+                    Text(key.capitalized).tag(key)
+                }
+            }
+            .accessibilityIdentifier("ruleStylePicker")
+            Button("Add Rule") { addRule() }
+                .disabled(conditionKind == 1 && attrName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("addRuleButton")
+        }
+    }
+
+    private func describe(_ rule: ConditionalStyleRule) -> String {
+        switch rule.condition {
+        case .hasIcon(let iconID):
+            return "icon \(iconID) → \(rule.styleName)"
+        case .attributeEquals(let name, let value):
+            return "\(name)=\(value) → \(rule.styleName)"
+        }
+    }
+
+    private func addRule() {
+        let condition: ConditionalStyleRule.Condition
+        if conditionKind == 0 {
+            condition = .hasIcon(selectedIcon)
+        } else {
+            condition = .attributeEquals(
+                name: attrName.trimmingCharacters(in: .whitespaces),
+                value: attrValue
+            )
+        }
+        session.apply(SetStyleRulesCommand(rules: rules + [
+            ConditionalStyleRule(condition: condition, styleName: selectedStyle)
+        ]))
+        attrName = ""
+        attrValue = ""
+    }
+
+    private func remove(_ rule: ConditionalStyleRule) {
+        session.apply(SetStyleRulesCommand(rules: rules.filter { $0.id != rule.id }))
     }
 }
 
