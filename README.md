@@ -109,7 +109,8 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Named styles** (`topic`, `important`, `note`) via style sheet + local style overrides
 - **Filters**: text / `name=value` attribute filter; **Hide** (path-to-root) or **Highlight**
 - **Bookmarks** sidebar + palette actions; jump selects and unfolds ancestors
-- HTML schema **1** additive: `node-attrs`, `attribute-registry`, `bookmarks`, `data-style-name`, filter attrs on `<article>`
+- **Conditional styles**: map-level rules `hasIcon(x)` / `attr=value` → apply named style, layered after the named style (local fields still win)
+- HTML schema **1** additive: `node-attrs`, `attribute-registry`, `bookmarks`, `style-rules`, `data-style-name`, filter attrs on `<article>`
 
 ### How to use attributes
 
@@ -132,6 +133,12 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 
 1. Inspector **Named Style** picker, or palette **Apply Style: …**.
 2. Local Style section still overrides non-default fields (font size, colors, fill).
+
+### How to use conditional styles
+
+1. Inspector **Style Rules** (map-level, always visible at the bottom).
+2. Pick **Has Icon** or **Attribute** (`name` + `value`), choose a named style, **Add Rule**.
+3. Matching nodes layer that style over their named style automatically; local style fields still win.
 
 ### Multi-window check
 
@@ -210,7 +217,7 @@ In `Apps/SwiftMindMac/project.yml`, set `DEVELOPMENT_TEAM` when enabling signed 
 
 Not in M0–M4 — planned for later (rules / scripts / clients):
 
-- Conditional styles, L2 declarative rules, L3 sandboxed scripts
+- L2 declarative rules, L3 sandboxed scripts
 - Freeplane `.mm` import
 - iPad/iPhone clients
 - In-browser editing (native app remains the editor)

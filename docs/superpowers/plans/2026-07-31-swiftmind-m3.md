@@ -114,14 +114,14 @@ Apps/SwiftMindMac/
 
 ### Task 10: Conditional styles (basic)
 
-- [ ] Rules: `if hasIcon(x) apply styleName` or `if attr status==done apply style` — **deferred** (post-M3 polish)
-- [ ] Applied in `StyleResolver` after named style
-- [ ] HTML encode rules
-- [ ] Simple UI: list rules in inspector/settings
+- [x] Rules: `if hasIcon(x) apply styleName` or `if attr status==done apply style` — shipped post-M4 (2026-08)
+- [x] Applied in `StyleResolver` after named style
+- [x] HTML encode rules
+- [x] Simple UI: list rules in inspector/settings
 
 ### Task 11: Performance baseline
 
-- [ ] Snapshot culling optional if > N nodes (viewport) — only if needed
+- [x] Snapshot culling optional if > N nodes (viewport) — **not needed**: measured 2041-node layout at ~8ms (`PerformanceBaselineTests`); revisit only if real maps get slow
 - [x] Avoid full document rewrite on selection (already done)
 
 ### Task 12: Verify + docs

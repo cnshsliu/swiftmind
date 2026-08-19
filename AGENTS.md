@@ -10,7 +10,7 @@ The architecture (from `docs/superpowers/specs/2026-07-24-swiftmind-design.md`):
 
 > UI-free mind-map core (Swift Package) + native macOS shell; HTML is a codec; the canvas consumes layout snapshots and never owns business truth.
 
-Feature state: milestones M0–M4 are implemented — outline + canvas views, auto layout with pin/free positions, fold, drag reparent, Markdown notes, URL/node links, icons, search (⌘F), command palette (⌘K), node attributes with a map-level registry, named styles, filters (hide/highlight), bookmarks, multi-window support, and L1 formulas with L0 aggregates (sum/count/progress) whose computed values are derived data (memoized by `FormulaEngine`, never stored). See `README.md` for the full feature list and keyboard shortcuts.
+Feature state: milestones M0–M4 are implemented — outline + canvas views, auto layout with pin/free positions, fold, drag reparent, Markdown notes, URL/node links, icons, search (⌘F), command palette (⌘K), node attributes with a map-level registry, named styles, conditional style rules, filters (hide/highlight), bookmarks, multi-window support, and L1 formulas with L0 aggregates (sum/count/progress) whose computed values are derived data (memoized by `FormulaEngine`, never stored). See `README.md` for the full feature list and keyboard shortcuts.
 
 ## Repository layout
 
@@ -24,10 +24,10 @@ Sources/SwiftMindCore/         # UI-free core library (the "brain")
   HTML/                        #   HTMLCodec (encode/decode), HTMLSkin (read-only browser CSS)
   Search/                      #   MapSearch (title/note substring matching)
   Filter/                      #   MapFilter (text / attr=value, hide vs highlight)
-  Style/                       #   StyleSheet (named styles: topic, important, note)
+  Style/                       #   StyleSheet (named styles: topic, important, note) + ConditionalStyleRule
   Formula/                     #   L1 formula DSL: FormulaLexer, FormulaParser, FormulaAST,
                                #   FormulaEvaluator, FormulaValue, FormulaEngine (memoized)
-Tests/SwiftMindCoreTests/      # XCTest unit tests (~128) + Fixtures/minimal.swiftmind.html golden file
+Tests/SwiftMindCoreTests/      # XCTest unit tests (~141) + Fixtures/minimal.swiftmind.html golden file
 Apps/SwiftMindMac/             # The macOS app
   project.yml                  #   XcodeGen spec — regenerate project with `xcodegen generate`
   SwiftMindMac.xcodeproj/      #   Generated (gitignored pattern `*.xcodeproj/`); do not edit by hand
