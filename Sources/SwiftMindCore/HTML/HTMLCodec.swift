@@ -40,6 +40,20 @@ public enum HTMLCodec {
             }
             out += "</section>\n"
         }
+        if !map.styleSheet.rules.isEmpty {
+            out += "<section class=\"style-rules\" hidden=\"hidden\">\n"
+            for rule in map.styleSheet.rules {
+                out += "  <rule data-id=\"\(escapeAttribute(rule.id))\" data-style=\"\(escapeAttribute(rule.styleName))\""
+                switch rule.condition {
+                case .hasIcon(let iconID):
+                    out += " data-condition-kind=\"icon\" data-query=\"\(escapeAttribute(iconID))\""
+                case .attributeEquals(let name, let value):
+                    out += " data-condition-kind=\"attr\" data-name=\"\(escapeAttribute(name))\" data-query=\"\(escapeAttribute(value))\""
+                }
+                out += "/>\n"
+            }
+            out += "</section>\n"
+        }
         out += "</article>\n"
         out += "</body>\n"
         out += "</html>\n"
@@ -96,6 +110,7 @@ public enum HTMLCodec {
             activeFilter: delegate.activeFilter,
             bookmarks: delegate.bookmarks
         )
+        map.styleSheet.rules = delegate.styleRules
         // Ensure registry includes any attr names found on nodes.
         Self.collectAttributeNames(from: root).forEach { map.attributeRegistry.ensureRegistered($0) }
         return map
@@ -285,6 +300,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     var attributeRegistry = AttributeRegistry()
     var activeFilter: MapFilter?
     var bookmarks: [Bookmark] = []
+    var styleRules: [ConditionalStyleRule] = []
 
     private var nodeStack: [Node] = []
     private var capturingTitle = false
@@ -296,6 +312,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var inAttrsList = false
     private var inAttributeRegistry = false
     private var inBookmarksSection = false
+    private var inStyleRulesSection = false
     private var titleBuffer = ""
     private var nodeTitleBuffer = ""
     private var noteBuffer = ""
@@ -363,6 +380,8 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 inAttributeRegistry = true
             } else if classes.contains("bookmarks") {
                 inBookmarksSection = true
+            } else if classes.contains("style-rules") {
+                inStyleRulesSection = true
             }
 
         case "attr":
@@ -379,6 +398,28 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
             let label = attributeDict["data-label"] ?? ""
             bookmarks.append(
                 Bookmark(id: id, nodeID: NodeID(rawValue: nodeRef), label: label)
+            )
+
+        case "rule":
+            guard foundSwiftMindArticle, inStyleRulesSection else { return }
+            guard let styleName = attributeDict["data-style"], !styleName.isEmpty else { return }
+            let query = attributeDict["data-query"] ?? ""
+            let condition: ConditionalStyleRule.Condition
+            switch attributeDict["data-condition-kind"] ?? "icon" {
+            case "attr":
+                let name = attributeDict["data-name"] ?? ""
+                guard !name.isEmpty else { return }
+                condition = .attributeEquals(name: name, value: query)
+            default:
+                guard !query.isEmpty else { return }
+                condition = .hasIcon(query)
+            }
+            styleRules.append(
+                ConditionalStyleRule(
+                    id: attributeDict["data-id"] ?? UUID().uuidString,
+                    condition: condition,
+                    styleName: styleName
+                )
             )
 
         case "ul":
@@ -562,6 +603,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
         case "section":
             inAttributeRegistry = false
             inBookmarksSection = false
+            inStyleRulesSection = false
 
         case "ul":
             if inLinksList {

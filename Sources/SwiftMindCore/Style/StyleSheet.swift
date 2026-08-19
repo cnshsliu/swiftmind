@@ -4,9 +4,12 @@ import Foundation
 public struct StyleSheet: Equatable, Sendable, Codable {
     /// name → style template
     public var styles: [String: NodeStyle]
+    /// Conditional rules, evaluated in order after the node's named style.
+    public var rules: [ConditionalStyleRule]
 
-    public init(styles: [String: NodeStyle] = [:]) {
+    public init(styles: [String: NodeStyle] = [:], rules: [ConditionalStyleRule] = []) {
         self.styles = styles
+        self.rules = rules
     }
 
     public static let defaultSheet: StyleSheet = {
@@ -46,11 +49,17 @@ public struct StyleSheet: Equatable, Sendable, Codable {
 
 /// Merges named style + local overrides (local non-default fields win simply by using local as base if no name).
 public enum StyleResolver {
-    /// Effective style for display: named template merged with local node.style.
-    /// Local style wins on a field-by-field basis when it differs from `.default`.
+    /// Effective style for display: named template + matching conditional rules
+    /// (in order), merged with local node.style. Local style wins on a
+    /// field-by-field basis when it differs from `.default`.
     public static func resolve(node: Node, sheet: StyleSheet) -> NodeStyle {
-        let named = sheet.style(named: node.styleName) ?? NodeStyle.default
-        return merge(base: named, overlay: node.style)
+        var base = sheet.style(named: node.styleName) ?? NodeStyle.default
+        for rule in sheet.rules where rule.matches(node) {
+            if let ruleStyle = sheet.style(named: rule.styleName) {
+                base = merge(base: base, overlay: ruleStyle)
+            }
+        }
+        return merge(base: base, overlay: node.style)
     }
 
     private static func merge(base: NodeStyle, overlay: NodeStyle) -> NodeStyle {
