@@ -137,6 +137,34 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 
 Open two maps (or the same file in two windows if the system allows). Edits and **Undo** in one window should not rewrite the other session’s history.
 
+## M4 features (computation)
+
+- **L1 formulas** on nodes: a safe, restricted expression DSL — no arbitrary code, ever
+- **L0 aggregates** as one-click formulas: **Sum of attribute**, **Count children**, **Progress %**
+- Results are **derived data**: they never modify the map, recompute live as children/attributes change, and undo cleanly
+- Errors are values: a broken formula shows `#ERR: reason` inline — nothing crashes, nothing goes stale
+- HTML schema stays **1** (additive): `data-formula="…"` on `<li>` stores the source string only; the browser skin never executes it
+
+### Formula DSL reference
+
+```text
+attr("cost")                          node attribute ("42" → number, "true" → bool, else string)
+sum|avg|min|max(children, attr: "cost")   roll up over direct children (missing attr skipped)
+count(children)                       number of direct children
+progress()                            checked descendants / total descendants (check icon = done)
+1 + 2 * 3   ( )   -x   %              arithmetic with usual precedence
+== != < <= > >=                       comparison (numeric or string)
+and  or  not                          boolean
+if(cond, then, else)                  lazy — only the taken branch evaluates
+```
+
+### How to use formulas
+
+1. Select a node → inspector **Formula**.
+2. Type a formula (e.g. `sum(children, attr: "cost")`) or use **Insert Aggregate** for one-click Sum/Count/Progress.
+3. The live result shows below the field; badges (`= 30`, `75%`) appear on the canvas node and in the outline.
+4. **Clear Formula** removes it; everything is undoable.
+
 ## Browser open (verify skin)
 
 1. Create or open a map in SwiftMindMac and save (document encode uses `includeSkin: true`).
@@ -180,9 +208,9 @@ In `Apps/SwiftMindMac/project.yml`, set `DEVELOPMENT_TEAM` when enabling signed 
 
 ## Out of scope (later milestones)
 
-Not in M0–M2 — planned for later (power layer / clients):
+Not in M0–M4 — planned for later (rules / scripts / clients):
 
-- Style sheets, attributes registry, filters, formulas, scripts
+- Conditional styles, L2 declarative rules, L3 sandboxed scripts
 - Freeplane `.mm` import
 - iPad/iPhone clients
 - In-browser editing (native app remains the editor)

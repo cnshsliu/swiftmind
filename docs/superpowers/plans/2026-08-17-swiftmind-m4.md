@@ -110,16 +110,16 @@ Tests/SwiftMindCoreTests/
 
 ### Task 6: Mac UI — L0 aggregate picker + badges
 
-- [ ] Aggregate picker (menu/button in inspector): Sum of attr / Count children / Progress % → inserts the corresponding L1 formula
-- [ ] Canvas + outline badge with formatted result (number formatting, e.g. `Σ 1,240` / `75%`)
-- [ ] XCUITest smoke: set formula via inspector, badge appears, undo removes it
+- [x] Aggregate picker (menu/button in inspector): Sum of attr / Count children / Progress % → inserts the corresponding L1 formula
+- [x] Canvas + outline badge with formatted result (number formatting, e.g. `Σ 1,240` / `75%`)
+- [x] XCUITest smoke: set formula via inspector, badge appears, undo removes it
 
 ### Task 7: Verify + docs
 
-- [ ] `swift test` green; `./scripts/verify.sh` green
-- [ ] README M4 section: DSL reference + progress() convention
-- [ ] AGENTS.md layout/test-count updates if structure changed
-- [ ] Tag `m4-complete` when exit criteria met
+- [x] `swift test` green; `./scripts/verify.sh` green
+- [x] README M4 section: DSL reference + progress() convention
+- [x] AGENTS.md layout/test-count updates if structure changed
+- [x] Tag `m4-complete` when exit criteria met
 
 **M4 exit:** In a real project map, the user puts `=sum(children, attr: "cost")` on a parent, sees a live total badge that updates as children are edited/added/undone, survives save → quit → relaunch, and a broken formula shows a clear `#ERR` instead of corrupting anything.
 

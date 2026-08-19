@@ -10,7 +10,7 @@ The architecture (from `docs/superpowers/specs/2026-07-24-swiftmind-design.md`):
 
 > UI-free mind-map core (Swift Package) + native macOS shell; HTML is a codec; the canvas consumes layout snapshots and never owns business truth.
 
-Feature state: milestones M0–M3 are implemented — outline + canvas views, auto layout with pin/free positions, fold, drag reparent, Markdown notes, URL/node links, icons, search (⌘F), command palette (⌘K), node attributes with a map-level registry, named styles, filters (hide/highlight), bookmarks, and multi-window support. See `README.md` for the full feature list and keyboard shortcuts.
+Feature state: milestones M0–M4 are implemented — outline + canvas views, auto layout with pin/free positions, fold, drag reparent, Markdown notes, URL/node links, icons, search (⌘F), command palette (⌘K), node attributes with a map-level registry, named styles, filters (hide/highlight), bookmarks, multi-window support, and L1 formulas with L0 aggregates (sum/count/progress) whose computed values are derived data (memoized by `FormulaEngine`, never stored). See `README.md` for the full feature list and keyboard shortcuts.
 
 ## Repository layout
 
@@ -25,7 +25,9 @@ Sources/SwiftMindCore/         # UI-free core library (the "brain")
   Search/                      #   MapSearch (title/note substring matching)
   Filter/                      #   MapFilter (text / attr=value, hide vs highlight)
   Style/                       #   StyleSheet (named styles: topic, important, note)
-Tests/SwiftMindCoreTests/      # XCTest unit tests (~54) + Fixtures/minimal.swiftmind.html golden file
+  Formula/                     #   L1 formula DSL: FormulaLexer, FormulaParser, FormulaAST,
+                               #   FormulaEvaluator, FormulaValue, FormulaEngine (memoized)
+Tests/SwiftMindCoreTests/      # XCTest unit tests (~128) + Fixtures/minimal.swiftmind.html golden file
 Apps/SwiftMindMac/             # The macOS app
   project.yml                  #   XcodeGen spec — regenerate project with `xcodegen generate`
   SwiftMindMac.xcodeproj/      #   Generated (gitignored pattern `*.xcodeproj/`); do not edit by hand
@@ -71,6 +73,7 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 - **All model mutations go through commands.** Every edit is a `MapCommand` (`execute`/`undo`) dispatched via `MapStore.dispatch(_:)`, which drives the `CommandBus` undo/redo stacks. Never mutate `MindMap` directly from views. Add a new file per command under `Sources/SwiftMindCore/Commands/`.
 - **`MapStore` revision contract:** `contentRevision` bumps on any content change (invalidates the cached geometry snapshot); `selectionRevision` bumps on selection-only changes (geometry cache stays valid). Views consume `snapshot()` — a `MapSnapshot` with selection applied — and never own business truth.
 - **HTML is the persistence format.** `HTMLCodec.encode(_:includeSkin:)` / `decode(_:)` are the only read/write paths; the app saves with `includeSkin: true` so the file renders read-only in browsers. The schema is versioned (`schemaVersion`, currently 1, additive). Round-trip fidelity is enforced by `HTMLCodecTests` against the golden fixture `Tests/SwiftMindCoreTests/Fixtures/minimal.swiftmind.html`.
+- **Formulas are derived data.** `Node.formula` (source string) is the only persisted piece — `data-formula` on `<li>`, schema 1 additive. Computed values come from `FormulaEngine` inside `MapStore`, memoized against the node's subtree value; every DSL feature reads only that subtree, so cache validation is plain equality (sibling edits never invalidate). Never store computed values in the model, never evaluate formula text as real code, and keep `snapshot()` geometry-only — views merge formula results at render time.
 - **Multi-window:** each document window owns its own `DocumentSession` and undo stack — do not introduce shared mutable state between sessions.
 - **Xcode gotcha:** `debugDocumentVersioning` must be `false` in the scheme. When true, Xcode injects `-NSDocumentRevisionsDebugMode YES` and `DocumentGroup` opens "YES" as a file path. `scripts/patch-xcode-scheme.sh` fixes this after every `xcodegen generate` (already wired into `rerun-mac.sh`); the app also defensively sets the default to false in `SwiftMindMacApp.init`.
 
@@ -85,7 +88,7 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 ## Testing instructions
 
 - **Unit tests:** XCTest via SPM in `Tests/SwiftMindCoreTests/` — model, commands, layout engine, HTML codec, search, pins, plus `DailyDriverE2ETests` (in-process end-to-end through the store). Run with `swift test`. Add tests next to the existing ones; reuse the `Fixtures/` golden file for codec tests.
-- **UI tests:** XCUITest in `Apps/SwiftMindMac/SwiftMindMacUITests/`; run with `./scripts/test-ui.sh`. Prefer accessibility identifiers and keyboard shortcuts over coordinates. Existing IDs include `mapCanvas`, `mapTitleField`, `viewModePicker`, `statusStrip`, `nodeCountLabel`, `selectedNodeLabel`, `toolbarAddChild`, `toolbarAddSibling`, `outlineList`. The app detects `-uitesting` launch arg and disables state restoration.
+- **UI tests:** XCUITest in `Apps/SwiftMindMac/SwiftMindMacUITests/`; run with `./scripts/test-ui.sh`. Prefer accessibility identifiers and keyboard shortcuts over coordinates. Existing IDs include `mapCanvas`, `mapTitleField`, `viewModePicker`, `statusStrip`, `nodeCountLabel`, `selectedNodeLabel`, `toolbarAddChild`, `toolbarAddSibling`, `outlineList`, `formulaField`, `formulaResult`, `clearFormulaButton`, `aggregatePicker`, `formulaBadge`. The app detects `-uitesting` launch arg and disables state restoration.
 - Verification before completion is not optional: run `swift test` for core changes and `./scripts/verify.sh` for anything touching the app.
 
 ## Security considerations
