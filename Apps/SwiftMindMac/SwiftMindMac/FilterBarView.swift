@@ -8,6 +8,9 @@ struct FilterBarView: View {
     @State private var queryDraft: String = ""
     @State private var mode: FilterMode = .hide
     @FocusState private var queryFocused: Bool
+    @State private var showSetAttributeSheet = false
+    @State private var bulkAttrName = ""
+    @State private var bulkAttrValue = ""
 
     private var activeFilter: MapFilter? {
         session.store.map.activeFilter
@@ -73,7 +76,70 @@ struct FilterBarView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("filterStatusLabel")
+
+                // L2: apply a declarative action to every match, one undo step.
+                Menu("Apply to Matches…") {
+                    Menu("Add Icon") {
+                        ForEach(NodeIcon.catalog) { icon in
+                            Button(icon.id) { applyBulk(.addIcon(icon.id)) }
+                        }
+                    }
+                    Menu("Remove Icon") {
+                        ForEach(NodeIcon.catalog) { icon in
+                            Button(icon.id) { applyBulk(.removeIcon(icon.id)) }
+                        }
+                    }
+                    Menu("Apply Style") {
+                        ForEach(styleKeys, id: \.self) { key in
+                            Button(key) { applyBulk(.setStyleName(key)) }
+                        }
+                    }
+                    Button("Clear Style") { applyBulk(.setStyleName(nil)) }
+                    Divider()
+                    Button("Set Attribute…") {
+                        bulkAttrName = ""
+                        bulkAttrValue = ""
+                        showSetAttributeSheet = true
+                    }
+                    Menu("Remove Attribute") {
+                        let names = session.store.map.attributeRegistry.definitions.map(\.name)
+                        if names.isEmpty {
+                            Text("No attributes in registry")
+                        } else {
+                            ForEach(names, id: \.self) { name in
+                                Button(name) { applyBulk(.removeAttribute(name)) }
+                            }
+                        }
+                    }
+                }
+                .font(.caption)
+                .accessibilityIdentifier("bulkApplyMenu")
             }
+        }
+        .sheet(isPresented: $showSetAttributeSheet) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Set Attribute on Matches")
+                    .font(.headline)
+                TextField("Name", text: $bulkAttrName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("bulkAttrNameField")
+                TextField("Value", text: $bulkAttrValue)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("bulkAttrValueField")
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showSetAttributeSheet = false }
+                    Button("Apply") {
+                        showSetAttributeSheet = false
+                        applyBulk(.setAttribute(name: bulkAttrName, value: bulkAttrValue))
+                    }
+                    .disabled(bulkAttrName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("bulkAttrApplyButton")
+                }
+            }
+            .padding(20)
+            .frame(width: 300)
         }
         .onAppear {
             syncFromModel()
@@ -142,5 +208,18 @@ struct FilterBarView: View {
     private func clearFilter() {
         queryDraft = ""
         session.applyQuiet(SetFilterCommand(filter: nil))
+    }
+
+    // MARK: - Bulk actions (L2)
+
+    private var styleKeys: [String] {
+        session.store.map.styleSheet.styles.keys.sorted()
+    }
+
+    private func applyBulk(_ action: BulkAction) {
+        guard let filter = activeFilter else { return }
+        let command = ApplyBulkActionCommand(rule: filter.rule, action: action)
+        session.apply(command)
+        session.showToast("Applied to \(command.affectedCount) node(s)", kind: .info)
     }
 }
