@@ -56,6 +56,7 @@ struct MapCanvasView: View {
         let _ = session.contentRevision
         let _ = session.selectionRevision
         let snapshot = session.store.snapshot()
+        let formulaResults = session.store.formulaResults()
         let hoverID = hoveredNodeID(in: snapshot)
 
         GeometryReader { geo in
@@ -63,7 +64,7 @@ struct MapCanvasView: View {
                 // Drawing only — Canvas path fills are not always hit-testable; text is.
                 // Keep pointer events on a full-size clear layer so hover/tap use the node rect.
                 Canvas { context, size in
-                    draw(snapshot: snapshot, hoverID: hoverID, context: &context, size: size)
+                    draw(snapshot: snapshot, formulaResults: formulaResults, hoverID: hoverID, context: &context, size: size)
                 }
                 .allowsHitTesting(false)
 
@@ -272,6 +273,7 @@ struct MapCanvasView: View {
 
     private func draw(
         snapshot: MapSnapshot,
+        formulaResults: [NodeID: FormulaValue],
         hoverID: NodeID?,
         context: inout GraphicsContext,
         size: CGSize
@@ -449,6 +451,21 @@ struct MapCanvasView: View {
                     foldBadge,
                     at: CGPoint(x: rect.maxX - 4, y: rect.maxY - 4),
                     anchor: .bottomTrailing
+                )
+            }
+
+            // Formula result badge — bottom-left of frame ("= 30", "75%", "#ERR").
+            if let value = formulaResults[node.id] {
+                let formula = session.store.map.node(id: node.id)?.formula
+                let badgeText = FormulaBadgeFormatter.text(for: value, formula: formula)
+                let isError = FormulaBadgeFormatter.isError(value)
+                let badge = Text("= \(badgeText)")
+                    .font(.system(size: Self.badgeFontSize, design: .monospaced))
+                    .foregroundColor(isError ? Color.red : Theme.badgeMuted)
+                context.draw(
+                    badge,
+                    at: CGPoint(x: rect.minX + 4, y: rect.maxY - 4),
+                    anchor: .bottomLeading
                 )
             }
         }

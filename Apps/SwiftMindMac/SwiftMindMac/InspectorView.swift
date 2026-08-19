@@ -432,6 +432,25 @@ struct FormulaInspectorSection: View {
                 }
                 .accessibilityIdentifier("formulaField")
 
+            // L0: one-click aggregates write the corresponding L1 formula.
+            Menu("Insert Aggregate") {
+                let attrNames = session.store.map.attributeRegistry.definitions.map(\.name)
+                Menu("Sum of Attribute") {
+                    if attrNames.isEmpty {
+                        Text("No attributes in registry")
+                    } else {
+                        ForEach(attrNames, id: \.self) { name in
+                            Button(name) { applyAggregate("sum(children, attr: \"\(name)\")") }
+                        }
+                    }
+                }
+                .disabled(attrNames.isEmpty)
+                Button("Count Children") { applyAggregate("count(children)") }
+                Button("Progress %") { applyAggregate("progress()") }
+            }
+            .font(.caption)
+            .accessibilityIdentifier("aggregatePicker")
+
             if let result {
                 HStack {
                     Text("Result")
@@ -473,6 +492,12 @@ struct FormulaInspectorSection: View {
         let next: String? = trimmed.isEmpty ? nil : trimmed
         guard next != node.formula else { return }
         session.applyQuiet(SetFormulaCommand(nodeID: node.id, formula: next))
+    }
+
+    /// L0 picker action: replaces the formula and commits immediately.
+    private func applyAggregate(_ formula: String) {
+        draft = formula
+        session.apply(SetFormulaCommand(nodeID: node.id, formula: formula))
     }
 
     private func isError(_ value: FormulaValue) -> Bool {

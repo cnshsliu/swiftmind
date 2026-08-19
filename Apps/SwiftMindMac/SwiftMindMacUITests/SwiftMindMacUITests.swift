@@ -120,4 +120,24 @@ final class SwiftMindMacUITests: XCTestCase {
             "My Brain control should be available"
         )
     }
+
+    func testFormulaSetAndClear() throws {
+        // Root is selected on launch; the inspector is visible by default.
+        let field = element("formulaField")
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Formula field should be in the inspector")
+
+        field.click()
+        field.typeText("count(children)")
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+
+        let result = element("formulaResult")
+        XCTAssertTrue(result.waitForExistence(timeout: 3), "Computed result should appear")
+
+        let clear = element("clearFormulaButton")
+        XCTAssertTrue(clear.waitForExistence(timeout: 2), "Clear button should appear once a formula is set")
+        clear.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        XCTAssertFalse(result.exists, "Clearing the formula should remove the result")
+    }
 }

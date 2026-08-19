@@ -77,6 +77,17 @@ struct OutlineRow: View {
                         .foregroundStyle(.tertiary)
                 }
 
+                if let value = session.store.formulaValue(for: node.id) {
+                    let isError = FormulaBadgeFormatter.isError(value)
+                    Text("= \(FormulaBadgeFormatter.text(for: value, formula: node.formula))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(isError ? Color.red : Color.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(isError ? Color.red.opacity(0.12) : Color.secondary.opacity(0.12)))
+                        .accessibilityIdentifier("formulaBadge")
+                }
+
                 if !node.children.isEmpty {
                     Text("\(node.children.count)")
                         .font(.caption2.monospacedDigit())
