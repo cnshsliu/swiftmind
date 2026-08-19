@@ -10,7 +10,7 @@ The architecture (from `docs/superpowers/specs/2026-07-24-swiftmind-design.md`):
 
 > UI-free mind-map core (Swift Package) + native macOS shell; HTML is a codec; the canvas consumes layout snapshots and never owns business truth.
 
-Feature state: milestones M0–M4 are implemented — outline + canvas views, auto layout with pin/free positions, fold, drag reparent, Markdown notes, URL/node links, icons, search (⌘F), command palette (⌘K), node attributes with a map-level registry, named styles, conditional style rules, filters (hide/highlight), bookmarks, multi-window support, and L1 formulas with L0 aggregates (sum/count/progress) whose computed values are derived data (memoized by `FormulaEngine`, never stored). See `README.md` for the full feature list and keyboard shortcuts.
+Feature state: milestones M0–M4 are implemented, plus M5a/M5b — outline + canvas views, auto layout with pin/free positions, fold, drag reparent, Markdown notes, URL/node links, icons, search (⌘F), command palette (⌘K), node attributes with a map-level registry, named styles, conditional style rules, filters (hide/highlight), L2 bulk actions on filter matches, bookmarks, multi-window support, L1 formulas with L0 aggregates (sum/count/progress) whose computed values are derived data (memoized by `FormulaEngine`, never stored), L3 sandboxed JavaScript via the palette (intent-based, one undo step), and best-effort Freeplane `.mm` import. See `README.md` for the full feature list and keyboard shortcuts.
 
 ## Repository layout
 
@@ -27,7 +27,11 @@ Sources/SwiftMindCore/         # UI-free core library (the "brain")
   Style/                       #   StyleSheet (named styles: topic, important, note) + ConditionalStyleRule
   Formula/                     #   L1 formula DSL: FormulaLexer, FormulaParser, FormulaAST,
                                #   FormulaEvaluator, FormulaValue, FormulaEngine (memoized)
-Tests/SwiftMindCoreTests/      # XCTest unit tests (~141) + Fixtures/minimal.swiftmind.html golden file
+  Automation/                  #   BulkAction (L2 declarative bulk edits)
+  Scripting/                   #   L3: ScriptRuntime protocol, MapScriptAPI (intent recording),
+                               #   JavaScriptCoreRuntime (sandboxed JS)
+  Import/                      #   MMImport (best-effort Freeplane .mm → MindMap, one-way)
+Tests/SwiftMindCoreTests/      # XCTest unit tests (~168) + Fixtures/ golden files
 Apps/SwiftMindMac/             # The macOS app
   project.yml                  #   XcodeGen spec — regenerate project with `xcodegen generate`
   SwiftMindMac.xcodeproj/      #   Generated (gitignored pattern `*.xcodeproj/`); do not edit by hand
@@ -74,6 +78,7 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 - **`MapStore` revision contract:** `contentRevision` bumps on any content change (invalidates the cached geometry snapshot); `selectionRevision` bumps on selection-only changes (geometry cache stays valid). Views consume `snapshot()` — a `MapSnapshot` with selection applied — and never own business truth.
 - **HTML is the persistence format.** `HTMLCodec.encode(_:includeSkin:)` / `decode(_:)` are the only read/write paths; the app saves with `includeSkin: true` so the file renders read-only in browsers. The schema is versioned (`schemaVersion`, currently 1, additive). Round-trip fidelity is enforced by `HTMLCodecTests` against the golden fixture `Tests/SwiftMindCoreTests/Fixtures/minimal.swiftmind.html`.
 - **Formulas are derived data.** `Node.formula` (source string) is the only persisted piece — `data-formula` on `<li>`, schema 1 additive. Computed values come from `FormulaEngine` inside `MapStore`, memoized against the node's subtree value; every DSL feature reads only that subtree, so cache validation is plain equality (sibling edits never invalidate). Never store computed values in the model, never evaluate formula text as real code, and keep `snapshot()` geometry-only — views merge formula results at render time.
+- **Scripts never mutate the map directly.** L3 scripts (JavaScriptCore, behind the `ScriptRuntime` protocol) read value snapshots and record `ScriptIntent`s; `ApplyScriptIntentsCommand` applies a successful run as one undoable batch (errors/timeouts apply nothing). Do not add bridges beyond the `mindmap` API object — the sandbox guarantee is "no network/file/process access", asserted by tests. Scripts live app-side (user-picked `.js` files), never embedded in the HTML.
 - **Multi-window:** each document window owns its own `DocumentSession` and undo stack — do not introduce shared mutable state between sessions.
 - **Xcode gotcha:** `debugDocumentVersioning` must be `false` in the scheme. When true, Xcode injects `-NSDocumentRevisionsDebugMode YES` and `DocumentGroup` opens "YES" as a file path. `scripts/patch-xcode-scheme.sh` fixes this after every `xcodegen generate` (already wired into `rerun-mac.sh`); the app also defensively sets the default to false in `SwiftMindMacApp.init`.
 

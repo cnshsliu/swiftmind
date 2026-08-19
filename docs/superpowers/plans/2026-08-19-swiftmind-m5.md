@@ -71,12 +71,12 @@ mindmap.log(message)                  // shown in result toast/console
 
 ### Tasks (M5a)
 
-- [ ] **T1 L2 core:** `BulkAction` + `ApplyBulkActionCommand` (filter match → snapshot → apply → single undo); unit tests
-- [ ] **T2 L2 UI:** "Apply to N matches…" menu on the active filter bar; palette entry
-- [ ] **T3 ScriptRuntime protocol + intent model:** `ScriptIntent` enum, `ScriptResult` (intents, logs, error), `ApplyScriptIntentsCommand` with validation (unknown id → skip + report); unit tests with a fake runtime
-- [ ] **T4 JavaScriptCore runtime:** `JSContext` bridge, API object, intent recording, error capture, 2s timeout; unit tests (reads, intents, throw-applies-nothing, timeout, no-`require`/`load` proof)
-- [ ] **T5 Mac runner + palette:** open panel → run → apply intents → toast "Script applied 12 changes" / error; XCUITest smoke
-- [ ] **T6 Verify + docs:** README scripting section + JS API reference, AGENTS.md, sample script under `docs/examples/`
+- [x] **T1 L2 core:** `BulkAction` + `ApplyBulkActionCommand` (filter match → snapshot → apply → single undo); unit tests
+- [x] **T2 L2 UI:** "Apply to N matches…" menu on the active filter bar; palette entry
+- [x] **T3 ScriptRuntime protocol + intent model:** `ScriptIntent` enum, `ScriptResult` (intents, logs, error), `ApplyScriptIntentsCommand` with validation (unknown id → skip + report); unit tests with a fake runtime
+- [x] **T4 JavaScriptCore runtime:** `JSContext` bridge, API object, intent recording, error capture, 2s timeout; unit tests (reads, intents, throw-applies-nothing, timeout, no-`require`/`load` proof)
+- [x] **T5 Mac runner + palette:** open panel → run → apply intents → toast "Script applied 12 changes" / error; XCUITest smoke
+- [x] **T6 Verify + docs:** README scripting section + JS API reference, AGENTS.md, sample script under `docs/examples/`
 
 **M5a exit:** User writes `mindmap.find("todo").forEach(id => mindmap.addIcon(id, "check"))` in a `.js` file, runs it from the palette, sees icons appear as **one** undoable step; a script that throws changes nothing; a runaway script times out with an error toast.
 
@@ -84,9 +84,9 @@ mindmap.log(message)                  // shown in result toast/console
 
 ## M5b — Freeplane `.mm` import (best-effort)
 
-- [ ] `MMImport` in core: parse Freeplane XML (`<node TEXT=...>` nesting, NOTE, rich content stripped to text)
-- [ ] File → Open picks `.mm` → new document via import (not a codec — one-way)
-- [ ] Tests with a small `.mm` fixture; documented best-effort caveats
+- [x] `MMImport` in core: parse Freeplane XML (`<node TEXT=...>` nesting, NOTE, rich content stripped to text)
+- [x] File → Open picks `.mm` → new document via import (not a codec — one-way)
+- [x] Tests with a small `.mm` fixture; documented best-effort caveats
 
 ## M5c — Mobile shells (iPad/iPhone) — needs product decisions first
 

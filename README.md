@@ -172,6 +172,48 @@ if(cond, then, else)                  lazy — only the taken branch evaluates
 3. The live result shows below the field; badges (`= 30`, `75%`) appear on the canvas node and in the outline.
 4. **Clear Formula** removes it; everything is undoable.
 
+## M5 features (automation)
+
+- **L2 bulk actions**: apply a declarative action (icon, style, attribute) to every node matching the active filter — one undo step
+- **L3 scripts**: sandboxed **JavaScript** (JavaScriptCore) run against the current map from the command palette
+- Scripts **never mutate the map directly**: the `mindmap` API records *intents*, applied as one undoable batch only if the script finishes cleanly. Errors and 2s timeouts change nothing.
+- No network/file/process access exists inside the sandbox (no `require`, `fetch`, or `process` — tested)
+
+### How to use bulk actions (L2)
+
+1. Set a filter in the sidebar (text or `attr=value`).
+2. **Apply to Matches…** → add/remove icon, apply/clear style, set/remove attribute.
+3. Toast reports the affected count; ⌘Z undoes the whole batch.
+
+### How to run a script (L3)
+
+1. Write a `.js` file using the `mindmap` API below (see `docs/examples/check-off-todos.js`).
+2. Palette (⌘K) → **Run Script…** → pick the file.
+3. Toast reports applied changes (or the error). ⌘Z undoes everything the script did.
+
+### JS API reference (the `mindmap` global)
+
+```js
+mindmap.title()                  // map title
+mindmap.rootId()                 // root node id
+mindmap.node(id)                 // { id, text, note, attrs: {...}, icons: [...] } or null
+mindmap.children(id)             // [childId, ...]
+mindmap.find(text)               // [nodeId, ...] — title/note substring, case-insensitive
+mindmap.setText(id, text)        // ── intents: recorded, applied after success,
+mindmap.setNote(id, markdown)    //    as one undo step ──
+mindmap.setAttr(id, name, value) // value "" removes the attribute
+mindmap.addIcon(id, iconId)      // icon ids: check, flag, star, warning, idea, question, important, todo
+mindmap.removeIcon(id, iconId)
+mindmap.setStyle(id, styleName)  // "" clears; named styles: topic, important, note
+mindmap.log(message)             // surfaced in the result toast
+```
+
+### Freeplane `.mm` import (best-effort)
+
+1. **Open Map…** panel accepts `.mm` files.
+2. The map is imported (text, hierarchy, fold state, plain-text notes) and saved as a sibling `Name.swiftmind.html` — the original `.mm` is never modified.
+3. Icons, styles, links, and rich formatting are dropped by design; import is a migration path, one-way.
+
 ## Browser open (verify skin)
 
 1. Create or open a map in SwiftMindMac and save (document encode uses `includeSkin: true`).
@@ -215,10 +257,9 @@ In `Apps/SwiftMindMac/project.yml`, set `DEVELOPMENT_TEAM` when enabling signed 
 
 ## Out of scope (later milestones)
 
-Not in M0–M4 — planned for later (rules / scripts / clients):
+Not in M0–M5 — planned for later (clients / deeper automation):
 
-- L2 declarative rules, L3 sandboxed scripts
-- Freeplane `.mm` import
-- iPad/iPhone clients
+- iPad/iPhone clients (shared Core is ready; needs product decisions first)
+- Script capabilities beyond map read + intents (none exist to gate today)
 - In-browser editing (native app remains the editor)
 - Forced iCloud ubiquity container (optional; see above)
