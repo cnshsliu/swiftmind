@@ -76,9 +76,12 @@ final class LayoutEngineTests: XCTestCase {
 
         let rights = children.filter { $0.frame.midX > rootMidX }
         let lefts = children.filter { $0.frame.midX < rootMidX }
-        // Four equal leaves → 2 left + 2 right (first prefers right on tie).
+        // Four equal leaves → 2 left + 2 right (first prefers left on tie).
         XCTAssertEqual(rights.count, 2, "auto children should not all pile on the right")
         XCTAssertEqual(lefts.count, 2, "auto children should not all pile on the left")
+        // First auto child grows to the left.
+        let first = children.first { $0.text == "C0" }!
+        XCTAssertLessThan(first.frame.midX, rootMidX, "first auto child should be placed on the left")
     }
 
     /// Mode 1: deeper nodes inherit the first-level side and only grow outward.

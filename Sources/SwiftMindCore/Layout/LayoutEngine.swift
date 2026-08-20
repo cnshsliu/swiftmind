@@ -103,7 +103,7 @@ public struct LayoutEngine: Sendable {
     // MARK: - Side assignment (root children only)
 
     /// First-level only: explicit `.left`/`.right` wins; `.auto` balances by subtree weight.
-    /// On ties prefer **right** (classic mind-map first-child placement).
+    /// On ties prefer **left** (first child grows to the left).
     private func assignRootChildSides(
         _ children: [Node],
         sheet: StyleSheet,
@@ -119,8 +119,8 @@ public struct LayoutEngine: Sendable {
             if child.side == .left || child.side == .right {
                 side = child.side
             } else {
-                // Lighter side wins; prefer right when equal.
-                side = rightWeight <= leftWeight ? .right : .left
+                // Lighter side wins; prefer left when equal.
+                side = leftWeight <= rightWeight ? .left : .right
             }
             let w = subtreeHeight(child, sheet: sheet, filter: filter)
             if side == .left {

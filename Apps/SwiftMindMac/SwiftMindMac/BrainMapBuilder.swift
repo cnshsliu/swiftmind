@@ -40,7 +40,7 @@ enum BrainMapBuilder {
         var children: [Node] = []
         for (index, vaultURL) in library.vaultURLs.enumerated() {
             _ = library.startAccessing(vaultURL)
-            let side: NodeSide = index % 2 == 0 ? .right : .left
+            let side: NodeSide = index % 2 == 0 ? .left : .right
             let node = makeDirectoryNode(
                 url: vaultURL,
                 kind: .vault,
