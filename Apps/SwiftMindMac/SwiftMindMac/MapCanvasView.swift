@@ -35,6 +35,8 @@ struct MapCanvasView: View {
     @State private var hoverLocation: CGPoint?
     /// Fallback when SwiftUI focus does not deliver key events to the canvas.
     @State private var keyMonitor: Any?
+    /// Spatial navigation memory: parent → last focused child (h/l returns to it).
+    @State private var lastChildByParent: [NodeID: NodeID] = [:]
     private static let minScale: CGFloat = 0.25
     private static let maxScale: CGFloat = 3
     private static let badgeFontSize: CGFloat = 11
@@ -125,6 +127,17 @@ struct MapCanvasView: View {
                 deleteSelectionIfAllowed()
                 return .handled
             }
+            // Spatial navigation: arrows + hjkl. h/l move relative to the
+            // branch side (left branch: h = outward to children, l = parent;
+            // right branch reversed), j/k = next/previous sibling.
+            .onKeyPress(.leftArrow) { navigateKey(.left) }
+            .onKeyPress(.rightArrow) { navigateKey(.right) }
+            .onKeyPress(.downArrow) { navigateKey(.down) }
+            .onKeyPress(.upArrow) { navigateKey(.up) }
+            .onKeyPress(.init("h")) { navigateKey(.left) }
+            .onKeyPress(.init("l")) { navigateKey(.right) }
+            .onKeyPress(.init("j")) { navigateKey(.down) }
+            .onKeyPress(.init("k")) { navigateKey(.up) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
@@ -139,6 +152,11 @@ struct MapCanvasView: View {
             // After click-select, ensure canvas can receive Return/Delete.
             if editingNodeID == nil {
                 canvasFocused = true
+            }
+            // Remember which child was last focused under each parent (h/l memory).
+            if let primary = session.store.selection.primary,
+               let parent = session.store.map.parentID(of: primary) {
+                lastChildByParent[parent] = primary
             }
             // Keep active node on-screen when selection moves (e.g. ⌘T / ⇧⌘T).
             ensurePrimaryVisible(animated: !reduceMotion)
@@ -206,6 +224,81 @@ struct MapCanvasView: View {
             return
         }
         session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
+    }
+
+    // MARK: - Spatial navigation (hjkl / arrows)
+
+    private enum NavDirection { case left, right, up, down }
+
+    private func navigateKey(_ direction: NavDirection) -> KeyPress.Result {
+        guard editingNodeID == nil else { return .ignored }
+        navigate(direction)
+        return .handled
+    }
+
+    private func navigate(_ direction: NavDirection) {
+        let snapshot = session.store.snapshot()
+        guard let current = session.store.selection.primary,
+              let visual = snapshot.nodes.first(where: { $0.id == current }) else { return }
+        let map = session.store.map
+
+        let target: NodeID?
+        switch direction {
+        case .up:
+            target = SpatialNavigator.sibling(of: current, in: map, offset: -1)
+        case .down:
+            target = SpatialNavigator.sibling(of: current, in: map, offset: 1)
+        case .left, .right:
+            target = horizontalTarget(from: current, visual: visual, direction: direction, snapshot: snapshot)
+        }
+        guard let target, target != current else { return }
+        session.select(target)
+    }
+
+    private func horizontalTarget(
+        from current: NodeID,
+        visual: NodeVisual,
+        direction: NavDirection,
+        snapshot: MapSnapshot
+    ) -> NodeID? {
+        let map = session.store.map
+        if visual.depth == 0 {
+            // Root: left → left-side child, right → right-side child.
+            let wanted: NodeSide = direction == .left ? .left : .right
+            return outwardChild(of: current, preferredSide: wanted, snapshot: snapshot)
+        }
+        // Outward = away from the center on this branch's side:
+        // left branch → h is outward, l is parent; right branch reversed.
+        let outward = (visual.side == .left) == (direction == .left)
+        if outward {
+            return outwardChild(of: current, preferredSide: nil, snapshot: snapshot)
+        }
+        return map.parentID(of: current)
+    }
+
+    /// Child to move to. A folded node unfolds instead of moving (next press
+    /// navigates in). Honors the last-focused-child memory; root prefers a
+    /// child on `preferredSide` (snapshot-resolved).
+    private func outwardChild(of id: NodeID, preferredSide: NodeSide?, snapshot: MapSnapshot) -> NodeID? {
+        let map = session.store.map
+        guard let node = map.node(id: id), !node.children.isEmpty else { return nil }
+        if node.isFolded {
+            session.applyQuiet(SetFoldedCommand(nodeID: id, isFolded: false))
+            return nil
+        }
+        let remembered = lastChildByParent[id]
+        if let preferredSide {
+            let childIDs = Set(node.children.map(\.id))
+            if let remembered,
+               childIDs.contains(remembered),
+               snapshot.nodes.first(where: { $0.id == remembered })?.side == preferredSide {
+                return remembered
+            }
+            if let match = snapshot.nodes.first(where: { childIDs.contains($0.id) && $0.side == preferredSide }) {
+                return match.id
+            }
+        }
+        return SpatialNavigator.childToFocus(of: id, in: map, remembered: remembered)
     }
 
     // MARK: - Hover / visibility

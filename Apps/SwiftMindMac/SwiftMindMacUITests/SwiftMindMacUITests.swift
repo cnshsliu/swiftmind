@@ -121,6 +121,36 @@ final class SwiftMindMacUITests: XCTestCase {
         )
     }
 
+    func testSpatialNavigationKeys() throws {
+        let selected = element("selectedNodeLabel")
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        // StaticText exposes its content via value, not label.
+        func selectedText() -> String { selected.value as? String ?? "" }
+
+        // ⌘T adds a child and selects it (branch side depends on layout weights).
+        app.typeKey("t", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        let childLabel = selectedText()
+        XCTAssertNotEqual(childLabel, "Central Idea")
+
+        // Inward = parent depends on branch side: left branch → h, right branch → l.
+        // On a childless node the outward arrow is a no-op, so try left first.
+        var outwardKey = XCUIKeyboardKey.rightArrow
+        app.typeKey(.leftArrow, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        if selectedText() == childLabel {
+            outwardKey = .leftArrow
+            app.typeKey(.rightArrow, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        }
+        XCTAssertEqual(selectedText(), "Central Idea", "inward arrow should select the parent")
+
+        // Outward from root returns to the last focused child (memory).
+        app.typeKey(outwardKey, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(selectedText(), childLabel, "outward arrow should return to the remembered child")
+    }
+
     func testRunScriptInPalette() throws {
         app.typeKey("k", modifierFlags: .command)
         let query = element("paletteQueryField")
