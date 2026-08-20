@@ -63,6 +63,8 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Pin / unpin** (⇧⌘P or toolbar): pin freezes layout position; Option+drag moves a pin; unpin restores auto layout
 - **Command Palette** (⌘K): filterable actions (Add Child/Sibling, Delete, Fold, Pin/Unpin, Undo, Redo) and **jump to node**
 - **Spatial navigation** (arrows or hjkl): `j`/`k` next/previous sibling; `h`/`l` follow the branch — on a **left**-side branch `h` goes outward to children and `l` to the parent, on a **right**-side branch reversed. From the root, `h`/`l` pick the left/right branch. Outward moves remember the last focused child; a folded node unfolds first.
+- **Follow mode** (`f` on the canvas): the active node is always panned to the viewport center as you navigate; press `f` again to restore free panning
+- **Focus clearing**: Esc or clicking blank canvas removes the current focus; with no focus, Delete removes the node under the pointer. Deleting a focused node moves focus to its next sibling (then previous, then parent)
 - **Map title** editable in the sidebar (undoable via `SetMapTitleCommand`)
 - **Multi-window**: each document window owns its own `DocumentSession` / undo stack
 

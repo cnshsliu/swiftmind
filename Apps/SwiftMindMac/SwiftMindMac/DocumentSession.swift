@@ -98,6 +98,13 @@ final class DocumentSession: ObservableObject {
         objectWillChange.send()
     }
 
+    /// Clear focus (Esc / click on blank canvas).
+    func clearSelection() {
+        store.clearSelection()
+        selectionRevision = store.selectionRevision
+        objectWillChange.send()
+    }
+
     var canUndo: Bool { store.canUndo }
     var canRedo: Bool { store.canRedo }
 

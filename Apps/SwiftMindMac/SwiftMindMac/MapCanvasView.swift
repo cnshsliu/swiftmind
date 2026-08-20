@@ -37,6 +37,8 @@ struct MapCanvasView: View {
     @State private var keyMonitor: Any?
     /// Spatial navigation memory: parent → last focused child (h/l returns to it).
     @State private var lastChildByParent: [NodeID: NodeID] = [:]
+    /// Follow mode (F): the active node is always panned to the viewport center.
+    @State private var followMode = false
     private static let minScale: CGFloat = 0.25
     private static let maxScale: CGFloat = 3
     private static let badgeFontSize: CGFloat = 11
@@ -91,6 +93,23 @@ struct MapCanvasView: View {
                    let visual = snapshot.nodes.first(where: { $0.id == editingNodeID }) {
                     editOverlay(for: visual, viewSize: geo.size)
                 }
+
+                if followMode {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Label("Follow", systemImage: "scope")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.regularMaterial, in: Capsule())
+                                .foregroundStyle(.secondary)
+                                .padding(10)
+                        }
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                }
             }
             .onAppear {
                 canvasSize = geo.size
@@ -127,6 +146,12 @@ struct MapCanvasView: View {
                 deleteSelectionIfAllowed()
                 return .handled
             }
+            // Esc clears the current focus (editing handles Esc itself).
+            .onKeyPress(.escape) {
+                guard editingNodeID == nil else { return .ignored }
+                session.clearSelection()
+                return .handled
+            }
             // Spatial navigation: arrows + hjkl. h/l move relative to the
             // branch side (left branch: h = outward to children, l = parent;
             // right branch reversed), j/k = next/previous sibling.
@@ -138,6 +163,12 @@ struct MapCanvasView: View {
             .onKeyPress(.init("l")) { navigateKey(.right) }
             .onKeyPress(.init("j")) { navigateKey(.down) }
             .onKeyPress(.init("k")) { navigateKey(.up) }
+            // Follow mode toggle: active node stays centered while navigating.
+            .onKeyPress(.init("f")) {
+                guard editingNodeID == nil else { return .ignored }
+                toggleFollowMode()
+                return .handled
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
@@ -159,7 +190,7 @@ struct MapCanvasView: View {
                 lastChildByParent[parent] = primary
             }
             // Keep active node on-screen when selection moves (e.g. ⌘T / ⇧⌘T).
-            ensurePrimaryVisible(animated: !reduceMotion)
+            keepPrimaryInFrame(animated: !reduceMotion)
         }
         // Cancel in-place edit if selection/model removes the node.
         .onChange(of: session.contentRevision) { _, _ in
@@ -168,7 +199,7 @@ struct MapCanvasView: View {
                 cancelEdit()
             }
             // New/moved nodes change layout — pan so primary stays in view.
-            ensurePrimaryVisible(animated: !reduceMotion)
+            keepPrimaryInFrame(animated: !reduceMotion)
         }
         .onAppear { installKeyMonitor() }
         .onDisappear { removeKeyMonitor() }
@@ -218,9 +249,20 @@ struct MapCanvasView: View {
 
     private func deleteSelectionIfAllowed() {
         let root = session.store.map.root.id
-        let ids = session.store.selection.selectedIDs.filter { $0 != root }
+        var ids = session.store.selection.selectedIDs.filter { $0 != root }
+        if ids.isEmpty,
+           let hover = hoverLocation,
+           let hovered = hitTest(hover, snapshot: session.store.snapshot(), viewSize: canvasSize),
+           hovered != root {
+            // No focus — Delete applies to the node under the pointer.
+            ids = [hovered]
+        }
         guard !ids.isEmpty else {
-            session.showToast("Can't delete the central idea", kind: .error)
+            if session.store.selection.selectedIDs.isEmpty {
+                session.showToast("Nothing to delete", kind: .error)
+            } else {
+                session.showToast("Can't delete the central idea", kind: .error)
+            }
             return
         }
         session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
@@ -302,6 +344,51 @@ struct MapCanvasView: View {
     }
 
     // MARK: - Hover / visibility
+
+    /// F toggles follow mode: every selection/layout change re-centers the
+    /// active node instead of just nudging it into the safe margin.
+    private func toggleFollowMode() {
+        followMode.toggle()
+        if followMode {
+            centerPrimary(animated: !reduceMotion)
+            session.showToast("Follow mode on — active node stays centered", kind: .info)
+        } else {
+            session.showToast("Follow mode off", kind: .info)
+        }
+    }
+
+    /// Follow mode centers the active node; otherwise just keep it in view.
+    private func keepPrimaryInFrame(animated: Bool) {
+        if followMode {
+            centerPrimary(animated: animated)
+        } else {
+            ensurePrimaryVisible(animated: animated)
+        }
+    }
+
+    /// Pan so the primary selection sits exactly at the viewport center.
+    private func centerPrimary(animated: Bool) {
+        guard canvasSize.width > 40, canvasSize.height > 40 else { return }
+        guard let primary = session.store.selection.primary else { return }
+        let snapshot = session.store.snapshot()
+        guard let visual = snapshot.nodes.first(where: { $0.id == primary }) else { return }
+
+        // Inverse of viewFrame: node center lands on the viewport center.
+        let target = CGSize(
+            width: -(visual.frame.x + visual.frame.width / 2) * Double(scale),
+            height: -(visual.frame.y + visual.frame.height / 2) * Double(scale)
+        )
+        guard target != offset else { return }
+        let apply = {
+            offset = target
+            panBase = target
+        }
+        if animated {
+            withAnimation(.easeOut(duration: 0.22)) { apply() }
+        } else {
+            apply()
+        }
+    }
 
     private func hoveredNodeID(in snapshot: MapSnapshot) -> NodeID? {
         guard let hover = hoverLocation, canvasSize.width > 0 else { return nil }
@@ -840,7 +927,8 @@ struct MapCanvasView: View {
                     session.select(id)
                     canvasFocused = true
                 } else {
-                    // Click empty canvas: keep selection, still take keyboard focus.
+                    // Click empty canvas: clear focus, still take keyboard focus.
+                    session.clearSelection()
                     canvasFocused = true
                 }
             }
