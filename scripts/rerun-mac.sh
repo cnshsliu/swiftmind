@@ -117,6 +117,14 @@ fi
 
 echo "    App: $APP_PATH"
 
+# Auto-sync the permanent copy (skip silently when the volume is absent).
+INSTALL_DIR="/Volumes/WD/Applications"
+if [ -d "$INSTALL_DIR" ]; then
+  echo "==> Syncing to ${INSTALL_DIR}…"
+  rsync -a --delete "$APP_PATH" "$INSTALL_DIR/"
+  APP_PATH="$INSTALL_DIR/$PRODUCT_NAME.app"
+fi
+
 if [ "$DO_LAUNCH" -eq 1 ]; then
   echo "==> Launching…"
   open "$APP_PATH"
