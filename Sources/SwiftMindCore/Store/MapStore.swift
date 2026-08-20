@@ -33,16 +33,60 @@ public final class MapStore {
         selectionRevision &+= 1
     }
 
+    public func clearSelection() {
+        selection.clear()
+        selectionRevision &+= 1
+    }
+
     public func dispatch(_ command: any MapCommand) throws {
+        // Capture a sibling focus target before a delete removes the primary.
+        var focusAfterDelete: NodeID?
+        if let delete = command as? DeleteNodesCommand,
+           let primary = selection.primary,
+           delete.nodeIDs.contains(primary) {
+            focusAfterDelete = siblingFocusTarget(deleting: primary, alsoDeleted: delete.nodeIDs)
+        }
         try bus.execute(command, on: &map)
         if let insert = command as? InsertChildCommand {
             selection.select(insert.newNodeID)
         } else if let insert = command as? InsertSiblingCommand {
             selection.select(insert.newNodeID)
+        } else if command is DeleteNodesCommand {
+            if let focusAfterDelete {
+                selection.select(focusAfterDelete)
+            } else {
+                // Prune deleted non-primary IDs; root only if focus was lost.
+                let hadSelection = !selection.selectedIDs.isEmpty
+                selection.selectedIDs = selection.selectedIDs.filter { map.node(id: $0) != nil }
+                if let primary = selection.primary, map.node(id: primary) == nil {
+                    selection.primary = selection.selectedIDs.first
+                }
+                if selection.selectedIDs.isEmpty, hadSelection {
+                    selection.select(map.root.id)
+                }
+            }
         }
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
+    }
+
+    /// Where focus goes when `id` is deleted: next surviving sibling, then
+    /// previous, then the parent (nil if the parent is deleted too).
+    private func siblingFocusTarget(deleting id: NodeID, alsoDeleted: Set<NodeID>) -> NodeID? {
+        guard let parentID = map.parentID(of: id),
+              let parent = map.node(id: parentID),
+              let index = parent.children.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+        if let after = parent.children[(index + 1)...].first(where: { !alsoDeleted.contains($0.id) }) {
+            return after.id
+        }
+        if index > 0,
+           let before = parent.children[..<index].last(where: { !alsoDeleted.contains($0.id) }) {
+            return before.id
+        }
+        return alsoDeleted.contains(parentID) ? nil : parentID
     }
 
     public func undo() throws {
