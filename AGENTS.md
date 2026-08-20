@@ -19,7 +19,7 @@ Package.swift                  # SPM manifest: SwiftMindCore library + tests (sw
 Sources/SwiftMindCore/         # UI-free core library (the "brain")
   Model/                       #   MindMap, Node, NodeID, NodeStyle, NodeLink, NodeIcon, NodeAttribute, Bookmark, Point2D, NodeSide
   Commands/                    #   MapCommand protocol + CommandBus (undo/redo) + one file per command
-  Store/                       #   MapStore (map + selection + revision counters + geometry cache), SelectionState
+  Store/                       #   MapStore (map + selection + revision counters + geometry cache), SelectionState, SpatialNavigator
   Layout/                      #   LayoutEngine, LayoutConfig, MapSnapshot (geometry-only snapshots)
   HTML/                        #   HTMLCodec (encode/decode), HTMLSkin (read-only browser CSS)
   Search/                      #   MapSearch (title/note substring matching)

@@ -62,6 +62,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Search** (⌘F): sidebar field matches node **titles** and **notes**; select a hit to jump
 - **Pin / unpin** (⇧⌘P or toolbar): pin freezes layout position; Option+drag moves a pin; unpin restores auto layout
 - **Command Palette** (⌘K): filterable actions (Add Child/Sibling, Delete, Fold, Pin/Unpin, Undo, Redo) and **jump to node**
+- **Spatial navigation** (arrows or hjkl): `j`/`k` next/previous sibling; `h`/`l` follow the branch — on a **left**-side branch `h` goes outward to children and `l` to the parent, on a **right**-side branch reversed. From the root, `h`/`l` pick the left/right branch. Outward moves remember the last focused child; a folded node unfolds first.
 - **Map title** editable in the sidebar (undoable via `SetMapTitleCommand`)
 - **Multi-window**: each document window owns its own `DocumentSession` / undo stack
 
