@@ -12,7 +12,10 @@ final class VaultLibrary: ObservableObject {
         static let lastMapPath = "swiftmind.lastMapPath"
         static let lastMode = "swiftmind.lastMode" // "brain" | "map"
         static let foldState = "swiftmind.brainFoldState"
+        static let recentMapPaths = "swiftmind.recentMapPaths"
     }
+
+    private static let maxRecentMaps = 10
 
     enum AppMode: String {
         case brain
@@ -20,6 +23,8 @@ final class VaultLibrary: ObservableObject {
     }
 
     @Published private(set) var vaultURLs: [URL] = []
+    /// Most-recent-first list of opened map files (max 10).
+    @Published private(set) var recentMapURLs: [URL] = []
 
     private var bookmarkDataByPath: [String: Data] = [:]
     private var foldState: [String: Bool] = [:]
@@ -44,6 +49,9 @@ final class VaultLibrary: ObservableObject {
         let defaults = UserDefaults.standard
         if let dict = defaults.dictionary(forKey: Keys.foldState) as? [String: Bool] {
             foldState = dict
+        }
+        if let paths = defaults.array(forKey: Keys.recentMapPaths) as? [String] {
+            recentMapURLs = paths.map { URL(fileURLWithPath: $0) }
         }
         guard let bookmarks = defaults.array(forKey: Keys.vaultBookmarks) as? [Data] else {
             vaultURLs = []
@@ -99,6 +107,34 @@ final class VaultLibrary: ObservableObject {
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: Keys.lastMode)
         }
+    }
+
+    // MARK: - Recent maps (File → Open Recent)
+
+    /// Record a successfully opened map at the front of the recent list.
+    func recordRecentMap(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        var paths = recentMapURLs.map(\.path).filter { $0 != path }
+        paths.insert(path, at: 0)
+        if paths.count > Self.maxRecentMaps {
+            paths = Array(paths.prefix(Self.maxRecentMaps))
+        }
+        recentMapURLs = paths.map { URL(fileURLWithPath: $0) }
+        UserDefaults.standard.set(paths, forKey: Keys.recentMapPaths)
+    }
+
+    /// Drop one entry (e.g. file vanished or failed to open).
+    func removeRecentMap(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        let paths = recentMapURLs.map(\.path).filter { $0 != path }
+        guard paths.count != recentMapURLs.count else { return }
+        recentMapURLs = paths.map { URL(fileURLWithPath: $0) }
+        UserDefaults.standard.set(paths, forKey: Keys.recentMapPaths)
+    }
+
+    func clearRecentMaps() {
+        recentMapURLs = []
+        UserDefaults.standard.set([String](), forKey: Keys.recentMapPaths)
     }
 
     // MARK: - Vaults

@@ -36,6 +36,10 @@ struct SwiftMindMacApp: App {
                 }
                 .keyboardShortcut("o", modifiers: .command)
 
+                RecentFilesMenu { url in
+                    appModel.openMap(at: url)
+                }
+
                 Divider()
 
                 Button("My Brain") {
@@ -72,6 +76,38 @@ struct SwiftMindMacApp: App {
 }
 
 // MARK: - App menu commands (bound via FocusedValues)
+
+/// File → Open Recent: last 10 opened maps, most recent first.
+private struct RecentFilesMenu: View {
+    @ObservedObject private var library = VaultLibrary.shared
+    let open: (URL) -> Void
+
+    private func displayName(_ url: URL) -> String {
+        var name = url.lastPathComponent
+        if name.hasSuffix(".swiftmind.html") {
+            name = String(name.dropLast(".swiftmind.html".count))
+        }
+        return name
+    }
+
+    var body: some View {
+        Menu("Open Recent") {
+            if library.recentMapURLs.isEmpty {
+                Text("No Recent Maps")
+            } else {
+                ForEach(library.recentMapURLs, id: \.path) { url in
+                    Button(displayName(url)) {
+                        open(url)
+                    }
+                }
+                Divider()
+                Button("Clear Menu") {
+                    library.clearRecentMaps()
+                }
+            }
+        }
+    }
+}
 
 private struct SessionUndoRedoCommands: View {
     @FocusedValue(\.documentSession) private var session

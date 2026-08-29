@@ -123,12 +123,14 @@ final class AppModel: ObservableObject {
             if recordAsLast {
                 library.lastMapURL = url
                 library.lastMode = .map
+                library.recordRecentMap(url)
             }
             session = DocumentSession(map: map)
             session.isBrainMode = false
             wireSession()
             suppressAutosave = false
         } catch {
+            library.removeRecentMap(url)
             session.showToast("Could not open map: \(error.localizedDescription)", kind: .error)
             // Fall back to brain if open fails.
             showBrain()

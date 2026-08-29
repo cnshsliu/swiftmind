@@ -67,6 +67,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Focus clearing**: Esc or clicking blank canvas removes the current focus; with no focus, Delete removes the node under the pointer. Deleting a focused node moves focus to its next sibling (then previous, then parent)
 - **Map title** editable in the sidebar (undoable via `SetMapTitleCommand`)
 - **Multi-window**: each document window owns its own `DocumentSession` / undo stack
+- **Open Recent** (File menu): last 10 opened maps, most recent first; entries that fail to open are pruned
 
 ### How to use notes
 
