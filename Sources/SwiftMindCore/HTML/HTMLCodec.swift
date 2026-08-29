@@ -240,6 +240,10 @@ public enum HTMLCodec {
             case ">": result += "&gt;"
             case "\"": result += "&quot;"
             case "'": result += "&apos;"
+            // XML line-end normalization rewrites literal \r on parse; the
+            // character reference preserves a lone \r. (\r\n still collapses
+            // to \n — Foundation XMLParser normalizes after char-ref expansion.)
+            case "\r": result += "&#13;"
             default: result.append(ch)
             }
         }
@@ -247,7 +251,12 @@ public enum HTMLCodec {
     }
 
     private static func escapeAttribute(_ string: String) -> String {
+        // XML attribute-value normalization rewrites literal \t \n to spaces
+        // on parse, so they must survive as character references (\r already
+        // handled by escapeText).
         escapeText(string)
+            .replacingOccurrences(of: "\t", with: "&#9;")
+            .replacingOccurrences(of: "\n", with: "&#10;")
     }
 
     // MARK: - Colors / numbers

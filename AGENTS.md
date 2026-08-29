@@ -101,4 +101,4 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 - App Sandbox is enabled (`SwiftMindMac.entitlements`) with **user-selected file read/write only** — no network entitlement, no iCloud container entitlements. Keep it that way: unsigned local builds must keep working without a development team or provisioning profile.
 - Vault folders in "My Brain" are accessed via **security-scoped bookmarks** (`VaultLibrary`).
 - Do not add iCloud ubiquity-container entitlements to the committed config — that path is documented in `README.md` as an optional, signed-only future step.
-- The HTML codec escapes text/attributes on encode; preserve escaping when touching `HTMLCodec`.
+- The HTML codec escapes text/attributes on encode; preserve escaping when touching `HTMLCodec`. Control chars survive as character references (`\t`→`&#9;`, `\n`→`&#10;` in attributes, lone `\r`→`&#13;` everywhere). Known limitation: a `\r\n` pair still decodes as `\n` — Foundation's `XMLParser` normalizes line ends after character-reference expansion, so no encoding can preserve it.
