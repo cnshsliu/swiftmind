@@ -13,7 +13,10 @@ final class MapFileWatcher {
         stop()
         let dir = url.deletingLastPathComponent().path
         fd = open(dir, O_EVTONLY)
-        guard fd >= 0 else { return }
+        guard fd >= 0 else {
+            NSLog("MapFileWatcher: cannot watch %@ — external-change reload disabled", dir)
+            return
+        }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
             eventMask: [.write, .rename, .delete],

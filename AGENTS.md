@@ -32,7 +32,7 @@ Sources/SwiftMindCore/         # UI-free core library (the "brain")
                                #   JavaScriptCoreRuntime (sandboxed JS)
   Import/                      #   MMImport (best-effort Freeplane .mm → MindMap, one-way)
 Sources/SwiftMindCLI/          # swiftmind CLI executable (agent interface to maps)
-Tests/SwiftMindCoreTests/      # XCTest unit tests (~168) + Fixtures/ golden files
+Tests/SwiftMindCoreTests/      # XCTest unit tests (~200) + Fixtures/ golden files
 Apps/SwiftMindMac/             # The macOS app
   project.yml                  #   XcodeGen spec — regenerate project with `xcodegen generate`
   SwiftMindMac.xcodeproj/      #   Generated (gitignored pattern `*.xcodeproj/`); do not edit by hand
@@ -59,7 +59,7 @@ swift test
 # Full loop after ANY app-affecting change: stop app → test → rebuild → relaunch
 ./scripts/rerun-mac.sh            # add --no-test to skip tests, --no-launch to skip launch
 
-# CI-style gate: unit tests + app build + XCUITest smoke
+# CI-style gate: unit tests + CLI smoke + app build + XCUITest smoke
 ./scripts/verify.sh               # add --skip-ui to skip XCUITest
 
 # UI tests only (requires a GUI session, not headless)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full automated gate: core unit tests + Mac build + XCUITest smoke.
+# Full automated gate: core unit tests + CLI smoke + Mac build + XCUITest smoke.
 # Usage: ./scripts/verify.sh [--skip-ui]
 set -euo pipefail
 
@@ -11,17 +11,20 @@ for arg in "$@"; do
   esac
 done
 
-echo "======== 1/3 Core unit tests ========"
+echo "======== 1/4 Core unit tests ========"
 (cd "$ROOT" && swift test)
 
-echo "======== 2/3 Mac app build ========"
+echo "======== 2/4 CLI smoke test ========"
+"$ROOT/scripts/test-cli.sh"
+
+echo "======== 3/4 Mac app build ========"
 "$ROOT/scripts/rerun-mac.sh" --no-test --no-launch
 
 if [ "$SKIP_UI" -eq 0 ]; then
-  echo "======== 3/3 XCUITest smoke ========"
+  echo "======== 4/4 XCUITest smoke ========"
   "$ROOT/scripts/test-ui.sh"
 else
-  echo "======== 3/3 XCUITest skipped (--skip-ui) ========"
+  echo "======== 4/4 XCUITest skipped (--skip-ui) ========"
 fi
 
 echo "======== All automated checks passed ========"

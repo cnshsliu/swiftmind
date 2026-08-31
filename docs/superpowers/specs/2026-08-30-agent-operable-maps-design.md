@@ -90,7 +90,7 @@ stdout and exits 0. Exit codes: 0 ok, 1 usage error, 2 file error,
   `set-note --id --markdown`, `set-attr --id --name --value` (empty value
   removes), `set-formula --id --formula` (empty clears), `fold --id` /
   `unfold --id`, `pin --id --x --y` / `unpin --id`,
-  `move --id --to <parentId> [--index n]`, `delete --id…`.
+  `move --id --to <parentId> [--index n]`, `delete --ids <id,id,…>`.
 - **Batch:** `batch < ops.json` — a JSON array of op objects
   (`{"op": "add-child", "parent": "h_1", "text": "…"}`). The key agent
   primitive: one "thought" = one atomic set of changes. Every single-write
@@ -108,8 +108,8 @@ in the same directory → atomic rename → stdout JSON with affected node ids.
   `DispatchSource.makeFileSystemObjectSource` (atomic rename replaces the
   inode, so watching the file itself silently dies), filter events for the
   open document path, debounce ~150ms.
-- **Self-write suppression:** the app marks its own saves (flag + timestamp)
-  and skips reloads triggered by them.
+- **Self-write suppression:** the app hashes file content on every read/write
+  and skips reloads whose content matches its own last save.
 - **Reload semantics:** disk wins. External change → decode →
   `store.replaceMap`. Accepted cost for v1: **undo history is cleared** on
   external reload (existing `replaceMap` behavior), surfaced via a toast
@@ -125,9 +125,10 @@ in the same directory → atomic rename → stdout JSON with affected node ids.
 ## Error handling
 
 Agents are machine users, so errors are machine-readable: failures print
-`{"error": {"code": "node_not_found", "message": "…", "node": "h_7"}}` to
-stderr and exit non-zero. In batch mode the error includes the failing op's
-index and the file is left byte-identical (all-or-nothing).
+`{"error": {"code": "op_error", "message": "…", "opIndex": 1, "op": "delete"}}`
+to stderr and exit non-zero (1=usage, 2=file, 3=operation). In batch mode the
+error includes the failing op's index and the file is left byte-identical
+(all-or-nothing).
 
 ## SKILL.md contents
 
