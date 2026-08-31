@@ -7,12 +7,18 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .library(name: "SwiftMindCore", targets: ["SwiftMindCore"])
+        .library(name: "SwiftMindCore", targets: ["SwiftMindCore"]),
+        .executable(name: "swiftmind", targets: ["SwiftMindCLI"])
     ],
     targets: [
         .target(
             name: "SwiftMindCore",
             path: "Sources/SwiftMindCore"
+        ),
+        .executableTarget(
+            name: "SwiftMindCLI",
+            dependencies: ["SwiftMindCore"],
+            path: "Sources/SwiftMindCLI"
         ),
         .testTarget(
             name: "SwiftMindCoreTests",
