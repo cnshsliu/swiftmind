@@ -156,3 +156,27 @@ authoring by hand is error-prone; the CLI validates).
 - In-app MCP/HTTP server, live-session agent edits, per-agent undo steps (v2).
 - Built-in LLM calls of any kind.
 - Real-time multi-agent collaboration, file-level locking beyond atomic rename.
+
+## v2 requirements found in real agent dogfooding (2026-08-31)
+
+Collected by running the v1 CLI through realistic agent scenarios
+(expand / restructure / attribute+formula rollups) on a scratch map:
+
+1. **No way to create a map.** Every command needs an existing file, so an
+   agent cannot bootstrap a new map without the app. Add `swiftmind new
+   <file> --title <t>` (CLI 1.2) and/or a `create` op in the v2 MCP API.
+2. **Formula results are invisible to agents.** Computed values live in the
+   app's `MapStore` (derived, never persisted — by design). An agent that
+   needs "what's the total?" must re-implement the DSL. v2 MCP should return
+   computed formula values alongside nodes (evaluate against the live store).
+3. **No write acknowledgment from the app.** The CLI confirms the file write,
+   but the agent cannot tell whether the app reloaded it, or whether the app
+   is even running. v2's synchronous MCP call closes this loop (and restores
+   undo chains for agent edits).
+4. **No session introspection.** With several maps open, an agent cannot ask
+   which maps are open, which window is focused, or what node is selected —
+   context that would let it edit "the map the user is looking at". v2 MCP
+   should expose session state (open documents, selection).
+5. **CLI error model held up well.** Exit 1/2/3 + JSON errors, all-or-nothing
+   batches, and the clobber guard were all exercised; keep the same shape in
+   the MCP error responses.
