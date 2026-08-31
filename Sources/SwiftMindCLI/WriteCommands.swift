@@ -2,8 +2,11 @@ import Foundation
 import SwiftMindCore
 
 enum WriteCommands {
-    static func run(command: String, path: String, flags: [String: String]) throws {
+    static func run(command: String, path: String, flags: [String: String], bare: Set<String>, positional: [String]) throws {
         func required(_ name: String) throws -> String {
+            if bare.contains(name) {
+                throw CLIError.usage("\(command): --\(name) requires a value")
+            }
             guard let value = flags[name] else {
                 throw CLIError.usage("\(command) requires --\(name)")
             }
@@ -16,7 +19,15 @@ enum WriteCommands {
         let ops: [MapOp]
         switch command {
         case "add-child":
-            let side = flags["side"].flatMap { NodeSide(rawValue: $0) } ?? .auto
+            let side: NodeSide
+            if let raw = flags["side"] {
+                guard let parsed = NodeSide(rawValue: raw) else {
+                    throw CLIError.usage("add-child: unknown --side \"\(raw)\" (auto|left|right)")
+                }
+                side = parsed
+            } else {
+                side = .auto
+            }
             ops = [.addChild(
                 parentID: try id("parent"),
                 newNodeID: flags["id"].map { NodeID(rawValue: $0) } ?? .generate(),
@@ -37,26 +48,36 @@ enum WriteCommands {
             ops = [.setAttribute(
                 nodeID: try id("id"),
                 name: try required("name"),
-                value: flags["value"] ?? ""
+                value: try required("value")
             )]
         case "set-formula":
-            ops = [.setFormula(nodeID: try id("id"), formula: flags["formula"])]
+            ops = [.setFormula(nodeID: try id("id"), formula: try required("formula"))]
         case "fold":
             ops = [.setFolded(nodeID: try id("id"), isFolded: true)]
         case "unfold":
             ops = [.setFolded(nodeID: try id("id"), isFolded: false)]
         case "pin":
-            guard let x = Double(try required("x")), let y = Double(try required("y")) else {
-                throw CLIError.usage("pin requires numeric --x and --y")
+            guard let x = Double(try required("x")), let y = Double(try required("y")),
+                  x.isFinite, y.isFinite else {
+                throw CLIError.usage("pin requires finite numeric --x and --y")
             }
             ops = [.setPin(nodeID: try id("id"), position: Point2D(x: x, y: y))]
         case "unpin":
             ops = [.setPin(nodeID: try id("id"), position: nil)]
         case "move":
+            let index: Int
+            if let raw = flags["index"] {
+                guard let parsed = Int(raw) else {
+                    throw CLIError.usage("move: --index must be an integer, got \"\(raw)\"")
+                }
+                index = parsed
+            } else {
+                index = 0
+            }
             ops = [.move(
                 nodeID: try id("id"),
                 newParentID: try id("to"),
-                index: flags["index"].flatMap { Int($0) } ?? 0
+                index: index
             )]
         case "delete":
             let ids = try required("ids")
@@ -65,7 +86,7 @@ enum WriteCommands {
             guard !ids.isEmpty else { throw CLIError.usage("delete requires --ids") }
             ops = [.delete(nodeIDs: ids)]
         case "batch":
-            ops = try loadBatchOps(path: path, flags: flags)
+            ops = try loadBatchOps(positional: positional)
         default:
             throw CLIError.usage("unknown command: \(command)")
         }
@@ -77,10 +98,8 @@ enum WriteCommands {
     }
 
     /// `swiftmind batch <file> [ops.json]` — ops from the positional JSON file
-    /// or stdin ("-"). Flags arrive positionally after <file>, so we re-read
-    /// Process arguments for a non-flag third argument.
-    private static func loadBatchOps(path: String, flags: [String: String]) throws -> [MapOp] {
-        let positional = CommandLine.arguments.dropFirst(3).filter { !$0.hasPrefix("--") }
+    /// or piped stdin.
+    private static func loadBatchOps(positional: [String]) throws -> [MapOp] {
         let data: Data
         if let opsPath = positional.first, opsPath != "-" {
             guard let fileData = try? Data(contentsOf: URL(fileURLWithPath: opsPath)) else {
@@ -88,6 +107,9 @@ enum WriteCommands {
             }
             data = fileData
         } else {
+            if isatty(STDIN_FILENO) != 0 {
+                throw CLIError.usage("batch requires an ops JSON file or piped stdin")
+            }
             data = FileHandle.standardInput.readDataToEndOfFile()
         }
         do {

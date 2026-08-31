@@ -27,9 +27,12 @@ func usage() -> Never {
     """))
 }
 
-/// Parse `--flag value` pairs and bare `--flag` booleans (value "true").
-func parseFlags(_ args: [String]) -> [String: String] {
+/// Parse `--flag value` pairs; bare `--flag` (no value) and positionals are
+/// reported separately so commands can reject ambiguous input.
+func parseArgs(_ args: [String]) -> (flags: [String: String], bare: Set<String>, positional: [String]) {
     var flags: [String: String] = [:]
+    var bare: Set<String> = []
+    var positional: [String] = []
     var i = 0
     while i < args.count {
         let arg = args[i]
@@ -39,20 +42,22 @@ func parseFlags(_ args: [String]) -> [String: String] {
                 flags[name] = args[i + 1]
                 i += 2
             } else {
-                flags[name] = "true"
+                bare.insert(name)
                 i += 1
             }
         } else {
+            positional.append(arg)
             i += 1
         }
     }
-    return flags
+    return (flags, bare, positional)
 }
 
 guard args.count >= 2 else { usage() }
 let command = args[0]
 let path = args[1]
-let flags = parseFlags(Array(args.dropFirst(2)))
+let parsed = parseArgs(Array(args.dropFirst(2)))
+let flags = parsed.flags
 
 do {
     switch command {
@@ -73,7 +78,7 @@ do {
             ["id": $0.nodeID.rawValue, "title": $0.title, "matchInNote": $0.matchInNote]
         })
     default:
-        try WriteCommands.run(command: command, path: path, flags: flags)
+        try WriteCommands.run(command: command, path: path, flags: parsed.flags, bare: parsed.bare, positional: parsed.positional)
     }
 } catch let error as CLIError {
     MapFile.fail(error)
@@ -87,6 +92,8 @@ do {
     if let data = try? JSONSerialization.data(withJSONObject: payload),
        let text = String(data: data, encoding: .utf8) {
         FileHandle.standardError.write(Data((text + "\n").utf8))
+    } else {
+        FileHandle.standardError.write(Data("op_error at op \(error.opIndex)\n".utf8))
     }
     exit(3)
 } catch {
