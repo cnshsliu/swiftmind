@@ -68,6 +68,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Map title** editable in the sidebar (undoable via `SetMapTitleCommand`)
 - **Multi-window**: each document window owns its own `DocumentSession` / undo stack
 - **Open Recent** (File menu): last 10 opened maps, most recent first; entries that fail to open are pruned
+- **Agent CLI** (`swiftmind`): external agents/scripts read and edit maps via `read`/`find`/`add-child`/`batch` (all-or-nothing) — the app hot-reloads external changes; see `skills/swiftmind/SKILL.md`
 
 ### How to use notes
 

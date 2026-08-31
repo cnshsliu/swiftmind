@@ -31,6 +31,7 @@ Sources/SwiftMindCore/         # UI-free core library (the "brain")
   Scripting/                   #   L3: ScriptRuntime protocol, MapScriptAPI (intent recording),
                                #   JavaScriptCoreRuntime (sandboxed JS)
   Import/                      #   MMImport (best-effort Freeplane .mm → MindMap, one-way)
+Sources/SwiftMindCLI/          # swiftmind CLI executable (agent interface to maps)
 Tests/SwiftMindCoreTests/      # XCTest unit tests (~168) + Fixtures/ golden files
 Apps/SwiftMindMac/             # The macOS app
   project.yml                  #   XcodeGen spec — regenerate project with `xcodegen generate`
@@ -40,6 +41,7 @@ Apps/SwiftMindMac/             # The macOS app
                                #   OutlineMapView, InspectorView, BrainMapBuilder, VaultLibrary, etc.
   SwiftMindMacUITests/         #   XCUITest smoke tests
 scripts/                       # Automation entry points (see below)
+skills/swiftmind/SKILL.md      # agent driver's manual for the CLI
 docs/superpowers/              # Design spec, milestone plans, agent workflow notes
 ```
 
@@ -80,6 +82,7 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 - **Formulas are derived data.** `Node.formula` (source string) is the only persisted piece — `data-formula` on `<li>`, schema 1 additive. Computed values come from `FormulaEngine` inside `MapStore`, memoized against the node's subtree value; every DSL feature reads only that subtree, so cache validation is plain equality (sibling edits never invalidate). Never store computed values in the model, never evaluate formula text as real code, and keep `snapshot()` geometry-only — views merge formula results at render time.
 - **Scripts never mutate the map directly.** L3 scripts (JavaScriptCore, behind the `ScriptRuntime` protocol) read value snapshots and record `ScriptIntent`s; `ApplyScriptIntentsCommand` applies a successful run as one undoable batch (errors/timeouts apply nothing). Do not add bridges beyond the `mindmap` API object — the sandbox guarantee is "no network/file/process access", asserted by tests. Scripts live app-side (user-picked `.js` files), never embedded in the HTML.
 - **Multi-window:** each document window owns its own `DocumentSession` and undo stack — do not introduce shared mutable state between sessions.
+- **External map edits go through the CLI.** `swiftmind` (Sources/SwiftMindCLI) decodes, applies `MapOp`s via `BatchOps` (all-or-nothing, through the existing commands), and atomically rewrites the file. The app watches the open document's parent directory and hot-reloads external changes; this clears the undo stack (spec §hot reload). Never hand-edit `.swiftmind.html` in automation.
 - **Xcode gotcha:** `debugDocumentVersioning` must be `false` in the scheme. When true, Xcode injects `-NSDocumentRevisionsDebugMode YES` and `DocumentGroup` opens "YES" as a file path. `scripts/patch-xcode-scheme.sh` fixes this after every `xcodegen generate` (already wired into `rerun-mac.sh`); the app also defensively sets the default to false in `SwiftMindMacApp.init`.
 
 ## Code style guidelines

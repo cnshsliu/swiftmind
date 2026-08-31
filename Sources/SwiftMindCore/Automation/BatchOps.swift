@@ -24,8 +24,8 @@ public enum MapOp: Equatable, Sendable {
         case .setNote: return "set-note"
         case .setAttribute: return "set-attr"
         case .setFormula: return "set-formula"
-        case .setFolded(let _, let folded): return folded ? "fold" : "unfold"
-        case .setPin(let _, let pos): return pos == nil ? "unpin" : "pin"
+        case .setFolded(_, let folded): return folded ? "fold" : "unfold"
+        case .setPin(_, let pos): return pos == nil ? "unpin" : "pin"
         case .move: return "move"
         case .delete: return "delete"
         }

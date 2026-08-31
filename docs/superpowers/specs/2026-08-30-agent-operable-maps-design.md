@@ -113,7 +113,7 @@ in the same directory → atomic rename → stdout JSON with affected node ids.
 - **Reload semantics:** disk wins. External change → decode →
   `store.replaceMap`. Accepted cost for v1: **undo history is cleared** on
   external reload (existing `replaceMap` behavior), surfaced via a toast
-  ("Updated by external agent"). v2's live-session path restores undo chains.
+  ("Reloaded — file changed on disk"). v2's live-session path restores undo chains.
 - **Selection preservation:** if the previously selected node id still exists
   after reload, keep it selected (follow mode then re-centers smoothly);
   otherwise clear the selection.
