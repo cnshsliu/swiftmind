@@ -45,10 +45,14 @@ enum MapFile {
         }
     }
 
+    /// File modification date for clobber detection (nil if unreadable).
+    static func modificationDate(_ path: String) -> Date? {
+        try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date
+    }
+
     /// Atomic write (temp file + rename via .atomic) so the app's file watcher
     /// sees exactly one change event and never a partial file.
-    static func save(_ map: MindMap, to path: String) throws {
-        let html: String
+    static func save(_ map: MindMap, to path: String) throws {        let html: String
         do {
             html = try HTMLCodec.encode(map, includeSkin: true)
         } catch {

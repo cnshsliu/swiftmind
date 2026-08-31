@@ -92,7 +92,13 @@ enum WriteCommands {
         }
 
         var map = try MapFile.load(path)
+        let stamp = MapFile.modificationDate(path)
         let affected = try BatchOps.apply(ops, to: &map)
+        // Clobber guard: someone (the app, another CLI) rewrote the file
+        // between our read and write — refuse rather than lose their edits.
+        guard MapFile.modificationDate(path) == stamp else {
+            throw CLIError.file("file changed on disk while applying ops; re-run the command")
+        }
         try MapFile.save(map, to: path)
         MapFile.printJSON(["ok": true, "affected": affected.map(\.rawValue)])
     }
@@ -100,6 +106,9 @@ enum WriteCommands {
     /// `swiftmind batch <file> [ops.json]` — ops from the positional JSON file
     /// or piped stdin.
     private static func loadBatchOps(positional: [String]) throws -> [MapOp] {
+        if positional.count > 1 {
+            throw CLIError.usage("batch: unexpected extra arguments: \(positional.dropFirst().joined(separator: " "))")
+        }
         let data: Data
         if let opsPath = positional.first, opsPath != "-" {
             guard let fileData = try? Data(contentsOf: URL(fileURLWithPath: opsPath)) else {

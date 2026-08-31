@@ -15,9 +15,12 @@ build it: `cd <repo> && ./scripts/install-cli.sh`.
 
 ## Commands
 
-All commands: `swiftmind <cmd> <file>`. Success prints JSON on stdout, exit 0.
-Errors print `{"error":{"code","message"}}` on stderr, exit 1/2/3
-(usage/file/operation).
+All commands: `swiftmind <cmd> <file>`. Success prints JSON on stdout, exit 0 —
+write commands print `{"ok": true, "affected": ["<id>", ...]}` where `affected`
+lists the ids touched, in op order. Errors print `{"error":{"code","message"}}`
+on stderr, exit 1/2/3 (usage/file/operation).
+
+`swiftmind --version` prints the CLI version.
 
 - `read <file>` — full map as a JSON tree (`root` → nested `children`; each
   node: `id`, `text`, optional `note`, `attributes`, `formula`, `folded`,
@@ -84,6 +87,10 @@ removes the attribute.)
 ## Discipline
 
 - Prefer one `batch` over many single commands — atomicity + one reload.
+- Write commands refuse to save if the file changed on disk between the CLI's
+  read and write (exit 2, "file changed on disk while applying ops"). This
+  means the app or another process saved concurrently — just re-run the
+  command on the fresh file.
 - Never delete a node and its ancestor in the same batch — the ancestor's
   delete already removes the descendant, and if the descendant delete happens
   to run second it fails and rolls back the whole batch.

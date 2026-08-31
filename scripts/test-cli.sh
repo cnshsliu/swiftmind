@@ -52,4 +52,40 @@ COUNT=$("$CLI" find "$WORK" --query "To Move" | python3 -c 'import json,sys; pri
 # validate the final file still parses
 "$CLI" validate "$WORK" >/dev/null || fail "final validate"
 
+# --version prints something sane
+"$CLI" --version | grep -qE '^swiftmind [0-9]+\.[0-9]+\.[0-9]+$' || fail "--version"
+
+# batch rejects extra positional arguments
+if "$CLI" batch "$WORK" ops1.json ops2.json 2>/dev/null; then
+  fail "batch with extra positional args should exit non-zero"
+fi
+
+# human-readable error for a missing node (no Swift internal repr)
+ERR=$("$CLI" set-text "$WORK" --id n_nope --text x 2>&1 >/dev/null) && fail "set-text on missing node should fail"
+echo "$ERR" | grep -q "node not found: n_nope" || fail "human-readable error, got: $ERR"
+echo "$ERR" | grep -q "NodeID(rawValue" && fail "error still leaks internal repr: $ERR"
+
+# clobber guard: keep touching the file while a large batch is mid-apply,
+# so at least one modification lands inside the CLI's read→write window
+python3 - "$WORK" "$CLI" <<'PYEOF' || fail "clobber guard"
+import json, subprocess, sys, threading, time
+work, cli = sys.argv[1], sys.argv[2]
+stop = False
+def toucher():
+    while not stop:
+        with open(work, "a") as f:
+            f.write("<!-- concurrent -->\n")
+        time.sleep(0.02)
+t = threading.Thread(target=toucher)
+t.start()
+ops = [{"op": "set-text", "id": "n_smoke", "text": f"bulk {i}"} for i in range(20000)]
+p = subprocess.run([cli, "batch", work], input=json.dumps(ops).encode(),
+                   capture_output=True)
+stop = True
+t.join()
+if p.returncode != 2 or b"changed on disk" not in p.stderr:
+    print(f"expected clobber refusal (exit 2), got rc={p.returncode} err={p.stderr!r}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+
 echo "CLI smoke test OK"

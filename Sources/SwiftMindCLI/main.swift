@@ -7,9 +7,19 @@ import SwiftMindCore
 
 let args = Array(CommandLine.arguments.dropFirst())
 
+/// Bumped on every CLI behavior change; keep in sync before running
+/// scripts/install-cli.sh so `swiftmind --version` reflects the installed build.
+let swiftmindCLIVersion = "1.1.0"
+
+if args.first == "--version" || args.first == "version" {
+    print("swiftmind \(swiftmindCLIVersion)")
+    exit(0)
+}
+
 func usage() -> Never {
     MapFile.fail(.usage("""
     usage: swiftmind <command> <file> [flags]
+      swiftmind --version              print the CLI version
       read <file>                      print the map as a JSON tree
       find <file> --query <text>       search titles/notes, print matching node ids
       validate <file>                  decode + re-encode check
