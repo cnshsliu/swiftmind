@@ -64,10 +64,10 @@ do {
         _ = try HTMLCodec.encode(map, includeSkin: false)
         MapFile.printJSON(["ok": true, "file": path])
     case "find":
-        let map = try MapFile.load(path)
         guard let query = flags["query"] else {
             throw CLIError.usage("find requires --query")
         }
+        let map = try MapFile.load(path)
         let hits = MapSearch.search(map: map, query: query)
         MapFile.printJSON(hits.map {
             ["id": $0.nodeID.rawValue, "title": $0.title, "matchInNote": $0.matchInNote]
@@ -78,11 +78,16 @@ do {
 } catch let error as CLIError {
     MapFile.fail(error)
 } catch let error as BatchOpError {
-    FileHandle.standardError.write(Data(
-        ("""
-        {"error":{"code":"op_error","message":"\(error.message)","opIndex":\(error.opIndex),"op":"\(error.opName)"}}
-        """ + "\n").utf8
-    ))
+    let payload: [String: Any] = ["error": [
+        "code": "op_error",
+        "message": error.message,
+        "opIndex": error.opIndex,
+        "op": error.opName,
+    ]]
+    if let data = try? JSONSerialization.data(withJSONObject: payload),
+       let text = String(data: data, encoding: .utf8) {
+        FileHandle.standardError.write(Data((text + "\n").utf8))
+    }
     exit(3)
 } catch {
     MapFile.fail(.op(error.localizedDescription))
