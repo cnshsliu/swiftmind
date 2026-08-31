@@ -181,6 +181,10 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertThrowsError(try decodeOps(#"[{"op":"add-child","parent":"n_x","text":"T","side":"lef"}]"#))
     }
 
+    func testDecodeMalformedIDThrows() {
+        XCTAssertThrowsError(try decodeOps(#"[{"op":"add-child","parent":"n_x","id":5,"text":"T"}]"#))
+    }
+
     func testEncodeDecodeRoundTrip() throws {
         let ops: [MapOp] = [
             .addChild(parentID: NodeID(rawValue: "n_x"), newNodeID: NodeID(rawValue: "n_n"), text: "Kid", side: .left),

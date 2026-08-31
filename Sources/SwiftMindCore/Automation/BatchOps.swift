@@ -157,8 +157,8 @@ extension MapOp: Codable {
             }
             return value
         }
-        func generatedID() -> NodeID {
-            if let raw = try? c.decode(String.self, forKey: .id) {
+        func generatedID() throws -> NodeID {
+            if let raw = try c.decodeIfPresent(String.self, forKey: .id) {
                 return NodeID(rawValue: raw)
             }
             return .generate()
@@ -177,14 +177,14 @@ extension MapOp: Codable {
             }
             self = .addChild(
                 parentID: try nodeID(.parent),
-                newNodeID: generatedID(),
+                newNodeID: try generatedID(),
                 text: try string(.text),
                 side: side
             )
         case "add-sibling":
             self = .addSibling(
                 siblingID: try nodeID(.sibling),
-                newNodeID: generatedID(),
+                newNodeID: try generatedID(),
                 text: try string(.text)
             )
         case "set-text":
