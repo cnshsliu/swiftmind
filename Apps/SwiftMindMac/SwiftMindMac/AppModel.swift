@@ -17,6 +17,11 @@ final class AppModel: ObservableObject {
 
     private var accessRoot: URL?
     private var saveTask: Task<Void, Never>?
+    private let fileWatcher = MapFileWatcher()
+    private var reloadTask: Task<Void, Never>?
+    /// Hash of the file content we last read or wrote — watcher events whose
+    /// content matches are our own saves and are ignored.
+    private var lastKnownFileHash: Int?
     private var suppressAutosave = false
     private var didBootstrap = false
 
@@ -63,6 +68,7 @@ final class AppModel: ObservableObject {
 
     func showBrain() {
         persistCurrentMapIfNeeded()
+        stopWatching()
         suppressAutosave = true
         isBrainMode = true
         mode = .brain
@@ -128,6 +134,8 @@ final class AppModel: ObservableObject {
             session = DocumentSession(map: map)
             session.isBrainMode = false
             wireSession()
+            lastKnownFileHash = data.hashValue
+            startWatching(url: url)
             suppressAutosave = false
         } catch {
             library.removeRecentMap(url)
@@ -214,7 +222,9 @@ final class AppModel: ObservableObject {
         guard !isBrainMode, let url = currentMapURL else { return }
         do {
             let html = try HTMLCodec.encode(session.exportMap(), includeSkin: true)
-            try Data(html.utf8).write(to: url, options: .atomic)
+            let data = Data(html.utf8)
+            try data.write(to: url, options: .atomic)
+            lastKnownFileHash = data.hashValue
             library.lastMapURL = url
         } catch {
             session.showToast("Save failed: \(error.localizedDescription)", kind: .error)
@@ -301,5 +311,51 @@ final class AppModel: ObservableObject {
             library.stopAccessing(accessRoot)
             self.accessRoot = nil
         }
+    }
+
+    // MARK: - External change watching (agent CLI writes)
+
+    private func startWatching(url: URL) {
+        fileWatcher.onChange = { [weak self] in
+            self?.scheduleExternalReload()
+        }
+        fileWatcher.watch(url: url)
+    }
+
+    private func stopWatching() {
+        reloadTask?.cancel()
+        reloadTask = nil
+        fileWatcher.stop()
+        lastKnownFileHash = nil
+    }
+
+    private func scheduleExternalReload() {
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            self.reloadIfExternallyChanged()
+        }
+    }
+
+    private func reloadIfExternallyChanged() {
+        guard !isBrainMode, let url = currentMapURL,
+              let data = try? Data(contentsOf: url) else { return }
+        let hash = data.hashValue
+        guard hash != lastKnownFileHash else { return }
+        guard let html = String(data: data, encoding: .utf8),
+              let map = try? HTMLCodec.decode(html) else { return }
+        lastKnownFileHash = hash
+
+        let selected = session.store.selection.primary
+        suppressAutosave = true
+        session.syncFromDocument(map)
+        if let selected, session.store.map.node(id: selected) != nil {
+            session.select(selected)
+        } else {
+            session.clearSelection()
+        }
+        suppressAutosave = false
+        session.showToast("Updated by external agent", kind: .info)
     }
 }
