@@ -124,4 +124,56 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertEqual(affected, [])
         XCTAssertEqual(map, original)
     }
+
+    private func decodeOps(_ json: String) throws -> [MapOp] {
+        let data = Data(json.utf8)
+        return try JSONDecoder().decode([MapOp].self, from: data)
+    }
+
+    func testDecodeAllOpKinds() throws {
+        let ops = try decodeOps("""
+        [
+          {"op":"add-child","parent":"n_x","id":"n_new","text":"Kid","side":"left"},
+          {"op":"add-sibling","sibling":"n_x","text":"Sib"},
+          {"op":"set-text","id":"n_x","text":"T"},
+          {"op":"set-note","id":"n_x","markdown":"M"},
+          {"op":"set-attr","id":"n_x","name":"status","value":"done"},
+          {"op":"set-formula","id":"n_x","formula":"count(children)"},
+          {"op":"fold","id":"n_x"},
+          {"op":"unfold","id":"n_x"},
+          {"op":"pin","id":"n_x","x":12.5,"y":-3},
+          {"op":"unpin","id":"n_x"},
+          {"op":"move","id":"n_x","to":"n_y","index":2},
+          {"op":"delete","ids":["n_x","n_y"]}
+        ]
+        """)
+        XCTAssertEqual(ops.count, 12)
+        XCTAssertEqual(ops[0], .addChild(
+            parentID: NodeID(rawValue: "n_x"),
+            newNodeID: NodeID(rawValue: "n_new"),
+            text: "Kid",
+            side: .left
+        ))
+        // add-sibling without id generates one
+        if case let .addSibling(_, generated, _) = ops[1] {
+            XCTAssertFalse(generated.rawValue.isEmpty)
+        } else {
+            XCTFail("op[1] should be addSibling")
+        }
+        XCTAssertEqual(ops[4], .setAttribute(nodeID: NodeID(rawValue: "n_x"), name: "status", value: "done"))
+        XCTAssertEqual(ops[6], .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: true))
+        XCTAssertEqual(ops[7], .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: false))
+        XCTAssertEqual(ops[8], .setPin(nodeID: NodeID(rawValue: "n_x"), position: Point2D(x: 12.5, y: -3)))
+        XCTAssertEqual(ops[9], .setPin(nodeID: NodeID(rawValue: "n_x"), position: nil))
+        XCTAssertEqual(ops[10], .move(nodeID: NodeID(rawValue: "n_x"), newParentID: NodeID(rawValue: "n_y"), index: 2))
+        XCTAssertEqual(ops[11], .delete(nodeIDs: [NodeID(rawValue: "n_x"), NodeID(rawValue: "n_y")]))
+    }
+
+    func testDecodeUnknownOpThrows() {
+        XCTAssertThrowsError(try decodeOps(#"[{"op":"explode","id":"n_x"}]"#))
+    }
+
+    func testDecodeMissingRequiredFieldThrows() {
+        XCTAssertThrowsError(try decodeOps(#"[{"op":"set-text","id":"n_x"}]"#))
+    }
 }
