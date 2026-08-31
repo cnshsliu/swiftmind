@@ -15,7 +15,7 @@ public enum MapOp: Equatable, Sendable {
     case move(nodeID: NodeID, newParentID: NodeID, index: Int)
     case delete(nodeIDs: [NodeID])
 
-    /// Stable wire name, also used in error reports.
+    /// Wire name used by the CLI and in error reports.
     public var name: String {
         switch self {
         case .addChild: return "add-child"

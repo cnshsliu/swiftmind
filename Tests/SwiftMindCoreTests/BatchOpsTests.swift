@@ -89,4 +89,39 @@ final class BatchOpsTests: XCTestCase {
         try BatchOps.apply([.setPin(nodeID: b, position: nil)], to: &map)
         XCTAssertNil(map.node(id: b)?.positionPin)
     }
+
+    func testAddSibling() throws {
+        var map = makeMap()
+        let newID = NodeID(rawValue: "n_sib")
+        try BatchOps.apply(
+            [.addSibling(siblingID: NodeID(rawValue: "n_a"), newNodeID: newID, text: "Sib")],
+            to: &map
+        )
+        XCTAssertEqual(
+            map.root.children.map(\.id),
+            [NodeID(rawValue: "n_a"), newID, NodeID(rawValue: "n_b")]
+        )
+    }
+
+    func testSetNote() throws {
+        var map = makeMap()
+        let a = NodeID(rawValue: "n_a")
+        try BatchOps.apply([.setNote(nodeID: a, markdown: "# Hello")], to: &map)
+        XCTAssertEqual(map.node(id: a)?.noteMarkdown, "# Hello")
+    }
+
+    func testDeleteNonRoot() throws {
+        var map = makeMap()
+        try BatchOps.apply([.delete(nodeIDs: [NodeID(rawValue: "n_a")])], to: &map)
+        XCTAssertNil(map.node(id: NodeID(rawValue: "n_a")))
+        XCTAssertNotNil(map.node(id: NodeID(rawValue: "n_b")))
+    }
+
+    func testEmptyBatchIsNoOp() throws {
+        var map = makeMap()
+        let original = map
+        let affected = try BatchOps.apply([], to: &map)
+        XCTAssertEqual(affected, [])
+        XCTAssertEqual(map, original)
+    }
 }
