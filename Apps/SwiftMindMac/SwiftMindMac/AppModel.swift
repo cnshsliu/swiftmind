@@ -220,6 +220,13 @@ final class AppModel: ObservableObject {
 
     func saveCurrentMap() {
         guard !isBrainMode, let url = currentMapURL else { return }
+        // If the file on disk no longer matches what we last read/wrote, an
+        // external process (agent CLI) changed it — reload instead of clobbering.
+        if let onDisk = try? Data(contentsOf: url),
+           let lastKnownFileHash, onDisk.hashValue != lastKnownFileHash {
+            reloadIfExternallyChanged()
+            return
+        }
         do {
             let html = try HTMLCodec.encode(session.exportMap(), includeSkin: true)
             let data = Data(html.utf8)
@@ -316,6 +323,8 @@ final class AppModel: ObservableObject {
     // MARK: - External change watching (agent CLI writes)
 
     private func startWatching(url: URL) {
+        reloadTask?.cancel()
+        reloadTask = nil
         fileWatcher.onChange = { [weak self] in
             self?.scheduleExternalReload()
         }
@@ -339,14 +348,23 @@ final class AppModel: ObservableObject {
     }
 
     private func reloadIfExternallyChanged() {
-        guard !isBrainMode, let url = currentMapURL,
-              let data = try? Data(contentsOf: url) else { return }
+        guard !isBrainMode, let url = currentMapURL else { return }
+        guard let data = try? Data(contentsOf: url) else {
+            // File missing or unreadable — keep the in-memory map; don't clobber.
+            return
+        }
         let hash = data.hashValue
         guard hash != lastKnownFileHash else { return }
         guard let html = String(data: data, encoding: .utf8),
-              let map = try? HTMLCodec.decode(html) else { return }
+              let map = try? HTMLCodec.decode(html) else {
+            // External write is malformed — warn once per change, keep memory copy.
+            lastKnownFileHash = hash
+            session.showToast("External change could not be read — kept in-memory version", kind: .error)
+            return
+        }
         lastKnownFileHash = hash
-
+        // NOTE: replaceMap clears the undo stack and multi-selection — accepted
+        // tradeoff for v1 (see spec §hot reload).
         let selected = session.store.selection.primary
         suppressAutosave = true
         session.syncFromDocument(map)
@@ -356,6 +374,6 @@ final class AppModel: ObservableObject {
             session.clearSelection()
         }
         suppressAutosave = false
-        session.showToast("Updated by external agent", kind: .info)
+        session.showToast("Reloaded — file changed on disk", kind: .info)
     }
 }
