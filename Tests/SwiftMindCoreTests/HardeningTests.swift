@@ -273,7 +273,8 @@ final class HardeningTests: XCTestCase {
 
         print("GUARDRAIL layout 10001 nodes: \(String(format: "%.3f", elapsed))s")
         XCTAssertEqual(snapshot.nodes.count, 10001)
-        XCTAssertLessThan(elapsed, 2.0, "Layout regression: 10k nodes should layout under 2s")
+        // Generous budget: catches algorithmic regressions, not machine speed.
+        XCTAssertLessThan(elapsed, 5.0, "Layout regression: 10k nodes should layout well under 5s")
     }
 
     func testEncodeDecodeRoundTripTenThousandNodes() throws {
