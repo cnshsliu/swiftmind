@@ -176,4 +176,29 @@ final class BatchOpsTests: XCTestCase {
     func testDecodeMissingRequiredFieldThrows() {
         XCTAssertThrowsError(try decodeOps(#"[{"op":"set-text","id":"n_x"}]"#))
     }
+
+    func testDecodeInvalidSideThrows() {
+        XCTAssertThrowsError(try decodeOps(#"[{"op":"add-child","parent":"n_x","text":"T","side":"lef"}]"#))
+    }
+
+    func testEncodeDecodeRoundTrip() throws {
+        let ops: [MapOp] = [
+            .addChild(parentID: NodeID(rawValue: "n_x"), newNodeID: NodeID(rawValue: "n_n"), text: "Kid", side: .left),
+            .addSibling(siblingID: NodeID(rawValue: "n_x"), newNodeID: NodeID(rawValue: "n_s"), text: "Sib"),
+            .setText(nodeID: NodeID(rawValue: "n_x"), text: "T"),
+            .setNote(nodeID: NodeID(rawValue: "n_x"), markdown: "M"),
+            .setAttribute(nodeID: NodeID(rawValue: "n_x"), name: "k", value: "v"),
+            .setFormula(nodeID: NodeID(rawValue: "n_x"), formula: "count(children)"),
+            .setFormula(nodeID: NodeID(rawValue: "n_x"), formula: nil),
+            .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: true),
+            .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: false),
+            .setPin(nodeID: NodeID(rawValue: "n_x"), position: Point2D(x: 1.5, y: -2)),
+            .setPin(nodeID: NodeID(rawValue: "n_x"), position: nil),
+            .move(nodeID: NodeID(rawValue: "n_x"), newParentID: NodeID(rawValue: "n_y"), index: 1),
+            .delete(nodeIDs: [NodeID(rawValue: "n_x")]),
+        ]
+        let data = try JSONEncoder().encode(ops)
+        let decoded = try JSONDecoder().decode([MapOp].self, from: data)
+        XCTAssertEqual(decoded, ops)
+    }
 }

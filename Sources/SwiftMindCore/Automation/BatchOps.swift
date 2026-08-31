@@ -122,19 +122,23 @@ public enum BatchOps {
 
 extension MapOp: Codable {
     private enum CodingKeys: String, CodingKey {
-        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, folded, x, y, to, index
+        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index
     }
 
-    private enum WireError: Error, CustomStringConvertible {
+    private enum WireError: Error, CustomStringConvertible, LocalizedError {
         case unknownOp(String)
         case missingField(String, op: String)
+        case invalidValue(String, op: String)
 
         var description: String {
             switch self {
             case .unknownOp(let op): return "unknown op \"\(op)\""
             case .missingField(let field, let op): return "op \"\(op)\" missing required field \"\(field)\""
+            case .invalidValue(let value, let op): return "op \"\(op)\" invalid value \"\(value)\""
             }
         }
+
+        var errorDescription: String? { description }
     }
 
     public init(from decoder: Decoder) throws {
@@ -153,8 +157,8 @@ extension MapOp: Codable {
             }
             return value
         }
-        func generatedID() throws -> NodeID {
-            if let raw = try c.decodeIfPresent(String.self, forKey: .id) {
+        func generatedID() -> NodeID {
+            if let raw = try? c.decode(String.self, forKey: .id) {
                 return NodeID(rawValue: raw)
             }
             return .generate()
@@ -162,18 +166,25 @@ extension MapOp: Codable {
 
         switch op {
         case "add-child":
-            let side = try c.decodeIfPresent(String.self, forKey: .side)
-                .flatMap { NodeSide(rawValue: $0) } ?? .auto
+            let side: NodeSide
+            if let raw = try c.decodeIfPresent(String.self, forKey: .side) {
+                guard let parsed = NodeSide(rawValue: raw) else {
+                    throw WireError.invalidValue(raw, op: op)
+                }
+                side = parsed
+            } else {
+                side = .auto
+            }
             self = .addChild(
                 parentID: try nodeID(.parent),
-                newNodeID: try generatedID(),
+                newNodeID: generatedID(),
                 text: try string(.text),
                 side: side
             )
         case "add-sibling":
             self = .addSibling(
                 siblingID: try nodeID(.sibling),
-                newNodeID: try generatedID(),
+                newNodeID: generatedID(),
                 text: try string(.text)
             )
         case "set-text":
@@ -212,8 +223,10 @@ extension MapOp: Codable {
         case "delete":
             if let ids = try c.decodeIfPresent([String].self, forKey: .ids) {
                 self = .delete(nodeIDs: ids.map { NodeID(rawValue: $0) })
+            } else if let raw = try c.decodeIfPresent(String.self, forKey: .id) {
+                self = .delete(nodeIDs: [NodeID(rawValue: raw)])
             } else {
-                self = .delete(nodeIDs: [try nodeID(.id)])
+                throw WireError.missingField("id/ids", op: op)
             }
         default:
             throw WireError.unknownOp(op)
@@ -246,9 +259,8 @@ extension MapOp: Codable {
         case let .setFormula(nodeID, formula):
             try c.encode(nodeID.rawValue, forKey: .id)
             try c.encodeIfPresent(formula, forKey: .formula)
-        case let .setFolded(nodeID, isFolded):
+        case let .setFolded(nodeID, _):
             try c.encode(nodeID.rawValue, forKey: .id)
-            try c.encode(isFolded, forKey: .folded)
         case let .setPin(nodeID, position):
             try c.encode(nodeID.rawValue, forKey: .id)
             if let position {
