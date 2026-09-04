@@ -2,14 +2,14 @@ import Foundation
 import SwiftMindCore
 
 // swiftmind <command> <file> [flags]
-// Commands: read, find, validate, add-child, add-sibling, set-text, set-note,
+// Commands: read, find, validate, new, add-child, add-sibling, set-text, set-note,
 //           set-attr, set-formula, fold, unfold, pin, unpin, move, delete, batch
 
 let args = Array(CommandLine.arguments.dropFirst())
 
 /// Bumped on every CLI behavior change; keep in sync before running
 /// scripts/install-cli.sh so `swiftmind --version` reflects the installed build.
-let swiftmindCLIVersion = "1.1.0"
+let swiftmindCLIVersion = "1.2.0"
 
 if args.first == "--version" || args.first == "version" {
     print("swiftmind \(swiftmindCLIVersion)")
@@ -23,6 +23,7 @@ func usage() -> Never {
       read <file>                      print the map as a JSON tree
       find <file> --query <text>       search titles/notes, print matching node ids
       validate <file>                  decode + re-encode check
+      new <file> [--title <t>]         create an empty map file (fails if it exists)
       add-child <file> --parent <id> --text <t> [--side auto|left|right] [--id <newid>]
       add-sibling <file> --of <id> --text <t> [--id <newid>]
       set-text <file> --id <id> --text <t>
@@ -87,6 +88,10 @@ do {
         MapFile.printJSON(hits.map {
             ["id": $0.nodeID.rawValue, "title": $0.title, "matchInNote": $0.matchInNote]
         })
+    case "new":
+        let title = flags["title"] ?? "Untitled"
+        try MapFile.create(path, title: title)
+        MapFile.printJSON(["ok": true, "file": path])
     default:
         try WriteCommands.run(command: command, path: path, flags: parsed.flags, bare: parsed.bare, positional: parsed.positional)
     }

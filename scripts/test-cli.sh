@@ -88,4 +88,13 @@ if p.returncode != 2 or b"changed on disk" not in p.stderr:
     sys.exit(1)
 PYEOF
 
+# new: creates a map, refuses to overwrite
+NEWF="$(mktemp -d)/fresh.swiftmind.html"
+"$CLI" new "$NEWF" --title "Fresh" >/dev/null || fail "new"
+"$CLI" validate "$NEWF" >/dev/null || fail "new output validates"
+"$CLI" read "$NEWF" | grep -q '"Fresh"' || fail "new title"
+if "$CLI" new "$NEWF" 2>/dev/null; then
+  fail "new on existing file should exit non-zero"
+fi
+
 echo "CLI smoke test OK"

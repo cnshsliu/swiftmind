@@ -50,6 +50,21 @@ enum MapFile {
         try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date
     }
 
+    /// Create an empty map file; refuses to overwrite an existing file.
+    static func create(_ path: String, title: String) throws {
+        let url = URL(fileURLWithPath: path)
+        guard !FileManager.default.fileExists(atPath: url.path) else {
+            throw CLIError.file("file exists: \(path)")
+        }
+        let map = MindMap.makeEmpty(title: title)
+        do {
+            let html = try HTMLCodec.encode(map, includeSkin: true)
+            try Data(html.utf8).write(to: url, options: .atomic)
+        } catch {
+            throw CLIError.file("cannot create \(path): \(error.localizedDescription)")
+        }
+    }
+
     /// Atomic write (temp file + rename via .atomic) so the app's file watcher
     /// sees exactly one change event and never a partial file.
     static func save(_ map: MindMap, to path: String) throws {        let html: String
