@@ -448,7 +448,7 @@ git commit -m "LayoutEngine: fixed-width estimated card size for expanded notes"
 - Create: `Sources/SwiftMindCore/Model/NoteDocument.swift`
 - Test: `Tests/SwiftMindCoreTests/NoteDocumentTests.swift`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/SwiftMindCoreTests/NoteDocumentTests.swift`:
 
@@ -504,12 +504,12 @@ final class NoteDocumentTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter NoteDocumentTests`
 Expected: FAIL — compile error, `NoteDocument` does not exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `Sources/SwiftMindCore/Model/NoteDocument.swift`:
 
@@ -552,12 +552,12 @@ public enum NoteDocument {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `swift test --filter NoteDocumentTests`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/SwiftMindCore/Model/NoteDocument.swift Tests/SwiftMindCoreTests/NoteDocumentTests.swift
