@@ -38,7 +38,8 @@ Apps/SwiftMindMac/             # The macOS app
   SwiftMindMac.xcodeproj/      #   Generated (gitignored pattern `*.xcodeproj/`); do not edit by hand
   SwiftMindMac/                #   SwiftUI app sources: SwiftMindMacApp, AppModel, DocumentSession,
                                #   SwiftMindFileDocument (FileDocument <-> HTMLCodec), MapCanvasView,
-                               #   OutlineMapView, InspectorView, BrainMapBuilder, VaultLibrary, etc.
+                               #   OutlineMapView, InspectorView, BrainMapBuilder, VaultLibrary,
+                               #   AgentBridge (Unix-socket agent bridge for `swiftmind mcp`), etc.
   SwiftMindMacUITests/         #   XCUITest smoke tests
 scripts/                       # Automation entry points (see below)
 skills/swiftmind/SKILL.md      # agent driver's manual for the CLI
@@ -81,8 +82,9 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 - **HTML is the persistence format.** `HTMLCodec.encode(_:includeSkin:)` / `decode(_:)` are the only read/write paths; the app saves with `includeSkin: true` so the file renders read-only in browsers. The schema is versioned (`schemaVersion`, currently 1, additive). Round-trip fidelity is enforced by `HTMLCodecTests` against the golden fixture `Tests/SwiftMindCoreTests/Fixtures/minimal.swiftmind.html`.
 - **Formulas are derived data.** `Node.formula` (source string) is the only persisted piece — `data-formula` on `<li>`, schema 1 additive. Computed values come from `FormulaEngine` inside `MapStore`, memoized against the node's subtree value; every DSL feature reads only that subtree, so cache validation is plain equality (sibling edits never invalidate). Never store computed values in the model, never evaluate formula text as real code, and keep `snapshot()` geometry-only — views merge formula results at render time.
 - **Scripts never mutate the map directly.** L3 scripts (JavaScriptCore, behind the `ScriptRuntime` protocol) read value snapshots and record `ScriptIntent`s; `ApplyScriptIntentsCommand` applies a successful run as one undoable batch (errors/timeouts apply nothing). Do not add bridges beyond the `mindmap` API object — the sandbox guarantee is "no network/file/process access", asserted by tests. Scripts live app-side (user-picked `.js` files), never embedded in the HTML.
-- **Multi-window:** each document window owns its own `DocumentSession` and undo stack — do not introduce shared mutable state between sessions.
+- **Single live session:** the app currently shares one `AppModel`/`DocumentSession` across all windows (`SwiftMindMacApp.swift`) — the agent bridge and all session-scoped features address that one session.
 - **External map edits go through the CLI.** `swiftmind` (Sources/SwiftMindCLI) decodes, applies `MapOp`s via `BatchOps` (all-or-nothing, through the existing commands), and atomically rewrites the file — refusing to save (exit 2) if the file changed on disk between its read and write. The app watches the open document's parent directory and hot-reloads external changes; this clears the undo stack (spec §hot reload). Never hand-edit `.swiftmind.html` in automation.
+- **Agent bridge (live edits).** `AgentBridge` in the app serves a Unix socket at `~/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind/agent.sock` (token file next to it, 0600, regenerated per launch). `swiftmind mcp` bridges stdio MCP to it; `applyOps` dispatches one `CompositeAgentCommand` = one undo step. Socket IO is hardened (MSG_NOSIGNAL, send/recv timeouts, 4 MB frame cap). No network entitlement. Kill switch: `defaults write app.swiftmind.mac swiftmind.agentBridge -bool false`.
 - **Xcode gotcha:** `debugDocumentVersioning` must be `false` in the scheme. When true, Xcode injects `-NSDocumentRevisionsDebugMode YES` and `DocumentGroup` opens "YES" as a file path. `scripts/patch-xcode-scheme.sh` fixes this after every `xcodegen generate` (already wired into `rerun-mac.sh`); the app also defensively sets the default to false in `SwiftMindMacApp.init`.
 
 ## Code style guidelines

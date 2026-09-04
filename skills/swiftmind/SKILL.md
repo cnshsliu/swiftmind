@@ -39,11 +39,27 @@ on stderr, exit 1/2/3 (usage/file/operation).
 - `move <file> --id <id> --to <parentId> [--index <n>]`
 - `delete <file> --ids <id,id,...>` — cannot delete the root.
 - `batch <file> [ops.json]` — ops array from file or stdin; **all-or-nothing**.
+- `new <file> [--title <t>]` — create an empty map file (fails if it exists).
 - `validate <file>` — decode + re-encode check.
 
 Always pass a value with each flag: a bare `--text` (or any required flag) is
 rejected as a usage error. Values that start with `--` cannot be passed as
 flags — use `batch` JSON instead for such text.
+
+## Live mode (MCP) — preferred when the app is running
+
+When SwiftMind.app is running, prefer the MCP bridge over file edits: edits
+become one ⌘Z step, formula results come computed, and you can see what the
+user has open. Register in the agent framework:
+
+    {"mcpServers": {"swiftmind": {"command": "swiftmind", "args": ["mcp"]}}}
+
+Tools: `read_map` (adds `formulaResult` per formula node), `find_nodes`,
+`apply_ops` (same op objects as `batch`; all-or-nothing, one undo step),
+`get_session`, `new_map`. If a tool returns "SwiftMind.app is not running",
+fall back to the file commands below. Never use `apply_ops` and a file-mode
+write command on the same map concurrently — the app's autosave wins the
+race; do live edits via MCP only, or stop the app and use file mode.
 
 ## The batch primitive (preferred for anything non-trivial)
 

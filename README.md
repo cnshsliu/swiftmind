@@ -69,6 +69,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Multi-window**: each document window owns its own `DocumentSession` / undo stack
 - **Open Recent** (File menu): last 10 opened maps, most recent first; entries that fail to open are pruned
 - **Agent CLI** (`swiftmind`): external agents/scripts read and edit maps via `read`/`find`/`add-child`/`batch` (all-or-nothing) — the app hot-reloads external changes; see `skills/swiftmind/SKILL.md`
+- **Agent live bridge** (`swiftmind mcp`): stdio MCP server that drives the running app over a local socket — edits land as **one ⌘Z step**, `read_map` includes computed **formula results**, and `get_session` reports what the user has open; `swiftmind new <file>` bootstraps an empty map from the CLI
 
 ### How to use notes
 
