@@ -344,7 +344,7 @@ git commit -m "MapOp setNoteExpanded (expand-note/collapse-note) + read JSON + a
 - Modify: `Sources/SwiftMindCore/Layout/LayoutEngine.swift` (`measure`, lines 86-101)
 - Test: `Tests/SwiftMindCoreTests/LayoutEngineTests.swift`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `LayoutEngineTests.swift`:
 
@@ -386,12 +386,12 @@ func testExpandedNoteHeightCapped() throws {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter LayoutEngineTests.testExpandedNoteNodeUsesCardSize`
 Expected: FAIL (width/height mismatch — expanded flag not handled yet).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `LayoutConfig.swift`, add fields (and matching init params with the same defaults):
 
@@ -428,12 +428,12 @@ In `LayoutEngine.measure`, right after `let style = ...`:
 
 Note the estimate math: empty note → 40 + 0 + 24 = 64; the test's 3-line note → 40 + 3*20 + 24 = 124... **recheck against the test**: test asserts 144 with 4 lines counted. Use `bodyLines + 1` (virtual H1 is a line too) — i.e. `Double(bodyLines + 1) * config.expandedNoteLineHeight` and drop the separate title height from the estimate, keeping `expandedNoteTitleHeight` out of `measure` (the card view uses it for rendering). Final formula: `min(maxHeight, max(nodeHeight, Double(bodyLines + 1) * lineHeight + paddingX * 2))` → 3-line note = 4*20+24 = 104. **Fix the test expectation to 104** (and empty note → 1*20+24=44 → clamped to nodeHeight 32? no, 44 > 32 → 44). Decide in implementation; make code and test agree: use the formula above and expect **104** in the test.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `swift test --filter LayoutEngineTests`
 Expected: PASS (existing pin/fold layout tests unaffected — flag defaults to false).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/SwiftMindCore/Layout/ Tests/SwiftMindCoreTests/LayoutEngineTests.swift
