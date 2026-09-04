@@ -92,10 +92,10 @@ enum MCPServer {
     }
 
     private static func handleToolCall(id: Any, params: [String: Any]) {
-        guard let tool = params["name"] as? String,
-              let method = methodForTool[tool] else {
+        let tool = params["name"] as? String
+        guard let tool, let method = methodForTool[tool] else {
             respond(id: id, result: [
-                "content": [["type": "text", "text": "unknown tool"]],
+                "content": [["type": "text", "text": "unknown tool: \(tool ?? "<missing>")"]],
                 "isError": true,
             ])
             return

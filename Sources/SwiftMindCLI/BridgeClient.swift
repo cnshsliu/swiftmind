@@ -5,12 +5,15 @@ import Foundation
 enum BridgeClient {
     enum Failure: Error, CustomStringConvertible {
         case appNotRunning
+        case unresponsive
         case badResponse(String)
 
         var description: String {
             switch self {
             case .appNotRunning:
                 return "SwiftMind.app is not running (start it, or use the file-mode CLI)"
+            case .unresponsive:
+                return "SwiftMind.app is not responding (bridge timed out or dropped the connection)"
             case .badResponse(let detail):
                 return "bad bridge response: \(detail)"
             }
@@ -57,6 +60,7 @@ enum BridgeClient {
 
         var tv = timeval(tv_sec: 10, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
         let request: [String: Any] = [
             "id": 1, "token": token, "method": method, "params": params,
@@ -68,15 +72,20 @@ enum BridgeClient {
         // dead peer kills this process with SIGPIPE.
         try sendAll(fd, requestData)
 
+        // Connected — any failure from here on means a wedged app, not an absent one.
         guard let header = readFully(fd, count: 4) else {
-            throw Failure.appNotRunning
+            throw Failure.unresponsive
         }
         let responseLength = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian }
-        guard responseLength > 0, responseLength <= 4 * 1024 * 1024,
-              let responseData = readFully(fd, count: Int(responseLength)),
-              let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        guard responseLength > 0, responseLength <= 4 * 1024 * 1024 else {
+            throw Failure.badResponse("bad frame length \(responseLength)")
+        }
+        guard let responseData = readFully(fd, count: Int(responseLength)) else {
+            throw Failure.unresponsive  // mid-frame EOF or read timeout
+        }
+        guard let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
         else {
-            throw Failure.badResponse("no or malformed frame")
+            throw Failure.badResponse("malformed frame")
         }
         return response
     }
@@ -92,7 +101,7 @@ enum BridgeClient {
                 let n = send(fd, ptr.baseAddress! + sent, ptr.count - sent, MSG_NOSIGNAL)
                 if n < 0 {
                     if errno == EINTR { continue }
-                    throw Failure.appNotRunning  // EPIPE etc. — peer gone
+                    throw Failure.unresponsive  // EPIPE etc. — peer gone after connect
                 }
                 sent += n
             }
@@ -106,6 +115,7 @@ enum BridgeClient {
             let n = buffer.withUnsafeMutableBytes { ptr in
                 recv(fd, ptr.baseAddress, min(ptr.count, count - data.count), 0)
             }
+            if n < 0, errno == EINTR { continue }
             guard n > 0 else { return nil }
             data.append(contentsOf: buffer[0..<n])
         }
