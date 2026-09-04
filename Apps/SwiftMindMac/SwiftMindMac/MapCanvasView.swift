@@ -89,13 +89,14 @@ struct MapCanvasView: View {
                     .simultaneousGesture(magnifyGesture)
                     .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
 
+                // Below the edit overlay: editing a title must not sit behind a card.
+                ForEach(snapshot.nodes.filter(\.isNoteExpanded)) { visual in
+                    noteCard(for: visual, viewSize: geo.size)
+                }
+
                 if let editingNodeID,
                    let visual = snapshot.nodes.first(where: { $0.id == editingNodeID }) {
                     editOverlay(for: visual, viewSize: geo.size)
-                }
-
-                ForEach(snapshot.nodes.filter(\.isNoteExpanded)) { visual in
-                    noteCard(for: visual, viewSize: geo.size)
                 }
 
                 if followMode {
