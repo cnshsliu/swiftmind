@@ -36,6 +36,7 @@ echo '[{"op":"set-text","id":"n_smoke","text":"Renamed Smoke"},{"op":"fold","id"
 echo '[{"op":"expand-note","id":"n_smoke"}]' | "$CLI" batch "$WORK" >/dev/null || fail "expand-note"
 "$CLI" read "$WORK" | grep -q "noteExpanded" || fail "read exposes noteExpanded"
 echo '[{"op":"collapse-note","id":"n_smoke"}]' | "$CLI" batch "$WORK" >/dev/null || fail "collapse-note"
+"$CLI" read "$WORK" | grep -q "noteExpanded" && fail "collapse-note should remove noteExpanded"
 
 # atomicity: failing batch leaves file unchanged
 BEFORE=$(shasum "$WORK" | cut -d' ' -f1)

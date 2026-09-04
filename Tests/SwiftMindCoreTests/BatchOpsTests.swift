@@ -141,13 +141,15 @@ final class BatchOpsTests: XCTestCase {
           {"op":"set-formula","id":"n_x","formula":"count(children)"},
           {"op":"fold","id":"n_x"},
           {"op":"unfold","id":"n_x"},
+          {"op":"expand-note","id":"n_x"},
+          {"op":"collapse-note","id":"n_x"},
           {"op":"pin","id":"n_x","x":12.5,"y":-3},
           {"op":"unpin","id":"n_x"},
           {"op":"move","id":"n_x","to":"n_y","index":2},
           {"op":"delete","ids":["n_x","n_y"]}
         ]
         """)
-        XCTAssertEqual(ops.count, 12)
+        XCTAssertEqual(ops.count, 14)
         XCTAssertEqual(ops[0], .addChild(
             parentID: NodeID(rawValue: "n_x"),
             newNodeID: NodeID(rawValue: "n_new"),
@@ -163,10 +165,12 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertEqual(ops[4], .setAttribute(nodeID: NodeID(rawValue: "n_x"), name: "status", value: "done"))
         XCTAssertEqual(ops[6], .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: true))
         XCTAssertEqual(ops[7], .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: false))
-        XCTAssertEqual(ops[8], .setPin(nodeID: NodeID(rawValue: "n_x"), position: Point2D(x: 12.5, y: -3)))
-        XCTAssertEqual(ops[9], .setPin(nodeID: NodeID(rawValue: "n_x"), position: nil))
-        XCTAssertEqual(ops[10], .move(nodeID: NodeID(rawValue: "n_x"), newParentID: NodeID(rawValue: "n_y"), index: 2))
-        XCTAssertEqual(ops[11], .delete(nodeIDs: [NodeID(rawValue: "n_x"), NodeID(rawValue: "n_y")]))
+        XCTAssertEqual(ops[8], .setNoteExpanded(nodeID: NodeID(rawValue: "n_x"), isNoteExpanded: true))
+        XCTAssertEqual(ops[9], .setNoteExpanded(nodeID: NodeID(rawValue: "n_x"), isNoteExpanded: false))
+        XCTAssertEqual(ops[10], .setPin(nodeID: NodeID(rawValue: "n_x"), position: Point2D(x: 12.5, y: -3)))
+        XCTAssertEqual(ops[11], .setPin(nodeID: NodeID(rawValue: "n_x"), position: nil))
+        XCTAssertEqual(ops[12], .move(nodeID: NodeID(rawValue: "n_x"), newParentID: NodeID(rawValue: "n_y"), index: 2))
+        XCTAssertEqual(ops[13], .delete(nodeIDs: [NodeID(rawValue: "n_x"), NodeID(rawValue: "n_y")]))
     }
 
     func testDecodeUnknownOpThrows() {
@@ -219,6 +223,7 @@ final class BatchOpsTests: XCTestCase {
             .setAttribute(nodeID: rootID, name: "status", value: ""), // removal path
             .setFormula(nodeID: rootID, formula: "count(children)"),
             .setFolded(nodeID: rootID, isFolded: true),
+            .setNoteExpanded(nodeID: rootID, isNoteExpanded: true),
             .setPin(nodeID: rootID, position: Point2D(x: 1, y: 2)),
             .addSibling(siblingID: NodeID(rawValue: "n_a"), newNodeID: NodeID(rawValue: "n_sib"), text: "Sib"),
             .move(nodeID: NodeID(rawValue: "n_sib"), newParentID: rootID, index: 0),
@@ -232,9 +237,9 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertEqual(viaApply, viaCommand)
         XCTAssertEqual(ops[0].affectedIDs, [NodeID(rawValue: "n_new")])
         XCTAssertEqual(ops[1].affectedIDs, [rootID])
-        XCTAssertEqual(ops[8].affectedIDs, [NodeID(rawValue: "n_sib")])
         XCTAssertEqual(ops[9].affectedIDs, [NodeID(rawValue: "n_sib")])
-        XCTAssertEqual(ops[10].affectedIDs, [NodeID(rawValue: "n_new")])
+        XCTAssertEqual(ops[10].affectedIDs, [NodeID(rawValue: "n_sib")])
+        XCTAssertEqual(ops[11].affectedIDs, [NodeID(rawValue: "n_new")])
     }
 
     func testEncodeDecodeRoundTrip() throws {
@@ -248,6 +253,8 @@ final class BatchOpsTests: XCTestCase {
             .setFormula(nodeID: NodeID(rawValue: "n_x"), formula: nil),
             .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: true),
             .setFolded(nodeID: NodeID(rawValue: "n_x"), isFolded: false),
+            .setNoteExpanded(nodeID: NodeID(rawValue: "n_x"), isNoteExpanded: true),
+            .setNoteExpanded(nodeID: NodeID(rawValue: "n_x"), isNoteExpanded: false),
             .setPin(nodeID: NodeID(rawValue: "n_x"), position: Point2D(x: 1.5, y: -2)),
             .setPin(nodeID: NodeID(rawValue: "n_x"), position: nil),
             .move(nodeID: NodeID(rawValue: "n_x"), newParentID: NodeID(rawValue: "n_y"), index: 1),
