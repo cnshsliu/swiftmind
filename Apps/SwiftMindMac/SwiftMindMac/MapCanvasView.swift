@@ -192,13 +192,14 @@ struct MapCanvasView: View {
                 return .handled
             }
             // Note editor (E) and note card expansion (X) for the primary node.
+            // Brain pseudo-nodes must not get CompositeAgentCommand mutations.
             .onKeyPress(.init("e")) {
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, !session.isBrainMode else { return .ignored }
                 toggleNoteEditor()
                 return .handled
             }
             .onKeyPress(.init("x")) {
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, !session.isBrainMode else { return .ignored }
                 toggleNoteExpansion()
                 return .handled
             }
@@ -206,15 +207,17 @@ struct MapCanvasView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
         .clipped()
-        // children: .ignore so the identifier is discoverable by XCUITest
-        .accessibilityElement(children: .ignore)
+        // children: .contain keeps mapCanvas discoverable while exposing
+        // overlay identifiers (noteEditor, noteCard-*) to XCUITest.
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Mind map canvas")
         .accessibilityIdentifier("mapCanvas")
         .accessibilityValue(selectedAccessibilityValue)
         .accessibilityAddTraits(.updatesFrequently)
         .onChange(of: session.selectionRevision) { _, _ in
             // After click-select, ensure canvas can receive Return/Delete.
-            if editingNodeID == nil {
+            // Never steal focus from the note editor or the in-place editor.
+            if editingNodeID == nil, noteEditorNodeID == nil {
                 canvasFocused = true
             }
             // Remember which child was last focused under each parent (h/l memory).
@@ -231,18 +234,35 @@ struct MapCanvasView: View {
                session.store.map.node(id: editingNodeID) == nil {
                 cancelEdit()
             }
-            if let id = noteEditorNodeID, session.store.map.node(id: id) == nil {
-                noteCommitTask?.cancel()
-                noteEditorNodeID = nil
-                session.liveNoteDocument = nil
-                preEditorPan = nil
-                editorPanTarget = nil
+            if let id = noteEditorNodeID {
+                if let node = session.store.map.node(id: id) {
+                    // External change (⌘Z, CLI, agent bridge): reload the
+                    // draft from the model. Our own debounced commits leave
+                    // model == draft, so they never trigger this reload; a
+                    // commit in flight (noteCommitTask != nil) suppresses it.
+                    let composed = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+                    if noteCommitTask == nil, composed != noteEditorDraft {
+                        noteEditorDraft = composed
+                        session.liveNoteDocument = (id, composed)
+                    }
+                } else {
+                    // Node vanished — close without committing, restoring pan.
+                    closeNoteEditor(committing: false)
+                }
             }
             // New/moved nodes change layout — pan so primary stays in view.
             keepPrimaryInFrame(animated: !reduceMotion)
         }
         .onAppear { installKeyMonitor() }
-        .onDisappear { removeKeyMonitor() }
+        .onDisappear {
+            removeKeyMonitor()
+            // Leaving the canvas (e.g. outline mode) must not leak the live
+            // draft: commit so the last keystrokes land, then clear the channel.
+            if noteEditorNodeID != nil {
+                closeNoteEditor(committing: true)
+            }
+            session.liveNoteDocument = nil
+        }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
             guard editingNodeID == nil else { return }
             beginEditPreferringHover(snapshot: session.store.snapshot())
@@ -779,10 +799,12 @@ struct MapCanvasView: View {
     private func noteCard(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
         let markdown = session.store.map.node(id: visual.id)?.noteMarkdown ?? ""
-        let live = session.liveNoteDocument
-        let document = live?.nodeID == visual.id
-            ? live!.document
-            : NoteDocument.compose(title: visual.text, body: markdown)
+        let document: String = {
+            if let live = session.liveNoteDocument, live.nodeID == visual.id {
+                return live.document
+            }
+            return NoteDocument.compose(title: visual.text, body: markdown)
+        }()
         let rendered = try? AttributedString(markdown: document)
         ScrollView(.vertical) {
             Text(rendered ?? AttributedString(document))
@@ -844,9 +866,12 @@ struct MapCanvasView: View {
         DispatchQueue.main.async { noteEditorFocused = true }
     }
 
-    private func closeNoteEditor() {
+    private func closeNoteEditor(committing: Bool = true) {
         noteCommitTask?.cancel()
-        commitNoteEditorDraft()
+        noteCommitTask = nil
+        if committing {
+            commitNoteEditorDraft()
+        }
         noteEditorNodeID = nil
         session.liveNoteDocument = nil
         // Restore the pre-editor pan only if the user hasn't panned since.
@@ -884,13 +909,15 @@ struct MapCanvasView: View {
     }
 
     /// 1s debounce — each typing burst is one CompositeAgentCommand, i.e. one
-    /// undo step (the scheduleAutosave idiom from AppModel).
+    /// undo step (the scheduleAutosave idiom from AppModel). noteCommitTask is
+    /// cleared after firing so "a commit is in flight" is detectable.
     private func scheduleNoteCommit() {
         noteCommitTask?.cancel()
         noteCommitTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
             commitNoteEditorDraft()
+            noteCommitTask = nil
         }
     }
 

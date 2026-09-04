@@ -47,10 +47,12 @@ struct InspectorView: View {
                 }
 
                 Section("Note") {
-                    let live = session.liveNoteDocument
-                    let bodyMarkdown = live?.nodeID == node.id
-                        ? NoteDocument.split(live!.document).body
-                        : node.noteMarkdown
+                    let bodyMarkdown: String = {
+                        if let live = session.liveNoteDocument, live.nodeID == node.id {
+                            return NoteDocument.split(live.document).body
+                        }
+                        return node.noteMarkdown
+                    }()
                     if !bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        let attr = try? AttributedString(markdown: bodyMarkdown) {
                         Text(attr)
