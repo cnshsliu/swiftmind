@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import SwiftMindCore
 
 /// Copy/cut/paste/drop brain for the map. All mutations are one
@@ -108,21 +109,22 @@ enum ClipboardService {
         let board = NSPasteboard.general
 
         // 1. Private node flavor.
+        let parent = targetID(in: session)
         if let data = board.data(forType: Self.nodeType),
            let nodes = try? JSONDecoder().decode([Node].self, from: data), !nodes.isEmpty {
-            applyNodes(nodes, into: session, toast: "Pasted nodes · ⌘Z to undo")
+            applyNodes(nodes, parent: parent, into: session, toast: "Pasted nodes · ⌘Z to undo")
             return
         }
 
         // 2. URLs (file or web).
         if let urls = board.readObjects(forClasses: [NSURL.self]) as? [URL], let url = urls.first {
-            ingest(url: url, into: session)
+            ingest(url: url, parent: parent, into: session)
             return
         }
 
         // 3. Image data.
         if let data = imageData(from: board) {
-            ingestImageData(data, into: session)
+            ingestImageData(data, parent: parent, into: session)
             return
         }
 
@@ -130,7 +132,7 @@ enum ClipboardService {
         if let html = board.string(forType: .html), !html.isEmpty {
             let text = htmlToPlainText(html)
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                ingestText(text, into: session)
+                ingestText(text, parent: parent, into: session)
                 return
             }
         }
@@ -138,20 +140,20 @@ enum ClipboardService {
         // 5. Plain text / markdown.
         if let text = board.string(forType: .string),
            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            ingestText(text, into: session)
+            ingestText(text, parent: parent, into: session)
         }
     }
 
-    private static func ingest(url: URL, into session: DocumentSession) {
+    private static func ingest(url: URL, parent: NodeID, into session: DocumentSession) {
         if isImageFile(url), let data = try? Data(contentsOf: url) {
-            ingestImageData(data, into: session)
+            ingestImageData(data, parent: parent, into: session)
             return
         }
         if url.isFileURL {
             // Follow-up: graft imported .mm/.swiftmind.html maps as subtrees.
             let title = url.lastPathComponent
             let (ops, id) = buildAddOps(
-                parent: targetID(in: session),
+                parent: parent,
                 title: title,
                 noteMarkdown: url.path,
                 links: [.url(url)]
@@ -160,7 +162,7 @@ enum ClipboardService {
         } else {
             let title = urlLabel(url)
             let (ops, id) = buildAddOps(
-                parent: targetID(in: session),
+                parent: parent,
                 title: title,
                 noteMarkdown: "",
                 links: [.url(url)]
@@ -169,13 +171,16 @@ enum ClipboardService {
         }
     }
 
-    static func ingestImageData(_ data: Data, into session: DocumentSession, at point: Point2D? = nil) {
+    static func ingestImageData(
+        _ data: Data, parent: NodeID, into session: DocumentSession,
+        at point: Point2D? = nil
+    ) {
         guard let png = normalizeImage(data) else {
             session.showToast("Couldn't read that image", kind: .error)
             return
         }
         let uri = "![pasted](data:image/png;base64,\(png.base64EncodedString()))"
-        if point == nil, let node = session.store.map.node(id: targetNode(in: session)) {
+        if point == nil, let node = session.store.map.node(id: parent) {
             // Append into the existing note (the note editor reconciles via
             // its contentRevision watcher).
             let note = node.noteMarkdown
@@ -185,7 +190,7 @@ enum ClipboardService {
         } else {
             let id = NodeID.generate()
             var ops: [MapOp] = [
-                .addChild(parentID: targetID(in: session), newNodeID: id, text: "Pasted image", side: .auto),
+                .addChild(parentID: parent, newNodeID: id, text: "Pasted image", side: .auto),
                 .setNote(nodeID: id, markdown: uri),
             ]
             if let point {
@@ -195,9 +200,9 @@ enum ClipboardService {
         }
     }
 
-    private static func ingestText(_ text: String, into session: DocumentSession) {
+    private static func ingestText(_ text: String, parent: NodeID, into session: DocumentSession) {
         if let nodes = MarkdownOutline.parse(text), !nodes.isEmpty {
-            applyNodes(nodes, into: session, toast: "Pasted outline · ⌘Z to undo")
+            applyNodes(nodes, parent: parent, into: session, toast: "Pasted outline · ⌘Z to undo")
             return
         }
         let lines = text.components(separatedBy: "\n")
@@ -208,7 +213,6 @@ enum ClipboardService {
             session.showToast("Pasted text truncated to \(maxCreatedNodes) nodes", kind: .error, duration: 3.2)
         }
         let capped = Array(lines.prefix(maxCreatedNodes))
-        let parent = targetID(in: session)
         var firstNew: NodeID?
         let ops: [MapOp] = capped.map { line in
             let id = NodeID.generate()
@@ -232,9 +236,8 @@ enum ClipboardService {
     /// Paste full node subtrees as children of the target (fresh ids so
     /// pasting into the same map never collides).
     static func applyNodes(
-        _ nodes: [Node], into session: DocumentSession, toast: String
+        _ nodes: [Node], parent: NodeID, into session: DocumentSession, toast: String
     ) {
-        let parent = targetID(in: session)
         var ops: [MapOp] = []
         var firstNew: NodeID?
         func emit(_ node: Node, parentID: NodeID) {
@@ -361,5 +364,108 @@ enum ClipboardService {
               )
         else { return "" }
         return attr.string
+    }
+
+    // MARK: - Drag & drop
+
+    /// Handles dragged-in items (Finder files, Safari URLs/text, images,
+    /// internal node copies) for the canvas. `parent` is the hit node, or
+    /// the selection/root fallback when dropping on empty canvas (then
+    /// `pin` places the new node at the drop point).
+    static func handleDrop(
+        providers: [NSItemProvider], parent: NodeID, pin: Point2D?,
+        into session: DocumentSession
+    ) {
+        guard !session.isBrainMode, let provider = providers.first else { return }
+        Task { @MainActor in
+            await performDrop(provider, parent: parent, pin: pin, session: session)
+        }
+    }
+
+    private static func performDrop(
+        _ provider: NSItemProvider, parent: NodeID, pin: Point2D?,
+        session: DocumentSession
+    ) async {
+        let nodeID = nodeType.rawValue
+
+        // 1. Internal node subtrees.
+        if provider.hasItemConformingToTypeIdentifier(nodeID),
+           let data = await loadData(provider, identifier: nodeID),
+           let nodes = try? JSONDecoder().decode([Node].self, from: data), !nodes.isEmpty {
+            applyNodes(nodes, parent: parent, into: session, toast: "Dropped nodes · ⌘Z to undo")
+            return
+        }
+
+        // 2. File URLs (Finder).
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+           let data = await loadData(provider, identifier: UTType.fileURL.identifier),
+           let path = String(data: data, encoding: .utf8) {
+            let url = URL(fileURLWithPath: path.trimmingCharacters(in: .whitespacesAndNewlines))
+            if isImageFile(url), let imageData = try? Data(contentsOf: url) {
+                ingestImageData(imageData, parent: parent, into: session, at: pin)
+            } else {
+                let (ops, id) = buildAddOps(
+                    parent: parent, title: url.lastPathComponent,
+                    noteMarkdown: url.path, links: [.url(url)]
+                )
+                var all = ops
+                if let pin { all.append(.setPin(nodeID: id, position: pin)) }
+                apply(all, into: session, select: id, toast: "Added file link · ⌘Z to undo")
+            }
+            return
+        }
+
+        // 3. Web URLs (Safari address bar).
+        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
+           let data = await loadData(provider, identifier: UTType.url.identifier),
+           let raw = String(data: data, encoding: .utf8),
+           let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           url.scheme?.hasPrefix("http") == true {
+            let (ops, id) = buildAddOps(
+                parent: parent, title: urlLabel(url),
+                noteMarkdown: "", links: [.url(url)]
+            )
+            var all = ops
+            if let pin { all.append(.setPin(nodeID: id, position: pin)) }
+            apply(all, into: session, select: id, toast: "Added link · ⌘Z to undo")
+            return
+        }
+
+        // 4. Images.
+        for identifier in [UTType.tiff.identifier, UTType.png.identifier, UTType.image.identifier] {
+            if provider.hasItemConformingToTypeIdentifier(identifier),
+               let data = await loadData(provider, identifier: identifier) {
+                ingestImageData(data, parent: parent, into: session, at: pin)
+                return
+            }
+        }
+
+        // 5. HTML → text.
+        if provider.hasItemConformingToTypeIdentifier(UTType.html.identifier),
+           let data = await loadData(provider, identifier: UTType.html.identifier),
+           let html = String(data: data, encoding: .utf8) {
+            let text = htmlToPlainText(html)
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ingestText(text, parent: parent, into: session)
+                return
+            }
+        }
+
+        // 6. Plain text / markdown.
+        if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
+           let data = await loadData(provider, identifier: UTType.plainText.identifier),
+           let text = String(data: data, encoding: .utf8) {
+            ingestText(text, parent: parent, into: session)
+        }
+    }
+
+    private static func loadData(
+        _ provider: NSItemProvider, identifier: String
+    ) async -> Data? {
+        await withCheckedContinuation { continuation in
+            _ = provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+                continuation.resume(returning: data)
+            }
+        }
     }
 }

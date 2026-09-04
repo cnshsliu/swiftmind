@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftMindCore
 import AppKit
+import UniformTypeIdentifiers
 
 struct MapCanvasView: View {
     @ObservedObject var session: DocumentSession
@@ -24,6 +25,8 @@ struct MapCanvasView: View {
     @State private var dragCurrentLocation: CGPoint?
     /// Live map-space position while reparent-dragging (ghost).
     @State private var reparentGhostCenter: CGPoint?
+    /// External drag & drop (Finder/Safari) — distinct from internal reparent.
+    @State private var isExternalDropTargeted = false
 
     // MARK: In-place edit
     @State private var editingNodeID: NodeID?
@@ -210,6 +213,36 @@ struct MapCanvasView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
         .clipped()
+        .overlay {
+            if isExternalDropTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(
+            of: [
+                UTType.swiftmindNode, .fileURL, .url, .image,
+                .html, .utf8PlainText, .plainText,
+            ],
+            isTargeted: $isExternalDropTargeted
+        ) { providers, location in
+            guard !session.isBrainMode, editingNodeID == nil else { return false }
+            let snapshot = session.store.snapshot()
+            // Drop onto a node = child of that node; empty canvas = child of
+            // the selection (or root), pinned at the drop point.
+            let hit = hitTest(location, snapshot: snapshot, viewSize: canvasSize)
+            let parent = hit ?? session.store.selection.primary ?? session.store.map.root.id
+            let pin: Point2D? = hit == nil ? {
+                let p = mapPoint(from: location, viewSize: canvasSize)
+                return Point2D(x: p.x, y: p.y)
+            }() : nil
+            ClipboardService.handleDrop(
+                providers: providers, parent: parent, pin: pin, into: session
+            )
+            return true
+        }
         // children: .contain keeps mapCanvas discoverable while exposing
         // overlay identifiers (noteEditor, noteCard-*) to XCUITest.
         .accessibilityElement(children: .contain)
