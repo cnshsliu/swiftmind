@@ -328,4 +328,33 @@ final class SwiftMindMacUITests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.8))
         XCTAssertFalse(result.exists, "Clearing the formula should remove the result")
     }
+
+    func testCopyPasteNode() throws {
+        let countLabel = element("nodeCountLabel")
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 5))
+        func nodeCount() -> Int {
+            let text = countLabel.value as? String ?? countLabel.label
+            let digits = text.compactMap(\.wholeNumberValue).prefix(1)
+            return digits.first ?? 0
+        }
+
+        // Add a child (auto-selected), copy it, clear selection, paste.
+        app.typeKey("t", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        let afterAdd = nodeCount()
+        app.typeKey("c", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        app.typeKey("v", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+
+        XCTAssertEqual(nodeCount(), afterAdd + 1, "Paste of a copied node should add exactly one node")
+        let selected = element("selectedNodeLabel")
+        XCTAssertTrue(
+            selected.waitForExistence(timeout: 2)
+                && (selected.value as? String ?? selected.label).contains("New Idea"),
+            "Pasted node should be selected; got \(selected.value ?? "nil")"
+        )
+    }
 }

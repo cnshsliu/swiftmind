@@ -73,6 +73,10 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 - **Open Recent** (File menu): last 10 opened maps, most recent first; entries that fail to open are pruned
 - **Agent CLI** (`swiftmind`): external agents/scripts read and edit maps via `read`/`find`/`add-child`/`batch` (all-or-nothing) — the app hot-reloads external changes; see `skills/swiftmind/SKILL.md`
 - **Agent live bridge** (`swiftmind mcp`): stdio MCP server that drives the running app over a local socket — edits land as **one ⌘Z step**, `read_map` includes computed **formula results**, and `get_session` reports what the user has open; `swiftmind new <file>` bootstraps an empty map from the CLI
+- **LaTeX in notes**: `$e^{i\pi}+1=0$` renders inline and `$$…$$` as centered block math (pure-Swift subset renderer: Greek, operators, fractions, super/subscripts, `\sqrt`, `\text`; unknown commands show their source instead of vanishing). Dollar amounts like `$5 and $10` stay literal
+- **Markdown note documents**: `E` opens a floating editor beside the node (live preview on the card), `X` toggles the expanded rendered card on the canvas; the note's first `# heading` is the node title
+- **Copy / cut / paste** (⌘C/⌘X/⌘V): copied nodes keep their subtree (children, notes, links). Pasting text/markdown creates child nodes (bullet outlines become nested subtrees); pasting a URL creates a link node; pasting an image embeds it into the focused node's note; HTML from other apps is converted to text. Text fields keep normal paste behavior. Every paste is one undo step
+- **Drag & drop onto the canvas**: drop on a node to add a child of it; drop on empty canvas to add a child of the selection pinned at the drop point. Accepts text/markdown, URLs (Safari), image files (embedded as data-URI note images), and other files (link nodes)
 
 ### How to use notes
 
@@ -111,6 +115,7 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 | Pinch | Zoom |
 | Double-click node | Rename |
 | Click node | Select |
+| **Drag text/URL/file/image in** from any app | Add node(s) — drop on a node = child of it; empty canvas = child of selection pinned at the drop point |
 
 ## M3 features (power layer)
 
