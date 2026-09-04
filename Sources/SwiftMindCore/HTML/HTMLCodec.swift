@@ -157,6 +157,9 @@ public enum HTMLCodec {
             out += " data-pin-x=\"\(formatNumber(pin.x))\""
             out += " data-pin-y=\"\(formatNumber(pin.y))\""
         }
+        if node.isNoteExpanded {
+            out += " data-note-expanded=\"true\""
+        }
         if !node.icons.isEmpty {
             let ids = node.icons.map(\.id).joined(separator: ",")
             out += " data-icons=\"\(escapeAttribute(ids))\""
@@ -513,6 +516,8 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 positionPin = Point2D(x: x, y: y)
             }
 
+            let noteExpanded = attributeDict["data-note-expanded"] == "true"
+
             var icons: [NodeIcon] = []
             if let iconsAttr = attributeDict["data-icons"], !iconsAttr.isEmpty {
                 icons = iconsAttr
@@ -543,6 +548,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 side: side,
                 style: style,
                 positionPin: positionPin,
+                isNoteExpanded: noteExpanded,
                 children: []
             )
             nodeStack.append(node)

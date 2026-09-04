@@ -127,6 +127,26 @@ final class HTMLCodecTests: XCTestCase {
         XCTAssertNil(decoded.root.positionPin)
     }
 
+    func testNoteExpandedRoundTrip() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_x"), text: "X", side: .right),
+            on: &map
+        )
+
+        // Default false: attribute is not emitted at all (old files byte-compatible).
+        var html = try HTMLCodec.encode(map, includeSkin: false)
+        XCTAssertFalse(html.contains("data-note-expanded"))
+
+        map.updateNode(id: NodeID(rawValue: "n_x")) { $0.isNoteExpanded = true }
+        html = try HTMLCodec.encode(map, includeSkin: false)
+        XCTAssertTrue(html.contains("data-note-expanded=\"true\""))
+
+        let decoded = try HTMLCodec.decode(html)
+        XCTAssertTrue(decoded.root.children[0].isNoteExpanded)
+    }
+
     func testLegacyM1HTMLStillDecodes() throws {
         let url = try XCTUnwrap(
             Bundle.module.url(

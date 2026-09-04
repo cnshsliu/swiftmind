@@ -13,6 +13,8 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     public var side: NodeSide
     public var style: NodeStyle
     public var positionPin: Point2D?
+    /// Show the note as a rendered markdown card on the canvas (persisted).
+    public var isNoteExpanded: Bool
     public var children: [Node]
 
     public init(
@@ -28,6 +30,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         side: NodeSide = .auto,
         style: NodeStyle = .default,
         positionPin: Point2D? = nil,
+        isNoteExpanded: Bool = false,
         children: [Node] = []
     ) {
         self.id = id
@@ -42,6 +45,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.side = side
         self.style = style
         self.positionPin = positionPin
+        self.isNoteExpanded = isNoteExpanded
         self.children = children
     }
 
