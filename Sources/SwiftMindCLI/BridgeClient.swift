@@ -20,9 +20,11 @@ enum BridgeClient {
         }
     }
 
+    /// Testing hook: SWIFTMIND_BRIDGE_DIR overrides the container path.
     private static var bridgeDirectory: String {
-        NSHomeDirectory()
-            + "/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind"
+        ProcessInfo.processInfo.environment["SWIFTMIND_BRIDGE_DIR"]
+            ?? NSHomeDirectory()
+                + "/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind"
     }
 
     /// One request, one short-lived connection.

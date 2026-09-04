@@ -110,4 +110,20 @@ echo "$MCP_OUT" | grep -q '"serverInfo"' || fail "mcp initialize"
 echo "$MCP_OUT" | grep -q '"id":2' || fail "mcp tools/call response"
 echo "$MCP_OUT" | grep -q '"content"' || fail "mcp tools/call content"
 
+# bridge loopback: fake UDS bridge + real MCP round-trip through swiftmind mcp
+LB_DIR="$(mktemp -d)/bridge"
+python3 "$ROOT/scripts/test-bridge-loopback.py" "$LB_DIR" &
+LB_PID=$!
+trap 'kill $LB_PID 2>/dev/null || true' EXIT
+for i in $(seq 1 50); do [ -S "$LB_DIR/agent.sock" ] && break; sleep 0.1; done
+[ -S "$LB_DIR/agent.sock" ] || fail "loopback bridge did not start"
+MCP_LB=$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_session","arguments":{}}}' \
+  | SWIFTMIND_BRIDGE_DIR="$LB_DIR" "$CLI" mcp)
+# the bridge response is pretty-printed JSON escaped into the MCP content text
+echo "$MCP_LB" | grep -q 'loopback\\" : true' || fail "mcp loopback round-trip: $MCP_LB"
+echo "$MCP_LB" | grep -q 'method\\" : \\"session\\"' || fail "loopback method echo"
+kill $LB_PID 2>/dev/null || true
+trap - EXIT
+
 echo "CLI smoke test OK"
