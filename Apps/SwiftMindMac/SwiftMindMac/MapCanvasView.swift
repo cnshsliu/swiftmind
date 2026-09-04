@@ -94,6 +94,10 @@ struct MapCanvasView: View {
                     editOverlay(for: visual, viewSize: geo.size)
                 }
 
+                ForEach(snapshot.nodes.filter(\.isNoteExpanded)) { visual in
+                    noteCard(for: visual, viewSize: geo.size)
+                }
+
                 if followMode {
                     VStack {
                         HStack {
@@ -581,8 +585,9 @@ struct MapCanvasView: View {
                 }
             }
 
-            // Hide label while editing this node (overlay TextField shows it).
-            if editingNodeID != node.id {
+            // Hide label while editing this node (overlay TextField shows it);
+            // expanded nodes render the note card instead of the plain title.
+            if editingNodeID != node.id && !node.isNoteExpanded {
                 let textRect = rect.insetBy(dx: 6, dy: 4)
                 let adjustedTextRect = CGRect(
                     x: textRect.minX + iconStripWidth,
@@ -721,6 +726,32 @@ struct MapCanvasView: View {
                     editFieldFocused = true
                 }
             }
+    }
+
+    /// Read-only rendered markdown card for an expanded node. Hit-testing is
+    /// off so canvas selection/gestures keep working through the card.
+    @ViewBuilder
+    private func noteCard(for visual: NodeVisual, viewSize: CGSize) -> some View {
+        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        let markdown = session.store.map.node(id: visual.id)?.noteMarkdown ?? ""
+        let document = NoteDocument.compose(title: visual.text, body: markdown)
+        let rendered = try? AttributedString(markdown: document)
+        ScrollView(.vertical) {
+            Text(rendered ?? AttributedString(document))
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+        }
+        .scrollDisabled(true) // overflow is clipped; layout height is an estimate
+        .frame(width: frame.width, height: frame.height)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+        .position(x: frame.midX, y: frame.midY)
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
     }
 
     private func viewFrame(for mapFrame: Rect2D, viewSize: CGSize) -> CGRect {

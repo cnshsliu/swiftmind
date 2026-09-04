@@ -375,7 +375,8 @@ public struct LayoutEngine: Sendable {
                 hasNote: !node.noteMarkdown.isEmpty,
                 iconIDs: node.icons.map(\.id),
                 isPinned: node.positionPin != nil,
-                isHighlighted: isHighlighted(node, filter: filter)
+                isHighlighted: isHighlighted(node, filter: filter),
+                isNoteExpanded: node.isNoteExpanded
             )
         )
     }

@@ -50,6 +50,8 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
     public var isPinned: Bool
     /// True when the active filter is in highlight mode and this node matches.
     public var isHighlighted: Bool
+    /// True when the source node renders its note as a markdown card.
+    public var isNoteExpanded: Bool
 
     public init(
         id: NodeID,
@@ -63,7 +65,8 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         hasNote: Bool = false,
         iconIDs: [String] = [],
         isPinned: Bool = false,
-        isHighlighted: Bool = false
+        isHighlighted: Bool = false,
+        isNoteExpanded: Bool = false
     ) {
         self.id = id
         self.text = text
@@ -77,6 +80,7 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         self.iconIDs = iconIDs
         self.isPinned = isPinned
         self.isHighlighted = isHighlighted
+        self.isNoteExpanded = isNoteExpanded
     }
 }
 
