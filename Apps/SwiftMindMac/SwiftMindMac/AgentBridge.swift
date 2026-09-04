@@ -129,15 +129,17 @@ final class AgentBridge {
         guard conn >= 0 else { return }
         defer { close(conn) }
         // Darwin raises SIGPIPE on send() to a closed peer — that would kill
-        // the app. Belt and braces: SO_NOSIGPIPE where valid (rejected with
-        // EINVAL on AF_UNIX on newer macOS) and MSG_NOSIGNAL on every send,
-        // which is the operative guard — EPIPE becomes a plain send() error.
+        // the app. Belt and braces: SO_NOSIGPIPE on the fd (accepted on
+        // AF_UNIX here, kept for defense in depth) and MSG_NOSIGNAL on every
+        // send, which is the operative guard — EPIPE becomes a plain send()
+        // error.
         var yes: Int32 = 1
         setsockopt(conn, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout<Int32>.size))
-        // Bound the blocking recv so a client dribbling a partial frame can't
-        // stall the serial ioQueue forever.
+        // Bound the blocking recv/send so a client dribbling a partial frame
+        // or stalling mid-response can't block the serial ioQueue forever.
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(conn, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         guard let requestData = Self.readFrame(conn) else { return }
         let response: [String: Any] = DispatchQueue.main.sync {
             MainActor.assumeIsolated {
