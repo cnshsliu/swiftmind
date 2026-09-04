@@ -185,6 +185,32 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertThrowsError(try decodeOps(#"[{"op":"add-child","parent":"n_x","id":5,"text":"T"}]"#))
     }
 
+    /// command(in:) must produce the same effect as BatchOps.apply.
+    func testCommandInMatchesApply() throws {
+        var viaApply = makeMap()
+        var viaCommand = viaApply
+        let rootID = viaApply.root.id
+        let ops: [MapOp] = [
+            .addChild(parentID: rootID, newNodeID: NodeID(rawValue: "n_new"), text: "New", side: .auto),
+            .setText(nodeID: rootID, text: "Renamed"),
+            .setNote(nodeID: rootID, markdown: "note"),
+            .setAttribute(nodeID: rootID, name: "status", value: "done"),
+            .setAttribute(nodeID: rootID, name: "status", value: ""), // removal path
+            .setFormula(nodeID: rootID, formula: "count(children)"),
+            .setFolded(nodeID: rootID, isFolded: true),
+            .setPin(nodeID: rootID, position: Point2D(x: 1, y: 2)),
+            .delete(nodeIDs: [NodeID(rawValue: "n_new")]),
+        ]
+        try BatchOps.apply(ops, to: &viaApply)
+        for op in ops {
+            try op.command(in: viaCommand).execute(on: &viaCommand)
+        }
+        XCTAssertEqual(viaApply, viaCommand)
+        XCTAssertEqual(ops[0].affectedIDs, [NodeID(rawValue: "n_new")])
+        XCTAssertEqual(ops[1].affectedIDs, [rootID])
+        XCTAssertEqual(ops[8].affectedIDs, [NodeID(rawValue: "n_new")])
+    }
+
     func testEncodeDecodeRoundTrip() throws {
         let ops: [MapOp] = [
             .addChild(parentID: NodeID(rawValue: "n_x"), newNodeID: NodeID(rawValue: "n_n"), text: "Kid", side: .left),

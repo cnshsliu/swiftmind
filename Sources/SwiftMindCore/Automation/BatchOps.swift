@@ -69,53 +69,57 @@ public enum BatchOps {
     }
 
     private static func applyOne(_ op: MapOp, to map: inout MindMap) throws -> [NodeID] {
-        switch op {
+        try op.command(in: map).execute(on: &map)
+        return op.affectedIDs
+    }
+}
+
+extension MapOp {
+    /// Ids this op touches, in order (used for the CLI's `affected` response).
+    public var affectedIDs: [NodeID] {
+        switch self {
+        case .addChild(_, let newNodeID, _, _): return [newNodeID]
+        case .addSibling(_, let newNodeID, _): return [newNodeID]
+        case .setText(let id, _), .setNote(let id, _), .setAttribute(let id, _, _),
+             .setFormula(let id, _), .setFolded(let id, _), .setPin(let id, _):
+            return [id]
+        case .move(let id, _, _): return [id]
+        case .delete(let ids): return ids
+        }
+    }
+
+    /// Build the underlying command. `map` is only read, for ops whose
+    /// command needs current state (attribute removal).
+    public func command(in map: MindMap) throws -> any MapCommand {
+        switch self {
         case let .addChild(parentID, newNodeID, text, side):
-            try InsertChildCommand(parentID: parentID, newNodeID: newNodeID, text: text, side: side)
-                .execute(on: &map)
-            return [newNodeID]
+            return InsertChildCommand(parentID: parentID, newNodeID: newNodeID, text: text, side: side)
         case let .addSibling(siblingID, newNodeID, text):
-            try InsertSiblingCommand(siblingID: siblingID, newNodeID: newNodeID, text: text)
-                .execute(on: &map)
-            return [newNodeID]
+            return InsertSiblingCommand(siblingID: siblingID, newNodeID: newNodeID, text: text)
         case let .setText(nodeID, text):
-            try SetTextCommand(nodeID: nodeID, newText: text).execute(on: &map)
-            return [nodeID]
+            return SetTextCommand(nodeID: nodeID, newText: text)
         case let .setNote(nodeID, markdown):
-            try SetNoteCommand(nodeID: nodeID, noteMarkdown: markdown).execute(on: &map)
-            return [nodeID]
+            return SetNoteCommand(nodeID: nodeID, noteMarkdown: markdown)
         case let .setAttribute(nodeID, name, value):
             if value.isEmpty {
                 guard let node = map.node(id: nodeID) else {
                     throw MapCommandError.nodeNotFound(nodeID)
                 }
                 let remaining = node.attributes.filter { $0.name != name }
-                try SetAttributesCommand(nodeID: nodeID, attributes: remaining).execute(on: &map)
-            } else {
-                try UpsertAttributeCommand(
-                    nodeID: nodeID,
-                    attribute: NodeAttribute(name: name, value: value)
-                ).execute(on: &map)
+                return SetAttributesCommand(nodeID: nodeID, attributes: remaining)
             }
-            return [nodeID]
+            return UpsertAttributeCommand(nodeID: nodeID, attribute: NodeAttribute(name: name, value: value))
         case let .setFormula(nodeID, formula):
             let normalized = (formula ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            try SetFormulaCommand(nodeID: nodeID, formula: normalized.isEmpty ? nil : normalized)
-                .execute(on: &map)
-            return [nodeID]
+            return SetFormulaCommand(nodeID: nodeID, formula: normalized.isEmpty ? nil : normalized)
         case let .setFolded(nodeID, isFolded):
-            try SetFoldedCommand(nodeID: nodeID, isFolded: isFolded).execute(on: &map)
-            return [nodeID]
+            return SetFoldedCommand(nodeID: nodeID, isFolded: isFolded)
         case let .setPin(nodeID, position):
-            try SetPinCommand(nodeID: nodeID, positionPin: position).execute(on: &map)
-            return [nodeID]
+            return SetPinCommand(nodeID: nodeID, positionPin: position)
         case let .move(nodeID, newParentID, index):
-            try MoveNodeCommand(nodeID: nodeID, newParentID: newParentID, index: index)
-                .execute(on: &map)
-            return [nodeID]
+            return MoveNodeCommand(nodeID: nodeID, newParentID: newParentID, index: index)
         case let .delete(nodeIDs):
-            try DeleteNodesCommand(nodeIDs: nodeIDs).execute(on: &map)
-            return nodeIDs
+            return DeleteNodesCommand(nodeIDs: nodeIDs)
         }
     }
 }
