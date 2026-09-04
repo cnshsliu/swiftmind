@@ -36,6 +36,8 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 
 **Agents / automation:** after UI or app changes, always run `./scripts/rerun-mac.sh` so you never need to manually stop Xcode Run and click the triangle again.
 
+The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev`, shown as **SwiftMind Dev**): it runs alongside the permanent Release install with its own container, preferences and agent bridge. `swiftmind mcp` talks to the Release install by default.
+
 ## M1 features
 
 - **Outline** and **map canvas** views sharing selection and the same `MapStore`

@@ -20,7 +20,9 @@ enum BridgeClient {
         }
     }
 
-    /// Testing hook: SWIFTMIND_BRIDGE_DIR overrides the container path.
+    /// Default target is the permanent Release install's container. Debug
+    /// dev builds live in the app.swiftmind.mac.dev container — point at them
+    /// with the SWIFTMIND_BRIDGE_DIR testing hook.
     private static var bridgeDirectory: String {
         ProcessInfo.processInfo.environment["SWIFTMIND_BRIDGE_DIR"]
             ?? NSHomeDirectory()

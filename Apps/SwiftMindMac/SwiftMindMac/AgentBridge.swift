@@ -8,8 +8,12 @@ import SwiftMindCore
 /// Spec: docs/superpowers/specs/2026-09-03-agent-live-bridge-design.md
 @MainActor
 final class AgentBridge {
-    /// Bundle id — the CLI derives the container path from this constant.
-    /// Keep in sync with `BridgeClient` in the CLI target.
+    /// Release bundle id — the CLI derives the default container path from
+    /// this constant (keep in sync with `BridgeClient` in the CLI target).
+    /// Debug builds use `app.swiftmind.mac.dev`, so their bridge lives in a
+    /// separate container and never fights the permanent Release install;
+    /// the bridge directory itself is resolved from this app's own sandbox
+    /// container at runtime (see `bridgeDirectory()`).
     nonisolated static let bundleID = "app.swiftmind.mac"
     nonisolated static let socketName = "agent.sock"
     nonisolated static let tokenName = "agent.token"
@@ -34,6 +38,7 @@ final class AgentBridge {
         guard acceptSource == nil else { return }
         stopped = false
         // Kill switch: `defaults write app.swiftmind.mac swiftmind.agentBridge -bool false`
+        // (Debug builds: use the app.swiftmind.mac.dev domain instead)
         if let disabled = UserDefaults.standard.object(forKey: "swiftmind.agentBridge") as? Bool,
            !disabled {
             return

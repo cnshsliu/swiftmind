@@ -29,9 +29,21 @@ for arg in "$@"; do
   esac
 done
 
+# Match only the instance this run manages, by executable path — the Debug
+# dev instance (DerivedData) and the permanent Release install can run side
+# by side, so a bare `pkill -x SwiftMind` would kill the wrong one.
+INSTALL_DIR="/Volumes/WD/Applications"
+if [ "$CONFIG" = "Release" ]; then
+  PROC_PATTERN="${INSTALL_DIR}/SwiftMind\.app/Contents/MacOS/SwiftMind"
+else
+  PROC_PATTERN="DerivedData.*SwiftMind\.app/Contents/MacOS/SwiftMind"
+fi
+
+proc_pids() { pgrep -f "$PROC_PATTERN" 2>/dev/null || true; }
+
 stop_app() {
-  echo "==> Stopping running ${PRODUCT_NAME}…"
-  OLD_PIDS="$(pgrep -x "$PRODUCT_NAME" 2>/dev/null || true)"
+  echo "==> Stopping running ${PRODUCT_NAME} (${CONFIG})…"
+  OLD_PIDS="$(proc_pids)"
 
   if [ -z "$OLD_PIDS" ]; then
     echo "    not running"
@@ -55,7 +67,7 @@ APPLESCRIPT
     sleep 1.0
   fi
 
-  OLD_PIDS="$(pgrep -x "$PRODUCT_NAME" 2>/dev/null || true)"
+  OLD_PIDS="$(proc_pids)"
   if [ -n "$OLD_PIDS" ]; then
     echo "    kill: $OLD_PIDS"
     # shellcheck disable=SC2086
@@ -67,17 +79,17 @@ APPLESCRIPT
   fi
 
   # Last resort: debugserver may still hold the process
-  if pgrep -x "$PRODUCT_NAME" >/dev/null 2>&1 && pgrep -x debugserver >/dev/null 2>&1; then
+  if [ -n "$(proc_pids)" ] && pgrep -x debugserver >/dev/null 2>&1; then
     echo "    stopping debugserver (Xcode was debugging this app)…"
     pkill -x debugserver 2>/dev/null || true
     sleep 0.4
-    # shellcheck disable=SC2046
-    kill -9 $(pgrep -x "$PRODUCT_NAME" 2>/dev/null) 2>/dev/null || true
+    # shellcheck disable=SC2086
+    kill -9 $(proc_pids) 2>/dev/null || true
     sleep 0.2
   fi
 
-  if pgrep -x "$PRODUCT_NAME" >/dev/null 2>&1; then
-    echo "    WARNING: still running: $(pgrep -x "$PRODUCT_NAME" | tr '\n' ' ')"
+  if [ -n "$(proc_pids)" ]; then
+    echo "    WARNING: still running: $(proc_pids | tr '\n' ' ')"
     return 1
   fi
   echo "    stopped"
@@ -127,7 +139,6 @@ echo "    App: $APP_PATH"
 
 # Sync the permanent copy only for Release builds — the install in
 # /Volumes/WD/Applications must stay Release; Debug dev loops never touch it.
-INSTALL_DIR="/Volumes/WD/Applications"
 if [ "$CONFIG" = "Release" ] && [ -d "$INSTALL_DIR" ]; then
   echo "==> Syncing to ${INSTALL_DIR}…"
   rsync -a --delete "$APP_PATH" "$INSTALL_DIR/"
@@ -138,7 +149,7 @@ if [ "$DO_LAUNCH" -eq 1 ]; then
   echo "==> Launching…"
   open "$APP_PATH"
   sleep 1.2
-  NEW_PIDS="$(pgrep -x "$PRODUCT_NAME" 2>/dev/null | tr '\n' ' ' || true)"
+  NEW_PIDS="$(proc_pids | tr '\n' ' ')"
   if [ -n "$(echo "$NEW_PIDS" | tr -d '[:space:]')" ]; then
     echo "==> ${PRODUCT_NAME} running (pid ${NEW_PIDS})"
   else

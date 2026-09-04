@@ -8,8 +8,9 @@ APP_DIR="$ROOT/Apps/SwiftMindMac"
 SCHEME="SwiftMindMac"
 RESULT_BUNDLE="/tmp/SwiftMindUITests.xcresult"
 
-# Stop app so UI tests own the process
-pkill -x SwiftMind 2>/dev/null || true
+# Stop only the dev (DerivedData) instance so UI tests own it — the
+# permanent Release install in /Volumes/WD/Applications keeps running.
+pkill -f 'DerivedData.*SwiftMind\.app/Contents/MacOS/SwiftMind' 2>/dev/null || true
 sleep 0.3
 
 echo "==> Generate project…"

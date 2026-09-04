@@ -9,7 +9,7 @@ final class SwiftMindMacUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication(bundleIdentifier: "app.swiftmind.mac")
+        app = XCUIApplication(bundleIdentifier: "app.swiftmind.mac.dev")
         // Defaults for UI testing are set in SwiftMindMacApp when it sees -uitesting.
         app.launchArguments = ["-uitesting"]
         app.launch()
@@ -180,8 +180,10 @@ final class SwiftMindMacUITests: XCTestCase {
         // runner's own container — resolve the real user home via getpwuid.
         let pw = try XCTUnwrap(getpwuid(getuid()), "getpwuid returned nil")
         let home = String(cString: pw.pointee.pw_dir)
+        // Debug builds use the canary bundle id app.swiftmind.mac.dev, so the
+        // bridge lives in that container (separate from the Release install).
         let bridgeDir = home
-            + "/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind"
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/Library/SwiftMind"
         let socketPath = bridgeDir + "/agent.sock"
         let tokenURL = URL(fileURLWithPath: bridgeDir + "/agent.token")
 

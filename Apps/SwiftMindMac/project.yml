@@ -21,11 +21,19 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.swiftmind.mac
         PRODUCT_NAME: SwiftMind
+        SM_DISPLAY_NAME: SwiftMind
         INFOPLIST_FILE: SwiftMindMac/Info.plist
         CODE_SIGN_ENTITLEMENTS: SwiftMindMac/SwiftMindMac.entitlements
         GENERATE_INFOPLIST_FILE: false
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         COMBINE_HIDPI_IMAGES: true
+      # Debug is a "canary" instance: own bundle id → own sandbox container,
+      # preferences and agent-bridge socket, so it can run alongside the
+      # permanent Release install without either affecting the other.
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: app.swiftmind.mac.dev
+          SM_DISPLAY_NAME: SwiftMind Dev
     dependencies:
       - package: SwiftMind
         product: SwiftMindCore
