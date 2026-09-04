@@ -201,6 +201,18 @@ private struct SessionNodeCommands: View {
         .keyboardShortcut(".", modifiers: .command)
         .disabled(session?.store.selection.primary == nil)
 
+        Button("Edit Note") {
+            NotificationCenter.default.post(name: .swiftMindToggleNoteEditor, object: nil)
+        }
+        .keyboardShortcut("e", modifiers: [.command, .shift])
+        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+
+        Button("Toggle Note Expansion") {
+            NotificationCenter.default.post(name: .swiftMindToggleNoteExpansion, object: nil)
+        }
+        .keyboardShortcut("e", modifiers: [.command, .option])
+        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+
         Divider()
 
         Button(pinMenuTitle) {

@@ -11,6 +11,10 @@ final class DocumentSession: ObservableObject {
     @Published var viewMode: ViewMode = .map
     @Published private(set) var toast: StatusToast?
 
+    /// Live floating-editor draft (virtual-H1 document) while the note editor
+    /// is open; rendered views prefer it over the stored model values.
+    @Published var liveNoteDocument: (nodeID: NodeID, document: String)?
+
     /// True when showing the My Brain vault navigator (not a map file).
     var isBrainMode: Bool = false
     /// Double-click / Return activation (open map or toggle folder in brain mode).

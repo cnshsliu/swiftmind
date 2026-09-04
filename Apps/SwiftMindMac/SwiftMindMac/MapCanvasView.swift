@@ -39,6 +39,18 @@ struct MapCanvasView: View {
     @State private var lastChildByParent: [NodeID: NodeID] = [:]
     /// Follow mode (F): the active node is always panned to the viewport center.
     @State private var followMode = false
+
+    // MARK: Floating note editor
+    @State private var noteEditorNodeID: NodeID?
+    @State private var noteEditorDraft: String = ""
+    @State private var noteCommitTask: Task<Void, Never>?
+    /// Canvas offset stashed when the editor opened (restored on close).
+    @State private var preEditorPan: CGSize?
+    /// The offset we panned to; restore only if the user hasn't panned since.
+    @State private var editorPanTarget: CGSize?
+    @FocusState private var noteEditorFocused: Bool
+    private static let noteEditorWidth: CGFloat = 420
+
     private static let minScale: CGFloat = 0.25
     private static let maxScale: CGFloat = 3
     private static let badgeFontSize: CGFloat = 11
@@ -92,6 +104,11 @@ struct MapCanvasView: View {
                 // Below the edit overlay: editing a title must not sit behind a card.
                 ForEach(snapshot.nodes.filter(\.isNoteExpanded)) { visual in
                     noteCard(for: visual, viewSize: geo.size)
+                }
+
+                if let editorID = noteEditorNodeID,
+                   let visual = snapshot.nodes.first(where: { $0.id == editorID }) {
+                    noteEditorOverlay(for: visual, viewSize: geo.size)
                 }
 
                 if let editingNodeID,
@@ -174,6 +191,17 @@ struct MapCanvasView: View {
                 toggleFollowMode()
                 return .handled
             }
+            // Note editor (E) and note card expansion (X) for the primary node.
+            .onKeyPress(.init("e")) {
+                guard editingNodeID == nil else { return .ignored }
+                toggleNoteEditor()
+                return .handled
+            }
+            .onKeyPress(.init("x")) {
+                guard editingNodeID == nil else { return .ignored }
+                toggleNoteExpansion()
+                return .handled
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
@@ -203,6 +231,13 @@ struct MapCanvasView: View {
                session.store.map.node(id: editingNodeID) == nil {
                 cancelEdit()
             }
+            if let id = noteEditorNodeID, session.store.map.node(id: id) == nil {
+                noteCommitTask?.cancel()
+                noteEditorNodeID = nil
+                session.liveNoteDocument = nil
+                preEditorPan = nil
+                editorPanTarget = nil
+            }
             // New/moved nodes change layout — pan so primary stays in view.
             keepPrimaryInFrame(animated: !reduceMotion)
         }
@@ -215,6 +250,14 @@ struct MapCanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasDelete)) { _ in
             guard editingNodeID == nil else { return }
             deleteSelectionIfAllowed()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteEditor)) { _ in
+            guard editingNodeID == nil else { return }
+            toggleNoteEditor()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteExpansion)) { _ in
+            guard editingNodeID == nil else { return }
+            toggleNoteExpansion()
         }
     }
 
@@ -364,6 +407,7 @@ struct MapCanvasView: View {
 
     /// Follow mode centers the active node; otherwise just keep it in view.
     private func keepPrimaryInFrame(animated: Bool) {
+        guard noteEditorNodeID == nil else { return }
         if followMode {
             centerPrimary(animated: animated)
         } else {
@@ -735,7 +779,10 @@ struct MapCanvasView: View {
     private func noteCard(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
         let markdown = session.store.map.node(id: visual.id)?.noteMarkdown ?? ""
-        let document = NoteDocument.compose(title: visual.text, body: markdown)
+        let live = session.liveNoteDocument
+        let document = live?.nodeID == visual.id
+            ? live!.document
+            : NoteDocument.compose(title: visual.text, body: markdown)
         let rendered = try? AttributedString(markdown: document)
         ScrollView(.vertical) {
             Text(rendered ?? AttributedString(document))
@@ -753,6 +800,109 @@ struct MapCanvasView: View {
         .position(x: frame.midX, y: frame.midY)
         .allowsHitTesting(false)
         .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
+    }
+
+    /// Floating markdown editor: right of the node, top-aligned. The first
+    /// line is the virtual H1 (the node title) — see NoteDocument.
+    @ViewBuilder
+    private func noteEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
+        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        let width = Self.noteEditorWidth
+        let height = min(480, max(200, viewSize.height - frame.minY - 24))
+        TextEditor(text: $noteEditorDraft)
+            .font(.system(size: 13, design: .monospaced))
+            .padding(8)
+            .frame(width: width, height: height)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(0.2), radius: 8, y: 2)
+            .position(x: frame.maxX + 16 + width / 2, y: frame.minY + height / 2)
+            .focused($noteEditorFocused)
+            .focusEffectDisabled()
+            .onExitCommand { closeNoteEditor() }
+            .onChange(of: noteEditorDraft) { _, newValue in
+                session.liveNoteDocument = (visual.id, newValue)
+                scheduleNoteCommit()
+            }
+            .accessibilityIdentifier("noteEditor")
+    }
+
+    private func toggleNoteEditor() {
+        if noteEditorNodeID != nil {
+            closeNoteEditor()
+            return
+        }
+        guard let primary = session.store.selection.primary,
+              let node = session.store.map.node(id: primary) else { return }
+        noteEditorNodeID = primary
+        noteEditorDraft = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+        session.liveNoteDocument = (primary, noteEditorDraft)
+        stashAndPanForEditor()
+        DispatchQueue.main.async { noteEditorFocused = true }
+    }
+
+    private func closeNoteEditor() {
+        noteCommitTask?.cancel()
+        commitNoteEditorDraft()
+        noteEditorNodeID = nil
+        session.liveNoteDocument = nil
+        // Restore the pre-editor pan only if the user hasn't panned since.
+        if let saved = preEditorPan, let target = editorPanTarget, offset == target {
+            let apply = { offset = saved; panBase = saved }
+            if reduceMotion { apply() } else {
+                withAnimation(.easeOut(duration: 0.22)) { apply() }
+            }
+        }
+        preEditorPan = nil
+        editorPanTarget = nil
+        canvasFocused = true
+    }
+
+    /// Pan the canvas left so the editor fits right of the node.
+    private func stashAndPanForEditor() {
+        guard let id = noteEditorNodeID,
+              let visual = session.store.snapshot().nodes.first(where: { $0.id == id }) else { return }
+        let frame = viewFrame(for: visual.frame, viewSize: canvasSize)
+        let overflow = frame.maxX + 16 + Self.noteEditorWidth - (canvasSize.width - 16)
+        guard overflow > 0 else { return }
+        preEditorPan = offset
+        let target = CGSize(width: offset.width - overflow, height: offset.height)
+        editorPanTarget = target
+        let apply = { offset = target; panBase = target }
+        if reduceMotion { apply() } else {
+            withAnimation(.easeOut(duration: 0.22)) { apply() }
+        }
+    }
+
+    private func toggleNoteExpansion() {
+        guard let primary = session.store.selection.primary,
+              let node = session.store.map.node(id: primary) else { return }
+        session.applyQuiet(SetNoteExpandedCommand(nodeID: primary, isNoteExpanded: !node.isNoteExpanded))
+    }
+
+    /// 1s debounce — each typing burst is one CompositeAgentCommand, i.e. one
+    /// undo step (the scheduleAutosave idiom from AppModel).
+    private func scheduleNoteCommit() {
+        noteCommitTask?.cancel()
+        noteCommitTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            commitNoteEditorDraft()
+        }
+    }
+
+    private func commitNoteEditorDraft() {
+        guard let id = noteEditorNodeID,
+              let node = session.store.map.node(id: id) else { return }
+        let (title, body) = NoteDocument.split(noteEditorDraft)
+        var ops: [MapOp] = []
+        if let title, title != node.text { ops.append(.setText(nodeID: id, text: title)) }
+        if body != node.noteMarkdown { ops.append(.setNote(nodeID: id, markdown: body)) }
+        guard !ops.isEmpty else { return }
+        session.applyQuiet(CompositeAgentCommand(ops: ops))
     }
 
     private func viewFrame(for mapFrame: Rect2D, viewSize: CGSize) -> CGRect {
@@ -1018,6 +1168,13 @@ struct MapCanvasView: View {
         }
         return nil
     }
+}
+
+// swiftMindToggleNoteEditor / swiftMindToggleNoteExpansion are posted from
+// SessionNodeCommands in SwiftMindMacApp, so they must not be file-private.
+extension Notification.Name {
+    static let swiftMindToggleNoteEditor = Notification.Name("swiftMindToggleNoteEditor")
+    static let swiftMindToggleNoteExpansion = Notification.Name("swiftMindToggleNoteExpansion")
 }
 
 private extension Notification.Name {
