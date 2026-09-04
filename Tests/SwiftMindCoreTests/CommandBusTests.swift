@@ -81,6 +81,25 @@ final class CommandBusTests: XCTestCase {
         XCTAssertEqual(map.root.children.map(\.id), [a, c])
     }
 
+    func testSetNoteExpandedUndoRedo() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_e"), text: "E", side: .right),
+            on: &map
+        )
+        let id = NodeID(rawValue: "n_e")
+        XCTAssertFalse(map.node(id: id)!.isNoteExpanded)
+
+        try bus.execute(SetNoteExpandedCommand(nodeID: id, isNoteExpanded: true), on: &map)
+        XCTAssertTrue(map.node(id: id)!.isNoteExpanded)
+
+        try bus.undo(on: &map)
+        XCTAssertFalse(map.node(id: id)!.isNoteExpanded)
+        try bus.redo(on: &map)
+        XCTAssertTrue(map.node(id: id)!.isNoteExpanded)
+    }
+
     func testSetMapTitleUndoRedo() throws {
         var map = MindMap.makeEmpty(title: "Original")
         let bus = CommandBus()
