@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The XCUITest runner is sandboxed by default, and App Sandbox denies
+	     outbound unix-socket connects into another app's container — even with
+	     network.client plus read-write path exceptions — so the AgentBridge
+	     loopback test cannot reach the live app. The runner is a local test
+	     harness (nothing ships in it), so turn its sandbox off. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>

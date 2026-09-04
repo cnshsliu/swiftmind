@@ -166,6 +166,146 @@ final class SwiftMindMacUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
     }
 
+    // MARK: - Agent bridge loopback
+
+    private struct BridgeClientError: Error {
+        let detail: String
+    }
+
+    /// The test runner acts as a UDS client against the live AgentBridge,
+    /// using the same wire protocol as BridgeClient in the CLI.
+    func testAgentBridgeLoopback() throws {
+        XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 5))
+        // The XCUITest runner is sandboxed, so NSHomeDirectory() points at the
+        // runner's own container — resolve the real user home via getpwuid.
+        let home = String(cString: getpwuid(getuid())!.pointee.pw_dir)
+        let bridgeDir = home
+            + "/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind"
+        let socketPath = bridgeDir + "/agent.sock"
+        let tokenURL = URL(fileURLWithPath: bridgeDir + "/agent.token")
+
+        // Each launch rewrites agent.token; a still-terminating instance from
+        // the previous test can briefly remove it or leave a stale one, so
+        // poll until a token/session round-trip succeeds.
+        var session: [String: Any]?
+        var lastProblem = "no attempt made"
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline, session == nil {
+            if let tokenData = try? Data(contentsOf: tokenURL),
+               let token = String(data: tokenData, encoding: .utf8), !token.isEmpty {
+                do {
+                    let response = try bridgeCall(
+                        socketPath: socketPath,
+                        request: ["id": 1, "token": token, "method": "session", "params": [:]]
+                    )
+                    if response["ok"] as? Bool == true {
+                        session = response
+                    } else {
+                        lastProblem = "bridge rejected: \(response)"
+                    }
+                } catch {
+                    lastProblem = "bridgeCall: \(error)"
+                }
+            } else {
+                lastProblem = "token unreadable at \(tokenURL.path)"
+            }
+            if session == nil {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            }
+        }
+        let ok = try XCTUnwrap(
+            session,
+            "no working agent.token/agent.sock after 10s — AgentBridge should always start with the app (last: \(lastProblem))"
+        )
+        let result = try XCTUnwrap(ok["result"] as? [String: Any])
+        XCTAssertNotNil(result["title"] as? String)
+        XCTAssertNotNil(result["isBrainMode"] as? Bool)
+
+        // Wrong token must be rejected.
+        let denied = try bridgeCall(
+            socketPath: socketPath,
+            request: ["id": 2, "token": "wrong", "method": "session", "params": [:]]
+        )
+        XCTAssertEqual(denied["ok"] as? Bool, false, "wrong token should fail: \(denied)")
+        let error = try XCTUnwrap(denied["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? String, "unauthorized")
+    }
+
+    /// One request, one short-lived connection (mirrors BridgeClient).
+    private func bridgeCall(socketPath: String, request: [String: Any]) throws -> [String: Any] {
+        func fail(_ detail: String) throws -> Never {
+            throw BridgeClientError(detail: detail)
+        }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { try fail("socket() failed: errno \(errno)") }
+        defer { close(fd) }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = socketPath.utf8CString
+        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
+            try fail("socket path too long")
+        }
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dest in
+                pathBytes.withUnsafeBufferPointer { src in
+                    dest.update(from: src.baseAddress!, count: src.count)
+                }
+            }
+        }
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else {
+            try fail("connect to \(socketPath) failed: errno \(errno)")
+        }
+
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        var payload = try JSONSerialization.data(withJSONObject: request)
+        var length = UInt32(payload.count).bigEndian
+        payload.insert(contentsOf: withUnsafeBytes(of: &length) { Data($0) }, at: 0)
+        try payload.withUnsafeBytes { ptr in
+            var sent = 0
+            while sent < ptr.count {
+                // MSG_NOSIGNAL: a dead peer must not kill the test runner with SIGPIPE.
+                let n = send(fd, ptr.baseAddress! + sent, ptr.count - sent, MSG_NOSIGNAL)
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    try fail("send failed: errno \(errno)")
+                }
+                sent += n
+            }
+        }
+
+        func readFully(_ count: Int) -> Data? {
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: min(count, 65536))
+            while data.count < count {
+                let n = buffer.withUnsafeMutableBytes { ptr in
+                    recv(fd, ptr.baseAddress, min(ptr.count, count - data.count), 0)
+                }
+                if n < 0, errno == EINTR { continue }
+                guard n > 0 else { return nil }
+                data.append(contentsOf: buffer[0..<n])
+            }
+            return data
+        }
+        guard let header = readFully(4) else { try fail("no response header") }
+        let responseLength = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian }
+        guard responseLength > 0, responseLength <= 4 * 1024 * 1024 else {
+            try fail("bad frame length \(responseLength)")
+        }
+        guard let body = readFully(Int(responseLength)) else { try fail("truncated response") }
+        guard let response = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            try fail("malformed response")
+        }
+        return response
+    }
+
     func testFormulaSetAndClear() throws {
         // Root is selected on launch; the inspector is visible by default.
         let field = element("formulaField")

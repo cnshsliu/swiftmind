@@ -40,6 +40,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.swiftmind.mac.uitests
         GENERATE_INFOPLIST_FILE: true
         CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_ENTITLEMENTS: SwiftMindMacUITests/SwiftMindMacUITests.entitlements
         TEST_TARGET_NAME: SwiftMindMac
     dependencies:
       - target: SwiftMindMac
