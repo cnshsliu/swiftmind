@@ -18,8 +18,12 @@ public final class CompositeAgentCommand: MapCommand {
         executed = []
         affected = []
         for (index, op) in ops.enumerated() {
-            let command = try op.command(in: map)
+            // Built lazily against current map state: attribute removal reads
+            // the node's live attributes. Build+execute share the catch so a
+            // build-time throw (missing node) also rolls back and stays atomic.
+            let command: any MapCommand
             do {
+                command = try op.command(in: map)
                 try command.execute(on: &map)
             } catch {
                 for past in executed.reversed() {
