@@ -29,8 +29,9 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 
 | Script | What it does |
 |--------|----------------|
-| `scripts/rerun-mac.sh` | Stop SwiftMind, `swift test`, rebuild, `open` the new `.app` |
+| `scripts/rerun-mac.sh` | Stop SwiftMind, `swift test`, rebuild (Debug), `open` the new `.app` from DerivedData |
 | `scripts/rerun-mac.sh --no-test` | Faster rebuild+relaunch |
+| `scripts/rerun-mac.sh --release` | Release build, synced to `/Volumes/WD/Applications` (the permanent install stays Release; Debug runs never touch it) |
 | `scripts/verify.sh` | Automated CI-style gate: tests + build |
 
 **Agents / automation:** after UI or app changes, always run `./scripts/rerun-mac.sh` so you never need to manually stop Xcode Run and click the triangle again.

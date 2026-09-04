@@ -58,7 +58,10 @@ Two build systems coexist on purpose:
 swift test
 
 # Full loop after ANY app-affecting change: stop app → test → rebuild → relaunch
-./scripts/rerun-mac.sh            # add --no-test to skip tests, --no-launch to skip launch
+./scripts/rerun-mac.sh            # Debug dev loop; add --no-test to skip tests, --no-launch to skip launch
+
+# Refresh the permanent install (Release build → /Volumes/WD/Applications, when mounted)
+./scripts/rerun-mac.sh --release  # Debug runs never touch that copy, so it stays Release
 
 # CI-style gate: unit tests + CLI smoke + app build + XCUITest smoke
 ./scripts/verify.sh               # add --skip-ui to skip XCUITest
