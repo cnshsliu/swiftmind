@@ -7,7 +7,6 @@ struct InspectorView: View {
     @ObservedObject var session: DocumentSession
 
     @State private var titleDraft: String = ""
-    @State private var noteDraft: String = ""
     @State private var urlDraft: String = ""
     @State private var fontSize: Double = 14
     @State private var isBold: Bool = false
@@ -18,11 +17,9 @@ struct InspectorView: View {
     @State private var boundNodeID: NodeID?
     /// Last model values we pushed into drafts; if draft still equals these, it is not dirty.
     @State private var lastSyncedTitle: String = ""
-    @State private var lastSyncedNote: String = ""
     /// Suppresses command dispatch while drafts are loaded from the model.
     @State private var isSyncing = false
     @FocusState private var titleFocused: Bool
-    @FocusState private var noteFocused: Bool
 
     private var primaryID: NodeID? {
         session.store.selection.primary
@@ -50,22 +47,16 @@ struct InspectorView: View {
                 }
 
                 Section("Note") {
-                    TextEditor(text: $noteDraft)
-                        .font(.body)
-                        .frame(minHeight: 100)
-                        .focused($noteFocused)
-                        .onChange(of: noteFocused) { _, focused in
-                            if !focused { commitNote(for: node.id) }
-                        }
-
-                    if !noteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       let attr = try? AttributedString(
-                        markdown: noteDraft,
-                        options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                       ) {
+                    let bodyMarkdown = node.noteMarkdown
+                    if !bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let attr = try? AttributedString(markdown: bodyMarkdown) {
                         Text(attr)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
+                            .accessibilityIdentifier("notePreview")
+                    } else {
+                        Text("No note — select the node on the canvas and press E to edit")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
                 }
 
@@ -232,7 +223,6 @@ struct InspectorView: View {
         guard let node = primaryNode else {
             boundNodeID = nil
             lastSyncedTitle = ""
-            lastSyncedNote = ""
             return
         }
 
@@ -243,9 +233,7 @@ struct InspectorView: View {
         if force || selectionChanged {
             boundNodeID = node.id
             titleDraft = node.text
-            noteDraft = node.noteMarkdown
             lastSyncedTitle = node.text
-            lastSyncedNote = node.noteMarkdown
             urlDraft = ""
             applyStyleToDrafts(node.style)
             return
@@ -255,10 +243,6 @@ struct InspectorView: View {
         if titleDraft == lastSyncedTitle {
             titleDraft = node.text
             lastSyncedTitle = node.text
-        }
-        if noteDraft == lastSyncedNote {
-            noteDraft = node.noteMarkdown
-            lastSyncedNote = node.noteMarkdown
         }
         applyStyleToDrafts(node.style)
     }
@@ -288,13 +272,6 @@ struct InspectorView: View {
         guard trimmed != node.text else { return }
         session.applyQuiet(SetTextCommand(nodeID: id, newText: trimmed))
         lastSyncedTitle = trimmed
-    }
-
-    private func commitNote(for id: NodeID) {
-        guard let node = session.store.map.node(id: id) else { return }
-        guard noteDraft != node.noteMarkdown else { return }
-        session.applyQuiet(SetNoteCommand(nodeID: id, noteMarkdown: noteDraft))
-        lastSyncedNote = noteDraft
     }
 
     private func commitStyleIfUser(for id: NodeID) {
