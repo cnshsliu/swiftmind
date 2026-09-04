@@ -163,4 +163,21 @@ final class HTMLCodecTests: XCTestCase {
         XCTAssertNil(map.root.positionPin)
         XCTAssertEqual(map.root.children.count, 2)
     }
+
+    func testDataUriImageNoteRoundTrip() throws {
+        var map = MindMap.makeEmpty(title: "IMG")
+        let child = NodeID(rawValue: "n_img")
+        var working = map
+        try InsertChildCommand(parentID: map.root.id, newNodeID: child, text: "Pic", side: .right)
+            .execute(on: &working)
+        // Data-URI image + LaTeX in one note: base64 and $ survive the
+        // escaped-text codec path unchanged.
+        let note = "![pasted](data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==)\n\n$e^{i\\pi}$"
+        try SetNoteCommand(nodeID: child, noteMarkdown: note).execute(on: &working)
+        map = working
+
+        let html = try HTMLCodec.encode(map, includeSkin: false)
+        let decoded = try HTMLCodec.decode(html)
+        XCTAssertEqual(decoded.node(id: child)?.noteMarkdown, note)
+    }
 }

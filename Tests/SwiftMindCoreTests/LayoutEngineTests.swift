@@ -246,4 +246,22 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertEqual(base.nodes.map(\.frame), overlaid.nodes.map(\.frame))
         XCTAssertTrue(overlaid.nodes.first { $0.text == "A" }!.isSelected)
     }
+
+    func testExpandedNoteImageLineReservesHeight() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_img"), text: "Img", side: .right),
+            on: &map
+        )
+        map.updateNode(id: NodeID(rawValue: "n_img")) {
+            $0.noteMarkdown = "one\n![i](data:image/png;base64,AA)\ntwo"
+            $0.isNoteExpanded = true
+        }
+
+        let snapshot = LayoutEngine().layout(map: map)
+        let card = snapshot.nodes.first { $0.id.rawValue == "n_img" }!
+        // 1 text + 8 image + 1 text + 1 H1 = 11 lines: 11*20 + 2*12 = 244
+        XCTAssertEqual(card.frame.height, 244, accuracy: 0.001)
+    }
 }

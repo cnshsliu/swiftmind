@@ -87,11 +87,12 @@ public struct LayoutEngine: Sendable {
         let style = StyleResolver.resolve(node: node, sheet: sheet)
         if node.isNoteExpanded {
             // Deterministic estimate (core stays UI-free): one line per
-            // markdown line plus the virtual H1 line, padded and capped.
+            // markdown line (images count as 8 lines, block math as its
+            // rows) plus the virtual H1 line, padded and capped.
             // The canvas clips any overflow inside this frame.
             let bodyLines = node.noteMarkdown.isEmpty
                 ? 0
-                : node.noteMarkdown.split(separator: "\n", omittingEmptySubsequences: false).count
+                : MarkdownSegmenter.estimatedLineCount(of: node.noteMarkdown, linesPerImage: 8)
             let estimated = Double(bodyLines + 1) * config.expandedNoteLineHeight
                 + config.paddingX * 2
             return (
