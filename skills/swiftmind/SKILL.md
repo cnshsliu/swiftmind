@@ -24,7 +24,7 @@ on stderr, exit 1/2/3 (usage/file/operation).
 
 - `read <file>` — full map as a JSON tree (`root` → nested `children`; each
   node: `id`, `text`, optional `note`, `attributes`, `formula`, `folded`,
-  `side`, `pinned`).
+  `noteExpanded`, `side`, `pinned`).
 - `find <file> --query <text>` — case-insensitive title/note search; returns
   matching nodes (`id`, `title`, `matchInNote`).
 - `add-child <file> --parent <id> --text <t> [--side auto|left|right] [--id <newid>]`
@@ -35,6 +35,7 @@ on stderr, exit 1/2/3 (usage/file/operation).
 - `set-formula <file> --id <id> --formula <f>` — `--formula ""` clears. DSL: `count(children)`,
   `sum(children, attr: "x")`, `avg|min|max(...)`, `progress()`, `attr("x")`, arithmetic/comparison/`if(...)`.
 - `fold <file> --id <id>` / `unfold`
+- `expand-note` / `collapse-note` (batch ops): `{"op":"expand-note","id":"…"}`
 - `pin <file> --id <id> --x <n> --y <n>` / `unpin`
 - `move <file> --id <id> --to <parentId> [--index <n>]`
 - `delete <file> --ids <id,id,...>` — cannot delete the root.

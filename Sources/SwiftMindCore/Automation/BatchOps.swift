@@ -11,6 +11,7 @@ public enum MapOp: Equatable, Sendable {
     /// nil or empty formula clears it.
     case setFormula(nodeID: NodeID, formula: String?)
     case setFolded(nodeID: NodeID, isFolded: Bool)
+    case setNoteExpanded(nodeID: NodeID, isNoteExpanded: Bool)
     case setPin(nodeID: NodeID, position: Point2D?)
     case move(nodeID: NodeID, newParentID: NodeID, index: Int)
     case delete(nodeIDs: [NodeID])
@@ -25,6 +26,7 @@ public enum MapOp: Equatable, Sendable {
         case .setAttribute: return "set-attr"
         case .setFormula: return "set-formula"
         case .setFolded(_, let folded): return folded ? "fold" : "unfold"
+        case .setNoteExpanded(_, let expanded): return expanded ? "expand-note" : "collapse-note"
         case .setPin(_, let pos): return pos == nil ? "unpin" : "pin"
         case .move: return "move"
         case .delete: return "delete"
@@ -81,7 +83,8 @@ extension MapOp {
         case .addChild(_, let newNodeID, _, _): return [newNodeID]
         case .addSibling(_, let newNodeID, _): return [newNodeID]
         case .setText(let id, _), .setNote(let id, _), .setAttribute(let id, _, _),
-             .setFormula(let id, _), .setFolded(let id, _), .setPin(let id, _):
+             .setFormula(let id, _), .setFolded(let id, _), .setNoteExpanded(let id, _),
+             .setPin(let id, _):
             return [id]
         case .move(let id, _, _): return [id]
         case .delete(let ids): return ids
@@ -114,6 +117,8 @@ extension MapOp {
             return SetFormulaCommand(nodeID: nodeID, formula: normalized.isEmpty ? nil : normalized)
         case let .setFolded(nodeID, isFolded):
             return SetFoldedCommand(nodeID: nodeID, isFolded: isFolded)
+        case let .setNoteExpanded(nodeID, isNoteExpanded):
+            return SetNoteExpandedCommand(nodeID: nodeID, isNoteExpanded: isNoteExpanded)
         case let .setPin(nodeID, position):
             return SetPinCommand(nodeID: nodeID, positionPin: position)
         case let .move(nodeID, newParentID, index):
@@ -210,6 +215,10 @@ extension MapOp: Codable {
             self = .setFolded(nodeID: try nodeID(.id), isFolded: true)
         case "unfold":
             self = .setFolded(nodeID: try nodeID(.id), isFolded: false)
+        case "expand-note":
+            self = .setNoteExpanded(nodeID: try nodeID(.id), isNoteExpanded: true)
+        case "collapse-note":
+            self = .setNoteExpanded(nodeID: try nodeID(.id), isNoteExpanded: false)
         case "pin":
             guard let x = try c.decodeIfPresent(Double.self, forKey: .x),
                   let y = try c.decodeIfPresent(Double.self, forKey: .y) else {
@@ -264,6 +273,8 @@ extension MapOp: Codable {
             try c.encode(nodeID.rawValue, forKey: .id)
             try c.encodeIfPresent(formula, forKey: .formula)
         case let .setFolded(nodeID, _):
+            try c.encode(nodeID.rawValue, forKey: .id)
+        case let .setNoteExpanded(nodeID, _):
             try c.encode(nodeID.rawValue, forKey: .id)
         case let .setPin(nodeID, position):
             try c.encode(nodeID.rawValue, forKey: .id)

@@ -32,6 +32,11 @@ echo '[{"op":"set-text","id":"n_smoke","text":"Renamed Smoke"},{"op":"fold","id"
   | "$CLI" batch "$WORK" >/dev/null || fail "batch"
 "$CLI" read "$WORK" | grep -q "Renamed Smoke" || fail "batch applied"
 
+# expand-note / collapse-note via batch; read exposes noteExpanded
+echo '[{"op":"expand-note","id":"n_smoke"}]' | "$CLI" batch "$WORK" >/dev/null || fail "expand-note"
+"$CLI" read "$WORK" | grep -q "noteExpanded" || fail "read exposes noteExpanded"
+echo '[{"op":"collapse-note","id":"n_smoke"}]' | "$CLI" batch "$WORK" >/dev/null || fail "collapse-note"
+
 # atomicity: failing batch leaves file unchanged
 BEFORE=$(shasum "$WORK" | cut -d' ' -f1)
 if echo '[{"op":"set-text","id":"n_smoke","text":"X"},{"op":"delete","ids":["n_nope"]}]' | "$CLI" batch "$WORK" 2>/dev/null; then

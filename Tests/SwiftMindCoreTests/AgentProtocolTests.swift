@@ -29,6 +29,23 @@ final class AgentProtocolTests: XCTestCase {
         XCTAssertNil(root["formulaResult"])
     }
 
+    func testReadJSONExposesNoteExpanded() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_j"), text: "J", side: .right),
+            on: &map
+        )
+        var json = AgentProtocol.mapJSON(for: map)
+        var child = (json["root"] as! [String: Any])["children"] as! [[String: Any]]
+        XCTAssertNil(child[0]["noteExpanded"])
+
+        map.updateNode(id: NodeID(rawValue: "n_j")) { $0.isNoteExpanded = true }
+        json = AgentProtocol.mapJSON(for: map)
+        child = (json["root"] as! [String: Any])["children"] as! [[String: Any]]
+        XCTAssertEqual(child[0]["noteExpanded"] as? Bool, true)
+    }
+
     func testMapJSONWithoutFormulasOmitsFormulaResult() {
         let map = MindMap.makeEmpty(title: "T")
         let json = AgentProtocol.mapJSON(for: map)

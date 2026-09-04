@@ -35,6 +35,7 @@ public enum AgentProtocol {
             }
         }
         if node.isFolded { dict["folded"] = true }
+        if node.isNoteExpanded { dict["noteExpanded"] = true }
         if node.side != .auto { dict["side"] = node.side.rawValue }
         if node.positionPin != nil { dict["pinned"] = true }
         if !node.children.isEmpty {

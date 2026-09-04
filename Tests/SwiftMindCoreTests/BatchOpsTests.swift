@@ -185,6 +185,27 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertThrowsError(try decodeOps(#"[{"op":"add-child","parent":"n_x","id":5,"text":"T"}]"#))
     }
 
+    func testExpandNoteOpDecodesAppliesAndUndoesViaComposite() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_b"), text: "B", side: .right),
+            on: &map
+        )
+        let json = #"[{"op":"expand-note","id":"n_b"}]"#.data(using: .utf8)!
+        let ops = try JSONDecoder().decode([MapOp].self, from: json)
+        XCTAssertEqual(ops, [.setNoteExpanded(nodeID: NodeID(rawValue: "n_b"), isNoteExpanded: true)])
+
+        let command = CompositeAgentCommand(ops: ops)
+        try bus.execute(command, on: &map)
+        XCTAssertTrue(map.node(id: NodeID(rawValue: "n_b"))!.isNoteExpanded)
+        try bus.undo(on: &map)
+        XCTAssertFalse(map.node(id: NodeID(rawValue: "n_b"))!.isNoteExpanded)
+
+        let collapse = try JSONDecoder().decode([MapOp].self, from: #"[{"op":"collapse-note","id":"n_b"}]"#.data(using: .utf8)!)
+        XCTAssertEqual(collapse, [.setNoteExpanded(nodeID: NodeID(rawValue: "n_b"), isNoteExpanded: false)])
+    }
+
     /// command(in:) and BatchOps.apply produce the same map and the same affected ids.
     func testCommandInMatchesApply() throws {
         var viaApply = makeMap()
