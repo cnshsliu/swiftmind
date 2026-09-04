@@ -65,31 +65,9 @@ enum MapFile {
         }
     }
 
-    /// JSON tree for `read`: id, text, note?, attributes?, formula?, folded?, side, children?
+    /// JSON tree for `read` (file mode: no computed formula values).
     static func jsonObject(for map: MindMap) -> [String: Any] {
-        [
-            "id": map.id,
-            "title": map.title,
-            "schemaVersion": map.schemaVersion,
-            "root": nodeJSON(map.root),
-        ]
-    }
-
-    private static func nodeJSON(_ node: Node) -> [String: Any] {
-        var dict: [String: Any] = [
-            "id": node.id.rawValue,
-            "text": node.text,
-        ]
-        if !node.noteMarkdown.isEmpty { dict["note"] = node.noteMarkdown }
-        if !node.attributes.isEmpty {
-            dict["attributes"] = node.attributes.map { ["name": $0.name, "value": $0.value] }
-        }
-        if let formula = node.formula { dict["formula"] = formula }
-        if node.isFolded { dict["folded"] = true }
-        if node.side != .auto { dict["side"] = node.side.rawValue }
-        if node.positionPin != nil { dict["pinned"] = true }
-        if !node.children.isEmpty { dict["children"] = node.children.map(nodeJSON) }
-        return dict
+        AgentProtocol.mapJSON(for: map)
     }
 
     static func printJSON(_ object: Any) {
