@@ -185,7 +185,7 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertThrowsError(try decodeOps(#"[{"op":"add-child","parent":"n_x","id":5,"text":"T"}]"#))
     }
 
-    /// command(in:) must produce the same effect as BatchOps.apply.
+    /// command(in:) and BatchOps.apply produce the same map and the same affected ids.
     func testCommandInMatchesApply() throws {
         var viaApply = makeMap()
         var viaCommand = viaApply
@@ -203,7 +203,8 @@ final class BatchOpsTests: XCTestCase {
             .move(nodeID: NodeID(rawValue: "n_sib"), newParentID: rootID, index: 0),
             .delete(nodeIDs: [NodeID(rawValue: "n_new")]),
         ]
-        try BatchOps.apply(ops, to: &viaApply)
+        let returned = try BatchOps.apply(ops, to: &viaApply)
+        XCTAssertEqual(returned, ops.flatMap(\.affectedIDs))
         for op in ops {
             try op.command(in: viaCommand).execute(on: &viaCommand)
         }
