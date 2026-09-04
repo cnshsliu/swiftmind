@@ -1,0 +1,114 @@
+import Foundation
+
+/// Client side of the app's AgentBridge Unix socket.
+/// Keep paths in sync with `AgentBridge` in the app target.
+enum BridgeClient {
+    enum Failure: Error, CustomStringConvertible {
+        case appNotRunning
+        case badResponse(String)
+
+        var description: String {
+            switch self {
+            case .appNotRunning:
+                return "SwiftMind.app is not running (start it, or use the file-mode CLI)"
+            case .badResponse(let detail):
+                return "bad bridge response: \(detail)"
+            }
+        }
+    }
+
+    private static var bridgeDirectory: String {
+        NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind"
+    }
+
+    /// One request, one short-lived connection.
+    static func call(method: String, params: [String: Any]) throws -> [String: Any] {
+        let tokenURL = URL(fileURLWithPath: bridgeDirectory + "/agent.token")
+        guard let tokenData = try? Data(contentsOf: tokenURL),
+              let token = String(data: tokenData, encoding: .utf8) else {
+            throw Failure.appNotRunning
+        }
+
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw Failure.appNotRunning }
+        defer { close(fd) }
+
+        let socketPath = bridgeDirectory + "/agent.sock"
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = socketPath.utf8CString
+        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
+            throw Failure.badResponse("socket path too long")
+        }
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dest in
+                pathBytes.withUnsafeBufferPointer { src in
+                    dest.update(from: src.baseAddress!, count: src.count)
+                }
+            }
+        }
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else { throw Failure.appNotRunning }
+
+        var tv = timeval(tv_sec: 10, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        let request: [String: Any] = [
+            "id": 1, "token": token, "method": method, "params": params,
+        ]
+        guard let requestData = try? JSONSerialization.data(withJSONObject: request) else {
+            throw Failure.badResponse("request not encodable")
+        }
+        // MSG_NOSIGNAL is mandatory on macOS AF_UNIX sends: without it a
+        // dead peer kills this process with SIGPIPE.
+        try sendAll(fd, requestData)
+
+        guard let header = readFully(fd, count: 4) else {
+            throw Failure.appNotRunning
+        }
+        let responseLength = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian }
+        guard responseLength > 0, responseLength <= 4 * 1024 * 1024,
+              let responseData = readFully(fd, count: Int(responseLength)),
+              let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        else {
+            throw Failure.badResponse("no or malformed frame")
+        }
+        return response
+    }
+
+    private static func sendAll(_ fd: Int32, _ data: Data) throws {
+        var header = Data()
+        var length = UInt32(data.count).bigEndian
+        header.append(Data(bytes: &length, count: 4))
+        header.append(data)
+        try header.withUnsafeBytes { ptr in
+            var sent = 0
+            while sent < ptr.count {
+                let n = send(fd, ptr.baseAddress! + sent, ptr.count - sent, MSG_NOSIGNAL)
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    throw Failure.appNotRunning  // EPIPE etc. — peer gone
+                }
+                sent += n
+            }
+        }
+    }
+
+    private static func readFully(_ fd: Int32, count: Int) -> Data? {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: min(count, 65536))
+        while data.count < count {
+            let n = buffer.withUnsafeMutableBytes { ptr in
+                recv(fd, ptr.baseAddress, min(ptr.count, count - data.count), 0)
+            }
+            guard n > 0 else { return nil }
+            data.append(contentsOf: buffer[0..<n])
+        }
+        return data
+    }
+}

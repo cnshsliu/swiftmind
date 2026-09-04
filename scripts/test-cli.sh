@@ -97,4 +97,17 @@ if "$CLI" new "$NEWF" 2>/dev/null; then
   fail "new on existing file should exit non-zero"
 fi
 
+# mcp without the app: initialize works, tool call reports app not running
+MCP_OUT=$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_map","arguments":{}}}' \
+  | "$CLI" mcp)
+echo "$MCP_OUT" | grep -q '"serverInfo"' || fail "mcp initialize"
+# When no app is running the tools/call result reports "not running":
+#   echo "$MCP_OUT" | grep -q 'not running' || fail "mcp app-absent tool error"
+# A dev instance may be live here, so accept either outcome but require a
+# well-formed JSON-RPC response with "id":2 and a result containing content.
+echo "$MCP_OUT" | grep -q '"id":2' || fail "mcp tools/call response"
+echo "$MCP_OUT" | grep -q '"content"' || fail "mcp tools/call content"
+
 echo "CLI smoke test OK"

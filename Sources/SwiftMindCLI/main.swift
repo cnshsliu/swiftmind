@@ -3,7 +3,7 @@ import SwiftMindCore
 
 // swiftmind <command> <file> [flags]
 // Commands: read, find, validate, new, add-child, add-sibling, set-text, set-note,
-//           set-attr, set-formula, fold, unfold, pin, unpin, move, delete, batch
+//           set-attr, set-formula, fold, unfold, pin, unpin, move, delete, batch, mcp
 
 let args = Array(CommandLine.arguments.dropFirst())
 
@@ -16,6 +16,10 @@ if args.first == "--version" || args.first == "version" {
     exit(0)
 }
 
+if args.first == "mcp" {
+    MCPServer.run()
+}
+
 func usage() -> Never {
     MapFile.fail(.usage("""
     usage: swiftmind <command> <file> [flags]
@@ -24,6 +28,7 @@ func usage() -> Never {
       find <file> --query <text>       search titles/notes, print matching node ids
       validate <file>                  decode + re-encode check
       new <file> [--title <t>]         create an empty map file (fails if it exists)
+      mcp                              run a stdio MCP server bridged to the live app
       add-child <file> --parent <id> --text <t> [--side auto|left|right] [--id <newid>]
       add-sibling <file> --of <id> --text <t> [--id <newid>]
       set-text <file> --id <id> --text <t>
