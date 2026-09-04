@@ -573,7 +573,7 @@ git commit -m "NoteDocument: virtual-H1 compose/split for node notes"
 - Modify: `Sources/SwiftMindCore/Layout/LayoutEngine.swift` (`appendNode`, ~line 351)
 - Modify: `Apps/SwiftMindMac/SwiftMindMac/MapCanvasView.swift`
 
-- [ ] **Step 1: Core — flag on `NodeVisual`**
+- [x] **Step 1: Core — flag on `NodeVisual`**
 
 In `MapSnapshot.swift`, add to `NodeVisual` (field + init param with default, mirroring `isPinned`):
 
@@ -587,7 +587,7 @@ In `MapSnapshot.swift`, add to `NodeVisual` (field + init param with default, mi
 Run: `swift test`
 Expected: PASS (snapshot equality unaffected — default false everywhere).
 
-- [ ] **Step 2: App — card overlay**
+- [x] **Step 2: App — card overlay**
 
 In `MapCanvasView.swift` body ZStack, after the `editOverlay` block (~line 92-95):
 
@@ -629,12 +629,12 @@ Add the view builder (near `editOverlay`, ~line 686):
 
 Note: cards skip the Canvas-drawn title — in `draw()`, the title draw block (~line 585-600) must skip expanded nodes: wrap it with `if editingNodeID != node.id && !node.isNoteExpanded { ... }`. Leave badges (note glyph, pin, fold, formula) as-is.
 
-- [ ] **Step 3: Verify build + manual smoke**
+- [x] **Step 3: Verify build + manual smoke**
 
 Run: `./scripts/rerun-mac.sh --no-test`
 Expected: BUILD SUCCEEDED; dev app relaunches. Manually: not automatable yet — checked via XCUITest in Task 9.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/SwiftMindCore/Layout/MapSnapshot.swift Sources/SwiftMindCore/Layout/LayoutEngine.swift Apps/SwiftMindMac/SwiftMindMac/MapCanvasView.swift
