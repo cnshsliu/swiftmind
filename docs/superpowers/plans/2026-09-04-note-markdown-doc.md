@@ -194,7 +194,7 @@ git commit -m "Add SetNoteExpandedCommand (undoable expansion toggle)"
 
 Wire names follow the fold/unfold precedent: ops `expand-note` / `collapse-note`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `BatchOpsTests.swift`:
 
@@ -242,12 +242,12 @@ func testReadJSONExposesNoteExpanded() throws {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter BatchOpsTests.testExpandNoteOpDecodesAppliesAndUndoesViaComposite`
 Expected: FAIL — compile error, no such case.
 
-- [ ] **Step 3: Implement `MapOp` case**
+- [x] **Step 3: Implement `MapOp` case**
 
 In `BatchOps.swift`:
 
@@ -303,12 +303,12 @@ In `AgentProtocol.swift` `nodeJSON`, next to the `folded` line:
         if node.isNoteExpanded { dict["noteExpanded"] = true }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `swift test --filter BatchOpsTests --filter AgentProtocolTests`
 Expected: PASS.
 
-- [ ] **Step 5: Update agent docs + CLI smoke**
+- [x] **Step 5: Update agent docs + CLI smoke**
 
 In `skills/swiftmind/SKILL.md`, line 26-27 area — add `noteExpanded` to the node field list, and after the `fold`/`unfold` line (37) add:
 
@@ -328,7 +328,7 @@ echo '[{"op":"collapse-note","id":"n_smoke"}]' | "$CLI" batch "$WORK" >/dev/null
 Run: `./scripts/test-cli.sh`
 Expected: ends with `CLI smoke test OK`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sources/SwiftMindCore/Automation/ Tests/SwiftMindCoreTests/BatchOpsTests.swift Tests/SwiftMindCoreTests/AgentProtocolTests.swift skills/swiftmind/SKILL.md scripts/test-cli.sh
