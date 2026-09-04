@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppModel: ObservableObject {
     let library = VaultLibrary.shared
+    let agentBridge = AgentBridge()
 
     @Published private(set) var mode: VaultLibrary.AppMode = .map
     @Published private(set) var currentMapURL: URL?
@@ -43,25 +44,26 @@ final class AppModel: ObservableObject {
            FileManager.default.fileExists(atPath: last.path),
            VaultLibrary.isMindMapFile(last) {
             openMap(at: last, recordAsLast: true)
-            return
+        } else {
+            do {
+                let url = try VaultLibrary.createEmptyMapIfNeeded(
+                    at: VaultLibrary.defaultNewMapURL,
+                    title: "Untitled"
+                )
+                openMap(at: url, recordAsLast: true)
+            } catch {
+                // Last resort: in-memory untitled (still no open panel).
+                suppressAutosave = true
+                isBrainMode = false
+                mode = .map
+                currentMapURL = nil
+                session = DocumentSession(map: .makeEmpty(title: "Untitled"))
+                wireSession()
+                suppressAutosave = false
+            }
         }
 
-        do {
-            let url = try VaultLibrary.createEmptyMapIfNeeded(
-                at: VaultLibrary.defaultNewMapURL,
-                title: "Untitled"
-            )
-            openMap(at: url, recordAsLast: true)
-        } catch {
-            // Last resort: in-memory untitled (still no open panel).
-            suppressAutosave = true
-            isBrainMode = false
-            mode = .map
-            currentMapURL = nil
-            session = DocumentSession(map: .makeEmpty(title: "Untitled"))
-            wireSession()
-            suppressAutosave = false
-        }
+        agentBridge.start(appModel: self)
     }
 
     // MARK: - My Brain
@@ -154,6 +156,22 @@ final class AppModel: ObservableObject {
             openMap(at: url)
         } catch {
             session.showToast("Could not create map: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    /// Bridge path: create a map in the default library with a title; returns
+    /// the new file's URL. Used by AgentBridge's `new` method.
+    func createAndOpenMap(titled title: String) -> URL? {
+        let dir = VaultLibrary.defaultLibraryDirectory
+        _ = library.startAccessing(dir)
+        let url = VaultLibrary.uniqueMapURL(in: dir, baseName: "Untitled")
+        do {
+            try VaultLibrary.createEmptyMapIfNeeded(at: url, title: title)
+            openMap(at: url)
+            return url
+        } catch {
+            session.showToast("Could not create map: \(error.localizedDescription)", kind: .error)
+            return nil
         }
     }
 

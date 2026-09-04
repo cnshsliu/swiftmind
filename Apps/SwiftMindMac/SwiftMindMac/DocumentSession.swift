@@ -71,6 +71,12 @@ final class DocumentSession: ObservableObject {
         }
     }
 
+    /// Bridge path: throws instead of toasting so the caller reports back.
+    func applyThrowing(_ command: any MapCommand) throws {
+        try store.dispatch(command)
+        publishContent()
+    }
+
     func undo() {
         do {
             try store.undo()

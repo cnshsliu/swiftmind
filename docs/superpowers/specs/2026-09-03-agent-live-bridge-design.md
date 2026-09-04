@@ -62,8 +62,10 @@ app never opens a network port.
   `DispatchQueue`, frames = UInt32-BE length + UTF-8 JSON). Network.framework
   has no public UDS listener API that fits; POSIX keeps us dependency-free.
 - Socket location (inside the sandbox container, writable under the existing
-  entitlements):
-  `~/Library/Containers/app.swiftmind.mac/Data/Library/Application Support/SwiftMind/agent.sock`
+  entitlements): `~/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind/agent.sock`
+  — deliberately NOT `Library/Application Support/...`: with a long username
+  that path exceeds the 104-byte `sockaddr_un.sun_path` limit. If `bind`
+  fails with `ENAMETOOLONG`, the bridge logs and disables itself.
   Directory created `0700`; token file `agent.token` next to it, `0600`,
   contents = a UUID generated fresh at every app launch.
 - Stale socket is unlinked before `bind`. `stop()` on app terminate.
