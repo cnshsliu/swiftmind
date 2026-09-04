@@ -199,6 +199,8 @@ final class BatchOpsTests: XCTestCase {
             .setFormula(nodeID: rootID, formula: "count(children)"),
             .setFolded(nodeID: rootID, isFolded: true),
             .setPin(nodeID: rootID, position: Point2D(x: 1, y: 2)),
+            .addSibling(siblingID: NodeID(rawValue: "n_a"), newNodeID: NodeID(rawValue: "n_sib"), text: "Sib"),
+            .move(nodeID: NodeID(rawValue: "n_sib"), newParentID: rootID, index: 0),
             .delete(nodeIDs: [NodeID(rawValue: "n_new")]),
         ]
         try BatchOps.apply(ops, to: &viaApply)
@@ -208,7 +210,9 @@ final class BatchOpsTests: XCTestCase {
         XCTAssertEqual(viaApply, viaCommand)
         XCTAssertEqual(ops[0].affectedIDs, [NodeID(rawValue: "n_new")])
         XCTAssertEqual(ops[1].affectedIDs, [rootID])
-        XCTAssertEqual(ops[8].affectedIDs, [NodeID(rawValue: "n_new")])
+        XCTAssertEqual(ops[8].affectedIDs, [NodeID(rawValue: "n_sib")])
+        XCTAssertEqual(ops[9].affectedIDs, [NodeID(rawValue: "n_sib")])
+        XCTAssertEqual(ops[10].affectedIDs, [NodeID(rawValue: "n_new")])
     }
 
     func testEncodeDecodeRoundTrip() throws {
