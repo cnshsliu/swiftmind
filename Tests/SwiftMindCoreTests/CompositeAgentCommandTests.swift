@@ -37,6 +37,25 @@ final class CompositeAgentCommandTests: XCTestCase {
             XCTAssertTrue(batchError.message.contains("n_ghost"))
         }
         XCTAssertEqual(map, original, "failed batch must leave the map untouched")
+        XCTAssertTrue(command.affected.isEmpty, "affected only reports a successful execute")
+    }
+
+    func testBuildTimeFailureRollsBack() throws {
+        let original = map!
+        let command = CompositeAgentCommand(ops: [
+            .addChild(parentID: rootID, newNodeID: NodeID(rawValue: "n_1"), text: "One", side: .auto),
+            .setAttribute(nodeID: NodeID(rawValue: "n_ghost"), name: "k", value: ""),
+        ])
+        XCTAssertThrowsError(try command.execute(on: &map)) { error in
+            guard let batchError = error as? BatchOpError else {
+                return XCTFail("expected BatchOpError, got \(error)")
+            }
+            XCTAssertEqual(batchError.opIndex, 1)
+            XCTAssertEqual(batchError.opName, "set-attr")
+            XCTAssertTrue(batchError.message.contains("n_ghost"))
+        }
+        XCTAssertEqual(map, original, "build-time failure must leave the map untouched")
+        XCTAssertTrue(command.affected.isEmpty)
     }
 
     func testUndoReversesWholeBatch() throws {

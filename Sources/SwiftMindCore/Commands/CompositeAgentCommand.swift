@@ -30,6 +30,7 @@ public final class CompositeAgentCommand: MapCommand {
                     try? past.undo(on: &map)
                 }
                 executed = []
+                affected = []
                 throw BatchOpError(
                     opIndex: index,
                     opName: op.name,
