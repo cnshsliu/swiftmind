@@ -66,7 +66,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 - **Follow mode** (`f` on the canvas): the active node is always panned to the viewport center as you navigate; press `f` again to restore free panning
 - **Focus clearing**: Esc or clicking blank canvas removes the current focus; with no focus, Delete removes the node under the pointer. Deleting a focused node moves focus to its next sibling (then previous, then parent)
 - **Map title** editable in the sidebar (undoable via `SetMapTitleCommand`)
-- **Multi-window**: each document window owns its own `DocumentSession` / undo stack
+- **Multi-window**: multiple windows onto the same map share one `AppModel` / `DocumentSession` — one live session, one selection, one undo stack; edits appear in every window at once
 - **Open Recent** (File menu): last 10 opened maps, most recent first; entries that fail to open are pruned
 - **Agent CLI** (`swiftmind`): external agents/scripts read and edit maps via `read`/`find`/`add-child`/`batch` (all-or-nothing) — the app hot-reloads external changes; see `skills/swiftmind/SKILL.md`
 - **Agent live bridge** (`swiftmind mcp`): stdio MCP server that drives the running app over a local socket — edits land as **one ⌘Z step**, `read_map` includes computed **formula results**, and `get_session` reports what the user has open; `swiftmind new <file>` bootstraps an empty map from the CLI
@@ -148,7 +148,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 
 ### Multi-window check
 
-Open two maps (or the same file in two windows if the system allows). Edits and **Undo** in one window should not rewrite the other session’s history.
+Open the same map in two windows. Both show the same live session: an edit in one appears in the other immediately, and **Undo** (⌘Z) steps back through the single shared history.
 
 ## M4 features (computation)
 
