@@ -85,6 +85,20 @@ public struct LayoutEngine: Sendable {
 
     private func measure(_ node: Node, sheet: StyleSheet) -> (width: Double, height: Double) {
         let style = StyleResolver.resolve(node: node, sheet: sheet)
+        if node.isNoteExpanded {
+            // Deterministic estimate (core stays UI-free): one line per
+            // markdown line plus the virtual H1 line, padded and capped.
+            // The canvas clips any overflow inside this frame.
+            let bodyLines = node.noteMarkdown.isEmpty
+                ? 0
+                : node.noteMarkdown.split(separator: "\n", omittingEmptySubsequences: false).count
+            let estimated = Double(bodyLines + 1) * config.expandedNoteLineHeight
+                + config.paddingX * 2
+            return (
+                config.expandedNoteWidth,
+                min(config.expandedNoteMaxHeight, max(config.nodeHeight, estimated))
+            )
+        }
         let cw = max(config.charWidth, style.fontSize * 0.55)
         let textWidth = Double(max(1, node.text.count)) * cw
         let iconCount = min(3, node.icons.count)

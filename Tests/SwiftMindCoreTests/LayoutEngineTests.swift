@@ -199,6 +199,42 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertTrue(snapshot.nodes.first { $0.id == map.root.id }!.isSelected)
     }
 
+    func testExpandedNoteNodeUsesCardSize() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_c"), text: "Card", side: .right),
+            on: &map
+        )
+        map.updateNode(id: NodeID(rawValue: "n_c")) {
+            $0.noteMarkdown = "line one\nline two\nline three"
+            $0.isNoteExpanded = true
+        }
+
+        let snapshot = LayoutEngine().layout(map: map)
+        let card = snapshot.nodes.first { $0.id.rawValue == "n_c" }!
+        // 3 body lines + 1 virtual H1 line = 4 lines: 4*20 + 2*12 padding = 104
+        XCTAssertEqual(card.frame.width, 360, accuracy: 0.001)
+        XCTAssertEqual(card.frame.height, 104, accuracy: 0.001)
+    }
+
+    func testExpandedNoteHeightCapped() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_big"), text: "Big", side: .right),
+            on: &map
+        )
+        map.updateNode(id: NodeID(rawValue: "n_big")) {
+            $0.noteMarkdown = (1...100).map { "line \($0)" }.joined(separator: "\n")
+            $0.isNoteExpanded = true
+        }
+
+        let snapshot = LayoutEngine().layout(map: map)
+        let card = snapshot.nodes.first { $0.id.rawValue == "n_big" }!
+        XCTAssertEqual(card.frame.height, 400, accuracy: 0.001)
+    }
+
     func testSelectionOverlayDoesNotMoveFrames() {
         var map = MindMap.makeEmpty(title: "T")
         let bus = CommandBus()
