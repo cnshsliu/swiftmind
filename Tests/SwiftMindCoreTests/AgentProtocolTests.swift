@@ -19,6 +19,16 @@ final class AgentProtocolTests: XCTestCase {
         XCTAssertEqual(json["title"] as? String, "T")
     }
 
+    func testMapJSONFormulaWithoutResultOmitsFormulaResult() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        try SetFormulaCommand(nodeID: map.root.id, formula: "count(children)").execute(on: &map)
+
+        let json = AgentProtocol.mapJSON(for: map)
+        let root = try XCTUnwrap(json["root"] as? [String: Any])
+        XCTAssertEqual(root["formula"] as? String, "count(children)")
+        XCTAssertNil(root["formulaResult"])
+    }
+
     func testMapJSONWithoutFormulasOmitsFormulaResult() {
         let map = MindMap.makeEmpty(title: "T")
         let json = AgentProtocol.mapJSON(for: map)
