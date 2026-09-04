@@ -19,7 +19,7 @@
 - Modify: `Sources/SwiftMindCore/HTML/HTMLCodec.swift` (encode ~line 156, decode ~line 510-547)
 - Test: `Tests/SwiftMindCoreTests/HTMLCodecTests.swift`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `HTMLCodecTests.swift`:
 
@@ -45,12 +45,12 @@ func testNoteExpandedRoundTrip() throws {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter HTMLCodecTests.testNoteExpandedRoundTrip`
 Expected: FAIL — compile error, `Node` has no `isNoteExpanded`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `Node.swift`, add the field after `positionPin` (line 15) and to the initializer (default `false`, before `children`):
 
@@ -84,12 +84,12 @@ In the decoder, after the `positionPin` block (~line 514):
 
 and pass `isNoteExpanded: noteExpanded` into the `Node(...)` call (~line 533-547).
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `swift test --filter HTMLCodecTests`
 Expected: PASS, including the golden-fixture round-trip (it has no expanded nodes → no new attribute emitted).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/SwiftMindCore/Model/Node.swift Sources/SwiftMindCore/HTML/HTMLCodec.swift Tests/SwiftMindCoreTests/HTMLCodecTests.swift
@@ -104,7 +104,7 @@ git commit -m "Add Node.isNoteExpanded persisted as data-note-expanded (additive
 - Create: `Sources/SwiftMindCore/Commands/SetNoteExpandedCommand.swift`
 - Test: `Tests/SwiftMindCoreTests/CommandBusTests.swift`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `CommandBusTests.swift`:
 
@@ -129,12 +129,12 @@ func testSetNoteExpandedUndoRedo() throws {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter CommandBusTests.testSetNoteExpandedUndoRedo`
 Expected: FAIL — compile error, type does not exist.
 
-- [ ] **Step 3: Implement** (clone of `SetFoldedCommand`)
+- [x] **Step 3: Implement** (clone of `SetFoldedCommand`)
 
 Create `Sources/SwiftMindCore/Commands/SetNoteExpandedCommand.swift`:
 
@@ -169,12 +169,12 @@ public final class SetNoteExpandedCommand: MapCommand {
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 Run: `swift test --filter CommandBusTests`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/SwiftMindCore/Commands/SetNoteExpandedCommand.swift Tests/SwiftMindCoreTests/CommandBusTests.swift
