@@ -44,6 +44,9 @@ struct MapCanvasView: View {
     @State private var noteEditorNodeID: NodeID?
     @State private var noteEditorDraft: String = ""
     @State private var noteCommitTask: Task<Void, Never>?
+    /// Normal-form document of the last committed model state; contentRevision
+    /// changes that move the model off this baseline came from outside.
+    @State private var lastCommittedNoteDocument: String?
     /// Canvas offset stashed when the editor opened (restored on close).
     @State private var preEditorPan: CGSize?
     /// The offset we panned to; restore only if the user hasn't panned since.
@@ -236,14 +239,17 @@ struct MapCanvasView: View {
             }
             if let id = noteEditorNodeID {
                 if let node = session.store.map.node(id: id) {
-                    // External change (⌘Z, CLI, agent bridge): reload the
-                    // draft from the model. Our own debounced commits leave
-                    // model == draft, so they never trigger this reload; a
-                    // commit in flight (noteCommitTask != nil) suppresses it.
-                    let composed = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
-                    if noteCommitTask == nil, composed != noteEditorDraft {
-                        noteEditorDraft = composed
-                        session.liveNoteDocument = (id, composed)
+                    // External change (⌘Z, CLI, agent bridge): the model moved
+                    // off the last-committed baseline. Own commits land exactly
+                    // on it, so they never trigger this reload. Cancel any
+                    // pending debounce commit — it would clobber the undo.
+                    let modelDoc = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+                    if modelDoc != lastCommittedNoteDocument {
+                        noteCommitTask?.cancel()
+                        noteCommitTask = nil
+                        noteEditorDraft = modelDoc
+                        session.liveNoteDocument = (id, modelDoc)
+                        lastCommittedNoteDocument = modelDoc
                     }
                 } else {
                     // Node vanished — close without committing, restoring pan.
@@ -861,6 +867,7 @@ struct MapCanvasView: View {
               let node = session.store.map.node(id: primary) else { return }
         noteEditorNodeID = primary
         noteEditorDraft = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+        lastCommittedNoteDocument = noteEditorDraft
         session.liveNoteDocument = (primary, noteEditorDraft)
         stashAndPanForEditor()
         DispatchQueue.main.async { noteEditorFocused = true }
@@ -874,6 +881,7 @@ struct MapCanvasView: View {
         }
         noteEditorNodeID = nil
         session.liveNoteDocument = nil
+        lastCommittedNoteDocument = nil
         // Restore the pre-editor pan only if the user hasn't panned since.
         if let saved = preEditorPan, let target = editorPanTarget, offset == target {
             let apply = { offset = saved; panBase = saved }
@@ -928,8 +936,15 @@ struct MapCanvasView: View {
         var ops: [MapOp] = []
         if let title, title != node.text { ops.append(.setText(nodeID: id, text: title)) }
         if body != node.noteMarkdown { ops.append(.setNote(nodeID: id, markdown: body)) }
-        guard !ops.isEmpty else { return }
+        if ops.isEmpty {
+            // Model unchanged — the baseline still tracks its normal form.
+            lastCommittedNoteDocument = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+            return
+        }
         session.applyQuiet(CompositeAgentCommand(ops: ops))
+        // Baseline = the normal form the model now holds. A nil split title
+        // means no setText op, so the model kept node.text.
+        lastCommittedNoteDocument = NoteDocument.compose(title: title ?? node.text, body: body)
     }
 
     private func viewFrame(for mapFrame: Rect2D, viewSize: CGSize) -> CGRect {
@@ -1134,11 +1149,16 @@ struct MapCanvasView: View {
                 }
                 if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
                     session.select(id)
-                    canvasFocused = true
+                    // Never steal keyboard focus from the open note editor.
+                    if noteEditorNodeID == nil {
+                        canvasFocused = true
+                    }
                 } else {
                     // Click empty canvas: clear focus, still take keyboard focus.
                     session.clearSelection()
-                    canvasFocused = true
+                    if noteEditorNodeID == nil {
+                        canvasFocused = true
+                    }
                 }
             }
     }
@@ -1158,7 +1178,10 @@ struct MapCanvasView: View {
                     }
                     return
                 }
-                beginEdit(at: event.location, snapshot: snapshot)
+                // Don't stack the in-place title editor on an open note editor.
+                if noteEditorNodeID == nil {
+                    beginEdit(at: event.location, snapshot: snapshot)
+                }
             }
     }
 
