@@ -125,8 +125,8 @@ agent flows too. Bumps the CLI to 1.2.0.
 
 1. Agent framework writes a `tools/call` line to `swiftmind mcp` stdin.
 2. CLI reads `agent.token`, connects to `agent.sock`, sends the request.
-3. App validates token, dry-runs the ops on a copy (all-or-nothing),
-   dispatches `CompositeAgentCommand` → store revision bumps →
+3. App validates token, dispatches `CompositeAgentCommand` (its execute-time
+   rollback keeps the batch all-or-nothing) → store revision bumps →
    `onContentChanged` schedules autosave (400 ms) → canvas re-renders.
 4. App writes the response frame; CLI wraps it as an MCP tool result.
 5. The user's ⌘Z undoes the entire agent batch as one step.
