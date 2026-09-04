@@ -161,6 +161,8 @@ final class AppModel: ObservableObject {
 
     /// Bridge path: create a map in the default library with a title; returns
     /// the new file's URL. Used by AgentBridge's `new` method.
+    /// The file is always named `Untitled N.swiftmind.html`; the title lives
+    /// inside the map, not in the file name.
     func createAndOpenMap(titled title: String) -> URL? {
         let dir = VaultLibrary.defaultLibraryDirectory
         _ = library.startAccessing(dir)

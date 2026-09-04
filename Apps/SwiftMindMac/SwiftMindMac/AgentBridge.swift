@@ -19,6 +19,7 @@ final class AgentBridge {
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var token = ""
+    private var stopped = false
     private weak var appModel: AppModel?
 
     /// Container-side bridge directory (app view; sandbox-resolved to
@@ -30,6 +31,8 @@ final class AgentBridge {
     }
 
     func start(appModel: AppModel) {
+        guard acceptSource == nil else { return }
+        stopped = false
         // Kill switch: `defaults write app.swiftmind.mac swiftmind.agentBridge -bool false`
         if let disabled = UserDefaults.standard.object(forKey: "swiftmind.agentBridge") as? Bool,
            !disabled {
@@ -109,6 +112,7 @@ final class AgentBridge {
     }
 
     func stop() {
+        stopped = true
         acceptSource?.cancel()
         acceptSource = nil
         listenFD = -1
@@ -124,6 +128,16 @@ final class AgentBridge {
         let conn = accept(listenFD, nil, nil)
         guard conn >= 0 else { return }
         defer { close(conn) }
+        // Darwin raises SIGPIPE on send() to a closed peer — that would kill
+        // the app. Belt and braces: SO_NOSIGPIPE where valid (rejected with
+        // EINVAL on AF_UNIX on newer macOS) and MSG_NOSIGNAL on every send,
+        // which is the operative guard — EPIPE becomes a plain send() error.
+        var yes: Int32 = 1
+        setsockopt(conn, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout<Int32>.size))
+        // Bound the blocking recv so a client dribbling a partial frame can't
+        // stall the serial ioQueue forever.
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         guard let requestData = Self.readFrame(conn) else { return }
         let response: [String: Any] = DispatchQueue.main.sync {
             MainActor.assumeIsolated {
@@ -137,7 +151,7 @@ final class AgentBridge {
 
     nonisolated private static func readFrame(_ fd: Int32) -> Data? {
         guard let header = readFully(fd, count: 4) else { return nil }
-        let length = header.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+        let length = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian }
         guard length > 0, length <= maxFrameBytes else { return nil }
         return readFully(fd, count: Int(length))
     }
@@ -150,7 +164,10 @@ final class AgentBridge {
             let n = buffer.withUnsafeMutableBytes { ptr in
                 recv(fd, ptr.baseAddress, min(ptr.count, count - data.count), 0)
             }
-            guard n > 0 else { return nil }
+            guard n > 0 else {
+                if n < 0, errno == EINTR { continue }
+                return nil
+            }
             data.append(contentsOf: buffer[0..<n])
         }
         return data
@@ -158,8 +175,29 @@ final class AgentBridge {
 
     nonisolated private static func writeFrame(_ fd: Int32, _ data: Data) {
         var length = UInt32(data.count).bigEndian
-        _ = withUnsafeBytes(of: &length) { send(fd, $0.baseAddress, $0.count, 0) }
-        _ = data.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+        let header = withUnsafeBytes(of: &length) { Data($0) }
+        guard sendAll(fd, header), sendAll(fd, data) else { return }
+    }
+
+    /// Loop over short writes; EINTR retries, EPIPE/any other error silently
+    /// drops the response (MSG_NOSIGNAL keeps EPIPE from killing the app).
+    nonisolated private static func sendAll(_ fd: Int32, _ data: Data) -> Bool {
+        data.withUnsafeBytes { ptr in
+            guard var base = ptr.baseAddress else { return true }
+            var remaining = ptr.count
+            while remaining > 0 {
+                let n = send(fd, base, remaining, MSG_NOSIGNAL)
+                if n > 0 {
+                    base += n
+                    remaining -= n
+                } else if n < 0, errno == EINTR {
+                    continue
+                } else {
+                    return false
+                }
+            }
+            return true
+        }
     }
 
     // MARK: - Method dispatch (main actor)
@@ -176,6 +214,11 @@ final class AgentBridge {
         }
         guard (request["token"] as? String) == token else {
             return failure("unauthorized", "missing or wrong token")
+        }
+        // In-flight connections accepted before termination must not ack
+        // edits whose autosave will never land.
+        guard !stopped else {
+            return failure("no_session", "bridge is shutting down")
         }
         let params = request["params"] as? [String: Any] ?? [:]
         do {
