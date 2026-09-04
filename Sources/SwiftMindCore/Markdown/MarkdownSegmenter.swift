@@ -117,7 +117,7 @@ public enum MarkdownSegmenter {
                 }
                 lineStart = false
                 col = -1000
-            case " ", "\t" where lineStart:
+            case " " where lineStart, "\t" where lineStart:
                 // Leading indentation: still eligible to open a fence.
                 text.append(c)
                 col += 1

@@ -53,9 +53,8 @@ struct InspectorView: View {
                         }
                         return node.noteMarkdown
                     }()
-                    if !bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       let attr = try? AttributedString(markdown: bodyMarkdown) {
-                        Text(attr)
+                    if !bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        MarkdownTextView(markdown: bodyMarkdown, fontSize: 13, maxImageHeight: 320)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("notePreview")
                     } else {

@@ -811,10 +811,8 @@ struct MapCanvasView: View {
             }
             return NoteDocument.compose(title: visual.text, body: markdown)
         }()
-        let rendered = try? AttributedString(markdown: document)
         ScrollView(.vertical) {
-            Text(rendered ?? AttributedString(document))
-                .font(.system(size: 12))
+            MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: 160)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
         }
