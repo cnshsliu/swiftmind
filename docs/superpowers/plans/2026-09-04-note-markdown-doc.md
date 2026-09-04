@@ -648,7 +648,7 @@ git commit -m "Render expanded notes as read-only markdown cards on the canvas"
 **Files:**
 - Modify: `Apps/SwiftMindMac/SwiftMindMac/InspectorView.swift`
 
-- [ ] **Step 1: Replace the Note section (lines 52-70)**
+- [x] **Step 1: Replace the Note section (lines 52-70)**
 
 ```swift
                 Section("Note") {
@@ -668,16 +668,16 @@ git commit -m "Render expanded notes as read-only markdown cards on the canvas"
 
 (Full block-level parsing now — no `inlineOnlyPreservingWhitespace` option.)
 
-- [ ] **Step 2: Remove the dead editing machinery**
+- [x] **Step 2: Remove the dead editing machinery**
 
 Delete: `@State private var noteDraft`, `@State private var lastSyncedNote`, `@FocusState private var noteFocused`, the `commitNote(for:)` method, and the note-related lines in `syncFromSelection` (`noteDraft = node.noteMarkdown`, `lastSyncedNote = ...` in both branches, and the "same node" refresh block for notes). Title/style drafts stay untouched.
 
-- [ ] **Step 3: Verify build**
+- [x] **Step 3: Verify build**
 
 Run: `./scripts/rerun-mac.sh --no-test`
 Expected: BUILD SUCCEEDED. Inspector shows rendered note (or the hint) for the selected node.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Apps/SwiftMindMac/SwiftMindMac/InspectorView.swift
