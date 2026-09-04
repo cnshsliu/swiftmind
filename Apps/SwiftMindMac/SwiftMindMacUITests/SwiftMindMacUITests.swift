@@ -178,7 +178,8 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 5))
         // The XCUITest runner is sandboxed, so NSHomeDirectory() points at the
         // runner's own container — resolve the real user home via getpwuid.
-        let home = String(cString: getpwuid(getuid())!.pointee.pw_dir)
+        let pw = try XCTUnwrap(getpwuid(getuid()), "getpwuid returned nil")
+        let home = String(cString: pw.pointee.pw_dir)
         let bridgeDir = home
             + "/Library/Containers/app.swiftmind.mac/Data/Library/SwiftMind"
         let socketPath = bridgeDir + "/agent.sock"
