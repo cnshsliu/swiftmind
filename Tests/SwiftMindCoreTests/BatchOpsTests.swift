@@ -264,4 +264,14 @@ final class BatchOpsTests: XCTestCase {
         let decoded = try JSONDecoder().decode([MapOp].self, from: data)
         XCTAssertEqual(decoded, ops)
     }
+
+    func testSetLinksAppliesAndUndoes() throws {
+        let link = NodeLink.url(URL(string: "https://example.com/a")!)
+        let id = NodeID(rawValue: "n_a")
+        var map = makeMap()
+        try MapOp.setLinks(nodeID: id, links: [link]).command(in: map).execute(on: &map)
+        XCTAssertEqual(map.node(id: id)?.links, [link])
+        try BatchOps.apply([.setLinks(nodeID: id, links: [])], to: &map)
+        XCTAssertEqual(map.node(id: id)?.links, [])
+    }
 }

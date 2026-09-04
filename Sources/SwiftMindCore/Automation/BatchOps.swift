@@ -12,6 +12,7 @@ public enum MapOp: Equatable, Sendable {
     case setFormula(nodeID: NodeID, formula: String?)
     case setFolded(nodeID: NodeID, isFolded: Bool)
     case setNoteExpanded(nodeID: NodeID, isNoteExpanded: Bool)
+    case setLinks(nodeID: NodeID, links: [NodeLink])
     case setPin(nodeID: NodeID, position: Point2D?)
     case move(nodeID: NodeID, newParentID: NodeID, index: Int)
     case delete(nodeIDs: [NodeID])
@@ -27,6 +28,7 @@ public enum MapOp: Equatable, Sendable {
         case .setFormula: return "set-formula"
         case .setFolded(_, let folded): return folded ? "fold" : "unfold"
         case .setNoteExpanded(_, let expanded): return expanded ? "expand-note" : "collapse-note"
+        case .setLinks: return "set-links"
         case .setPin(_, let pos): return pos == nil ? "unpin" : "pin"
         case .move: return "move"
         case .delete: return "delete"
@@ -84,7 +86,7 @@ extension MapOp {
         case .addSibling(_, let newNodeID, _): return [newNodeID]
         case .setText(let id, _), .setNote(let id, _), .setAttribute(let id, _, _),
              .setFormula(let id, _), .setFolded(let id, _), .setNoteExpanded(let id, _),
-             .setPin(let id, _):
+             .setPin(let id, _), .setLinks(let id, _):
             return [id]
         case .move(let id, _, _): return [id]
         case .delete(let ids): return ids
@@ -119,6 +121,8 @@ extension MapOp {
             return SetFoldedCommand(nodeID: nodeID, isFolded: isFolded)
         case let .setNoteExpanded(nodeID, isNoteExpanded):
             return SetNoteExpandedCommand(nodeID: nodeID, isNoteExpanded: isNoteExpanded)
+        case let .setLinks(nodeID, links):
+            return SetLinksCommand(nodeID: nodeID, links: links)
         case let .setPin(nodeID, position):
             return SetPinCommand(nodeID: nodeID, positionPin: position)
         case let .move(nodeID, newParentID, index):
@@ -131,7 +135,7 @@ extension MapOp {
 
 extension MapOp: Codable {
     private enum CodingKeys: String, CodingKey {
-        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index
+        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index, links
     }
 
     private enum WireError: Error, CustomStringConvertible, LocalizedError {
@@ -219,6 +223,11 @@ extension MapOp: Codable {
             self = .setNoteExpanded(nodeID: try nodeID(.id), isNoteExpanded: true)
         case "collapse-note":
             self = .setNoteExpanded(nodeID: try nodeID(.id), isNoteExpanded: false)
+        case "set-links":
+            self = .setLinks(
+                nodeID: try nodeID(.id),
+                links: try c.decodeIfPresent([NodeLink].self, forKey: .links) ?? []
+            )
         case "pin":
             guard let x = try c.decodeIfPresent(Double.self, forKey: .x),
                   let y = try c.decodeIfPresent(Double.self, forKey: .y) else {
@@ -276,6 +285,9 @@ extension MapOp: Codable {
             try c.encode(nodeID.rawValue, forKey: .id)
         case let .setNoteExpanded(nodeID, _):
             try c.encode(nodeID.rawValue, forKey: .id)
+        case let .setLinks(nodeID, links):
+            try c.encode(nodeID.rawValue, forKey: .id)
+            try c.encode(links, forKey: .links)
         case let .setPin(nodeID, position):
             try c.encode(nodeID.rawValue, forKey: .id)
             if let position {

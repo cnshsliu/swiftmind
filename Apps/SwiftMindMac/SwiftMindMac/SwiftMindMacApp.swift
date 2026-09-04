@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import SwiftMindCore
 
 @main
@@ -62,6 +63,10 @@ struct SwiftMindMacApp: App {
 
             CommandGroup(replacing: .undoRedo) {
                 SessionUndoRedoCommands()
+            }
+
+            CommandGroup(replacing: .pasteboard) {
+                SessionClipboardCommands()
             }
 
             CommandGroup(after: .sidebar) {
@@ -136,6 +141,47 @@ private struct SessionCommandPaletteCommands: View {
         }
         .keyboardShortcut("k", modifiers: .command)
         .disabled(presentCommandPalette == nil)
+    }
+}
+
+/// Edit → Copy/Cut/Paste. When a text view (title editor, note editor,
+/// search field, inspector fields) has keyboard focus, the standard text
+/// edit is forwarded instead of the map clipboard — see ClipboardService.
+private struct SessionClipboardCommands: View {
+    @FocusedValue(\.documentSession) private var session
+
+    private var hasSelection: Bool {
+        guard let session, !session.isBrainMode else { return false }
+        let root = session.store.map.root.id
+        return session.store.selection.selectedIDs.contains { $0 != root }
+    }
+
+    /// A focused text editor keeps the system text clipboard semantics.
+    private var textResponderActive: Bool {
+        NSApp.keyWindow?.firstResponder is NSTextView
+    }
+
+    var body: some View {
+        Button("Copy") {
+            guard let session else { return }
+            ClipboardService.copySelection(from: session)
+        }
+        .keyboardShortcut("c", modifiers: .command)
+        .disabled(!hasSelection && !textResponderActive)
+
+        Button("Cut") {
+            guard let session else { return }
+            ClipboardService.cutSelection(from: session)
+        }
+        .keyboardShortcut("x", modifiers: .command)
+        .disabled(!hasSelection && !textResponderActive)
+
+        Button("Paste") {
+            guard let session else { return }
+            ClipboardService.paste(into: session)
+        }
+        .keyboardShortcut("v", modifiers: .command)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
     }
 }
 
