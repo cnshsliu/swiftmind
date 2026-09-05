@@ -90,7 +90,7 @@ private struct CommandView: View {
                     RowView(atoms: args.first ?? [], size: size, block: block)
                 }
                 .fixedSize(horizontal: true, vertical: false)
-                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.20 }
+                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.28 }
             }
         default:
             // Unknown command: show the source so nothing silently
@@ -146,11 +146,11 @@ private struct FracView: View {
         .fixedSize(horizontal: true, vertical: false)
         .coordinateSpace(name: "fracSpace")
         .onPreferenceChange(BarYKey.self) { barY = $0 }
-        // The bar sits on the MATH AXIS (~0.20em above the text baseline,
+        // The bar sits on the MATH AXIS (~0.28em above the text baseline,
         // where '=' is optically centered). First frame falls back to
         // height/2; the preference corrects it from the next frame.
         .alignmentGuide(.firstTextBaseline) { d in
-            (barY ?? d.height / 2) + size * 0.20
+            (barY ?? d.height / 2) + size * 0.28
         }
     }
 }
