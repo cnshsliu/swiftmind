@@ -54,7 +54,9 @@ enum MathBitmapRenderer {
            let barRow = redBarRow(
             m.rep, width: Int(m.pixels.width), height: Int(m.pixels.height)
            ) {
-            baseline = (barRow + 0.5) / scale
+            // Bar goes on the MATH AXIS (~0.25em above the text baseline),
+            // level with where '=' is centered — not on the baseline itself.
+            baseline = (barRow + 0.5) / scale + fontSize * 0.25
         } else {
             // No bar (plain runs/scripts): estimated text baseline plus the
             // padding bleed around the rendered view.

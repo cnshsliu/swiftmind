@@ -97,9 +97,11 @@ private struct CommandView: View {
             // Rectangle is greedy: without fixedSize the bar stretches to
             // the full proposed width instead of the numerator's width.
             .fixedSize(horizontal: true, vertical: false)
-            // The fraction bar is the math baseline: without this guide the
-            // surrounding row would align its text with the denominator.
-            .alignmentGuide(.firstTextBaseline) { $0.height / 2 }
+            // The fraction bar sits on the MATH AXIS (~0.25em above the
+            // text baseline) — the same height where '=' and '+' are
+            // centered. Aligning the bar to the plain baseline makes every
+            // relation operator look floated above the fraction.
+            .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.25 }
         case "sqrt":
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("√")
@@ -112,7 +114,7 @@ private struct CommandView: View {
                     RowView(atoms: args.first ?? [], size: size, block: block)
                 }
                 .fixedSize(horizontal: true, vertical: false)
-                .alignmentGuide(.firstTextBaseline) { $0.height / 2 }
+                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.25 }
             }
         default:
             // Unknown command: show the source so nothing silently

@@ -68,13 +68,12 @@ enum LaTeXMetrics {
                 let den = row(args.count > 1 ? args[1] : [], size: inner)
                 // VStack(spacing: 1) { num; rule(0.8); den }
                 let height = num.height + 1 + 0.8 + 1 + den.height
-                // The view reports its midpoint as the baseline
-                // (alignmentGuide height/2 in CommandView).
-                return Box(height: height, baseline: height / 2)
+                // The view's guide is height/2 + math axis (see CommandView).
+                return Box(height: height, baseline: height / 2 + size * 0.25)
             case "sqrt":
                 let content = row(args.first ?? [], size: size)
                 let height = 1 + content.height // overline + content
-                return Box(height: height, baseline: height / 2)
+                return Box(height: height, baseline: height / 2 + size * 0.25)
             default:
                 var parts = [textBox(size)]
                 for _ in args { parts.append(textBox(size)) }
