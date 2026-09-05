@@ -334,8 +334,16 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertTrue(countLabel.waitForExistence(timeout: 5))
         func nodeCount() -> Int {
             let text = countLabel.value as? String ?? countLabel.label
-            let digits = text.compactMap(\.wholeNumberValue).prefix(1)
-            return digits.first ?? 0
+            let digits = text.prefix { $0.isNumber }
+            return Int(digits) ?? -1
+        }
+
+        // Focus the canvas first: at launch a text field (map title) can own
+        // keyboard focus, which would turn ⌘C/⌘V into plain text edits.
+        let canvas = element("mapCanvas")
+        if canvas.waitForExistence(timeout: 3) {
+            canvas.click()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
         }
 
         // Add a child (auto-selected), copy it, clear selection, paste.

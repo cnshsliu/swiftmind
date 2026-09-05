@@ -150,31 +150,24 @@ private struct SessionCommandPaletteCommands: View {
 private struct SessionClipboardCommands: View {
     @FocusedValue(\.documentSession) private var session
 
-    private var hasSelection: Bool {
-        guard let session, !session.isBrainMode else { return false }
-        let root = session.store.map.root.id
-        return session.store.selection.selectedIDs.contains { $0 != root }
-    }
-
-    /// A focused text editor keeps the system text clipboard semantics.
-    private var textResponderActive: Bool {
-        NSApp.keyWindow?.firstResponder is NSTextView
-    }
-
     var body: some View {
+        // NOTE: never gate these on dynamic per-selection state — AppKit
+        // evaluates menu enablement lazily (when the menu opens), so a
+        // keyboard shortcut can act on a stale disabled flag and silently
+        // no-op. Enable on session presence; handlers guard themselves.
         Button("Copy") {
             guard let session else { return }
             ClipboardService.copySelection(from: session)
         }
         .keyboardShortcut("c", modifiers: .command)
-        .disabled(!hasSelection && !textResponderActive)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Cut") {
             guard let session else { return }
             ClipboardService.cutSelection(from: session)
         }
         .keyboardShortcut("x", modifiers: .command)
-        .disabled(!hasSelection && !textResponderActive)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Paste") {
             guard let session else { return }
