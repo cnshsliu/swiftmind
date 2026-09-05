@@ -57,17 +57,17 @@ struct MarkdownTextView: View {
     private func blockView(_ block: Block) -> some View {
         switch block {
         case .header(let level, let pieces):
-            piecesView(pieces, font: headerFont(level))
+            piecesView(pieces, font: headerFont(level), metricsSize: headerMetricsSize(level))
         case .paragraph(let pieces):
-            piecesView(pieces, font: .system(size: fontSize))
+            piecesView(pieces, font: .system(size: fontSize), metricsSize: fontSize)
         case .listItem(let indent, let marker, let pieces):
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(marker).font(.system(size: fontSize)).foregroundStyle(.secondary)
-                piecesView(pieces, font: .system(size: fontSize))
+                piecesView(pieces, font: .system(size: fontSize), metricsSize: fontSize)
             }
             .padding(.leading, CGFloat(indent) * fontSize * 1.2)
         case .quote(let pieces):
-            piecesView(pieces, font: .system(size: fontSize).italic())
+            piecesView(pieces, font: .system(size: fontSize).italic(), metricsSize: fontSize)
                 .padding(.leading, 8)
                 .overlay(alignment: .leading) {
                     Rectangle()
@@ -100,10 +100,29 @@ struct MarkdownTextView: View {
         return .system(size: fontSize * scale, weight: weight)
     }
 
-    /// A paragraph-level run of text and inline-math pieces, flowed together.
+    private func headerMetricsSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return fontSize * 1.45
+        case 2: return fontSize * 1.28
+        case 3: return fontSize * 1.14
+        default: return fontSize
+        }
+    }
+
+    /// A paragraph-level run of text and inline-math pieces, flowed together
+    /// on a shared baseline. `metricsSize` is the font size used for text
+    /// baseline computation (headers pass their scaled size).
     @ViewBuilder
-    private func piecesView(_ pieces: [Piece], font: Font) -> some View {
-        FlowLayout(spacing: 0) {
+    private func piecesView(_ pieces: [Piece], font: Font, metricsSize: CGFloat) -> some View {
+        ParagraphFlowLayout(
+            items: pieces.map { piece in
+                switch piece {
+                case .text: return .text(fontSize: metricsSize)
+                case .inlineMath(let latex): return .math(latex: latex, fontSize: fontSize)
+                }
+            },
+            spacing: 0
+        ) {
             ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
                 switch piece {
                 case .text(let s):

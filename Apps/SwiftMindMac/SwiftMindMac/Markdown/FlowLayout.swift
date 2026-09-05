@@ -1,8 +1,19 @@
 import SwiftUI
+import SwiftMindCore
 
-/// Greedy line-breaking flow layout so inline math views and `Text` runs
-/// wrap together inside a paragraph.
-struct FlowLayout: Layout {
+/// Greedy line-breaking flow layout that aligns each line's items on a
+/// shared BASELINE instead of their top edges — inline math (fractions
+/// especially) must sit on the text baseline, not below it.
+///
+/// Baselines are supplied per item (index-aligned with the subviews):
+/// plain text uses font metrics, math views use `LaTeXMetrics`.
+struct ParagraphFlowLayout: Layout {
+    enum ItemKind {
+        case text(fontSize: CGFloat)
+        case math(latex: String, fontSize: CGFloat)
+    }
+
+    let items: [ItemKind]
     var spacing: CGFloat = 0
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -25,27 +36,69 @@ struct FlowLayout: Layout {
         }
     }
 
+    private func baseline(at index: Int, height: CGFloat) -> CGFloat {
+        guard index < items.count else { return height }
+        switch items[index] {
+        case .text(let fontSize):
+            return LaTeXMetrics.textBox(fontSize).baseline
+        case .math(let latex, let fontSize):
+            let box = LaTeXMetrics.box(latex: latex, fontSize: fontSize)
+            guard box.height > 0 else { return 0 }
+            // Scale the estimated baseline to the actually-measured height.
+            return box.baseline / box.height * height
+        }
+    }
+
     private func layout(
         subviews: Subviews, maxWidth: CGFloat
     ) -> (CGSize, [CGPoint]) {
-        var positions: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var maxX: CGFloat = 0
+        var lineBaselines: [CGFloat] = []
+        var lineHeights: [CGFloat] = []
+        var lineWidths: [CGFloat] = []
 
-        for subview in subviews {
+        var lineWidth: CGFloat = 0
+        var lineBaseline: CGFloat = 0
+        var lineBelow: CGFloat = 0
+
+        for (index, subview) in subviews.enumerated() {
             let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > maxWidth, maxWidth.isFinite {
-                x = 0
-                y += lineHeight + spacing
-                lineHeight = 0
+            let itemBaseline = baseline(at: index, height: size.height)
+            if lineWidth > 0, lineWidth + size.width > maxWidth, maxWidth.isFinite {
+                lineBaselines.append(lineBaseline)
+                lineHeights.append(lineBaseline + lineBelow)
+                lineWidths.append(lineWidth)
+                lineWidth = 0
+                lineBaseline = 0
+                lineBelow = 0
             }
-            positions.append(CGPoint(x: x, y: y))
-            x += size.width + spacing
-            maxX = max(maxX, x - spacing)
-            lineHeight = max(lineHeight, size.height)
+            lineBaseline = max(lineBaseline, itemBaseline)
+            lineBelow = max(lineBelow, size.height - itemBaseline)
+            lineWidth += size.width + spacing
         }
-        return (CGSize(width: maxX, height: y + lineHeight), positions)
+        lineBaselines.append(lineBaseline)
+        lineHeights.append(lineBaseline + lineBelow)
+        lineWidths.append(lineWidth)
+
+        // Second pass: positions (same wrap condition as pass one).
+        var positions: [CGPoint] = []
+        var y: CGFloat = 0
+        var lineIndex = 0
+        var x: CGFloat = 0
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            let itemBaseline = baseline(at: index, height: size.height)
+            if x > 0, x + size.width > maxWidth, maxWidth.isFinite {
+                y += lineHeights[lineIndex]
+                lineIndex += 1
+                x = 0
+            }
+            positions.append(CGPoint(x: x, y: y + lineBaselines[lineIndex] - itemBaseline))
+            x += size.width + spacing
+        }
+        let total = CGSize(
+            width: max(0, (lineWidths.max() ?? 0) - spacing),
+            height: y + (lineHeights.last ?? 0)
+        )
+        return (total, positions)
     }
 }

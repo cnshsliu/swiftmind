@@ -85,6 +85,9 @@ private struct CommandView: View {
                     .frame(height: 0.8)
                 RowView(atoms: args.count > 1 ? args[1] : [], size: inner, block: block)
             }
+            // Rectangle is greedy: without fixedSize the bar stretches to
+            // the full proposed width instead of the numerator's width.
+            .fixedSize(horizontal: true, vertical: false)
             // The fraction bar is the math baseline: without this guide the
             // surrounding row would align its text with the denominator.
             .alignmentGuide(.firstTextBaseline) { $0.height / 2 }
@@ -99,6 +102,7 @@ private struct CommandView: View {
                         .frame(height: 1)
                     RowView(atoms: args.first ?? [], size: size, block: block)
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 .alignmentGuide(.firstTextBaseline) { $0.height / 2 }
             }
         default:

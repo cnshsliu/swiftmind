@@ -350,11 +350,7 @@ final class SwiftMindMacUITests: XCTestCase {
 
         // Focus the canvas first: at launch a text field (map title) can own
         // keyboard focus, which would turn ⌘C/⌘V into plain text edits.
-        let canvas = element("mapCanvas")
-        if canvas.waitForExistence(timeout: 3) {
-            canvas.click()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        }
+        focusCanvasWithSelection()
 
         // Add a child (auto-selected), copy it, clear selection, paste.
         app.typeKey("t", modifierFlags: .command)
@@ -377,10 +373,7 @@ final class SwiftMindMacUITests: XCTestCase {
     }
 
     func testNoteEditorTypingKeepsEditorOpen() throws {
-        let canvas = element("mapCanvas")
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        canvas.click()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        focusCanvasWithSelection()
 
         // E opens the floating editor; typing letters (especially "e"/"x")
         // must go into the editor, not toggle it closed.
@@ -394,6 +387,25 @@ final class SwiftMindMacUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertFalse(editor.exists, "Esc should close the note editor")
+    }
+}
+
+// MARK: - Canvas focus helper
+
+/// Clicks the canvas and retries until a node is selected (the root sits at
+/// the center of a fresh map; a click slightly off leaves no selection and
+/// subsequent hotkeys would no-op).
+extension SwiftMindMacUITests {
+    func focusCanvasWithSelection() {
+        let canvas = element("mapCanvas")
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "map canvas should exist")
+        let selected = element("selectedNodeLabel")
+        for _ in 0..<3 {
+            canvas.click()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+            let value = selected.exists ? ((selected.value as? String) ?? selected.label) : ""
+            if !value.isEmpty && value != "No selection" { return }
+        }
     }
 }
 
