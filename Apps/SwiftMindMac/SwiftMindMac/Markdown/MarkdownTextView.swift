@@ -15,6 +15,10 @@ struct MarkdownTextView: View {
     @State private var lastInput: String = ""
     @State private var blocks: [Block] = []
     @Environment(\.colorScheme) private var colorScheme
+    /// Rendered inline-math bitmaps, keyed by latex|size|scheme. Nil entry
+    /// would mean "tried and failed"; missing key schedules an async render.
+    /// Rendering MUST NOT run inside a SwiftUI update (AttributeGraph abort).
+    @State private var mathImages: [String: MathBitmapRenderer.Rendered?] = [:]
 
     enum Block {
         case header(level: Int, pieces: [Piece])
@@ -113,15 +117,26 @@ struct MarkdownTextView: View {
                 let run = (try? AttributedString(markdown: s)).map { Text($0) } ?? Text(s)
                 return acc + run.font(font)
             case .inlineMath(let latex):
-                guard let rendered = MathBitmapRenderer.rendered(
-                    latex: latex, fontSize: fontSize, dark: colorScheme == .dark
-                ) else {
-                    return acc + Text(latex).font(font.monospaced())
+                let key = "\(latex)|\(fontSize)|\(colorScheme == .dark)"
+                if let cached = mathImages[key], let rendered = cached {
+                    // Image bottom sits on the text baseline; shift down so
+                    // the math baseline (measured bar row) lands ON it.
+                    return acc + Text(Image(nsImage: rendered.image))
+                        .baselineOffset(-(rendered.height - rendered.baseline))
                 }
-                // Image bottom sits on the text baseline; shift down so the
-                // math baseline (bar row) lands ON the text baseline.
-                return acc + Text(Image(nsImage: rendered.image))
-                    .baselineOffset(-(rendered.height - rendered.baseline))
+                if mathImages[key] == nil {
+                    // First sighting: schedule the (cached, synchronous-ish)
+                    // render for AFTER the current SwiftUI update finishes.
+                    let size = fontSize
+                    let dark = colorScheme == .dark
+                    DispatchQueue.main.async {
+                        guard mathImages[key] == nil else { return }
+                        mathImages[key] = MathBitmapRenderer.rendered(
+                            latex: latex, fontSize: size, dark: dark
+                        )
+                    }
+                }
+                return acc + Text(latex).font(font.monospaced())
             }
         }
     }
