@@ -388,7 +388,24 @@ final class SwiftMindMacUITests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertFalse(editor.exists, "Esc should close the note editor")
     }
+
+    func testZZCaptureNoteMathRendering() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        editor.typeText("Gauss $\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$ done")
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        guard let shot = try? XCUIScreen.main.screenshot() else {
+            XCTFail("no screenshot"); return
+        }
+        // Test runner's sandbox is disabled, so /tmp is writable.
+        try shot.pngRepresentation.write(to: URL(fileURLWithPath: "/tmp/uitest_shot.png"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: "/tmp/uitest_shot.png"))
+    }
 }
+
 
 // MARK: - Canvas focus helper
 
@@ -409,7 +426,8 @@ extension SwiftMindMacUITests {
     }
 }
 
-// MARK: - Input source helper
+
+    // MARK: - Input source helper
 
 /// Switches the keyboard to a plain ASCII layout while UI tests run so
 /// synthesized English keystrokes are not intercepted by a CJK input

@@ -14,6 +14,7 @@ struct MarkdownTextView: View {
 
     @State private var lastInput: String = ""
     @State private var blocks: [Block] = []
+    @Environment(\.colorScheme) private var colorScheme
 
     enum Block {
         case header(level: Int, pieces: [Piece])
@@ -57,17 +58,17 @@ struct MarkdownTextView: View {
     private func blockView(_ block: Block) -> some View {
         switch block {
         case .header(let level, let pieces):
-            piecesView(pieces, font: headerFont(level), metricsSize: headerMetricsSize(level))
+            piecesView(pieces, font: headerFont(level))
         case .paragraph(let pieces):
-            piecesView(pieces, font: .system(size: fontSize), metricsSize: fontSize)
+            piecesView(pieces, font: .system(size: fontSize))
         case .listItem(let indent, let marker, let pieces):
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(marker).font(.system(size: fontSize)).foregroundStyle(.secondary)
-                piecesView(pieces, font: .system(size: fontSize), metricsSize: fontSize)
+                piecesView(pieces, font: .system(size: fontSize))
             }
             .padding(.leading, CGFloat(indent) * fontSize * 1.2)
         case .quote(let pieces):
-            piecesView(pieces, font: .system(size: fontSize).italic(), metricsSize: fontSize)
+            piecesView(pieces, font: .system(size: fontSize).italic())
                 .padding(.leading, 8)
                 .overlay(alignment: .leading) {
                     Rectangle()
@@ -100,40 +101,27 @@ struct MarkdownTextView: View {
         return .system(size: fontSize * scale, weight: weight)
     }
 
-    private func headerMetricsSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: return fontSize * 1.45
-        case 2: return fontSize * 1.28
-        case 3: return fontSize * 1.14
-        default: return fontSize
-        }
-    }
 
-    /// A paragraph-level run of text and inline-math pieces, flowed together
-    /// on a shared baseline. `metricsSize` is the font size used for text
-    /// baseline computation (headers pass their scaled size).
-    @ViewBuilder
-    private func piecesView(_ pieces: [Piece], font: Font, metricsSize: CGFloat) -> some View {
-        ParagraphFlowLayout(
-            items: pieces.map { piece in
-                switch piece {
-                case .text: return .text(fontSize: metricsSize)
-                case .inlineMath(let latex): return .math(latex: latex, fontSize: fontSize)
+    /// A paragraph-level run of text and inline-math pieces as ONE Text:
+    /// wrapping and baseline alignment are native. Inline math is embedded
+    /// as a pre-rendered bitmap whose bar row was measured from pixels, so
+    /// its baselineOffset is exact (see MathBitmapRenderer).
+    private func piecesView(_ pieces: [Piece], font: Font) -> Text {
+        pieces.reduce(Text("")) { acc, piece in
+            switch piece {
+            case .text(let s):
+                let run = (try? AttributedString(markdown: s)).map { Text($0) } ?? Text(s)
+                return acc + run.font(font)
+            case .inlineMath(let latex):
+                guard let rendered = MathBitmapRenderer.rendered(
+                    latex: latex, fontSize: fontSize, dark: colorScheme == .dark
+                ) else {
+                    return acc + Text(latex).font(font.monospaced())
                 }
-            },
-            spacing: 0
-        ) {
-            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
-                switch piece {
-                case .text(let s):
-                    if let attr = try? AttributedString(markdown: s) {
-                        Text(attr).font(font)
-                    } else {
-                        Text(s).font(font)
-                    }
-                case .inlineMath(let latex):
-                    LaTeXMathView(latex: latex, fontSize: fontSize)
-                }
+                // Image bottom sits on the text baseline; shift down so the
+                // math baseline (bar row) lands ON the text baseline.
+                return acc + Text(Image(nsImage: rendered.image))
+                    .baselineOffset(-(rendered.height - rendered.baseline))
             }
         }
     }
