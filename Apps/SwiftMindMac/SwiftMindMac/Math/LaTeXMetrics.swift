@@ -24,12 +24,22 @@ enum LaTeXMetrics {
         return Box(height: height, baseline: baseline)
     }
 
-    private static func row(_ atoms: [MathAST], size: CGFloat) -> Box {
+    static func row(_ atoms: [MathAST], size: CGFloat) -> Box {
         let boxes = atoms.map { atomBox($0, size: size) }
         guard !boxes.isEmpty else { return textBox(size) }
         let baseline = boxes.map(\.baseline).max()!
         let below = boxes.map { $0.height - $0.baseline }.max()!
         return Box(height: baseline + below, baseline: baseline)
+    }
+
+    /// Distance from the fraction view's TOP to the center of the bar,
+    /// mirroring the VStack(spacing: 1) { num; rule(0.8); den } geometry.
+    /// This is NOT height/2 when the numerator is taller (e.g. \sqrt{\pi}).
+    static func fracBarOffset(
+        numerator: [MathAST], denominator: [MathAST], size: CGFloat
+    ) -> CGFloat {
+        let inner = size * 0.85
+        return row(numerator, size: inner).height + 1 + 0.4
     }
 
     private static func atomBox(_ atom: MathAST, size: CGFloat) -> Box {
@@ -68,8 +78,10 @@ enum LaTeXMetrics {
                 let den = row(args.count > 1 ? args[1] : [], size: inner)
                 // VStack(spacing: 1) { num; rule(0.8); den }
                 let height = num.height + 1 + 0.8 + 1 + den.height
-                // The view's guide is height/2 + math axis (~0.20em).
-                return Box(height: height, baseline: height / 2 + size * 0.20)
+                // Baseline = the TRUE bar position (not height/2 when the
+                // numerator is taller) + math axis (~0.20em).
+                let bar = num.height + 1 + 0.4
+                return Box(height: height, baseline: bar + size * 0.20)
             case "sqrt":
                 let content = row(args.first ?? [], size: size)
                 let height = 1 + content.height // overline + content
