@@ -1,4 +1,5 @@
 import XCTest
+import Carbon.HIToolbox
 
 /// macOS UI smoke tests (XCUITest — built into Xcode).
 ///
@@ -6,12 +7,19 @@ import XCTest
 /// without manual click-through. Canvas geometry is covered by unit tests.
 final class SwiftMindMacUITests: XCTestCase {
     var app: XCUIApplication!
+    private var savedInputSource: TISInputSource?
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        // Synthesized English keystrokes vanish into an active CJK input
+        // method (composition swallows letters; Esc cancels the composition,
+        // not the UI). Force ABC for the test, restore the user's source
+        // afterwards.
+        savedInputSource = InputSourceHelper.selectASCII()
         app = XCUIApplication(bundleIdentifier: "app.swiftmind.mac.dev")
-        // Defaults for UI testing are set in SwiftMindMacApp when it sees -uitesting.
-        app.launchArguments = ["-uitesting"]
+        // Defaults for UI testing are set in SwiftMindMacApp when it sees -uitesting;
+        // the scratch map keeps edits away from the user's real documents.
+        app.launchArguments = ["-uitesting", "-uitesting-scratch-map"]
         app.launch()
         try ensureDocumentWindow()
     }
@@ -19,6 +27,8 @@ final class SwiftMindMacUITests: XCTestCase {
     override func tearDownWithError() throws {
         app?.terminate()
         app = nil
+        InputSourceHelper.restore(savedInputSource)
+        savedInputSource = nil
     }
 
     // MARK: - Document bootstrap
@@ -384,5 +394,32 @@ final class SwiftMindMacUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertFalse(editor.exists, "Esc should close the note editor")
+    }
+}
+
+// MARK: - Input source helper
+
+/// Switches the keyboard to a plain ASCII layout while UI tests run so
+/// synthesized English keystrokes are not intercepted by a CJK input
+/// method's composition buffer.
+enum InputSourceHelper {
+    /// Selects ABC (or U.S.) and returns the source to restore, if any.
+    static func selectASCII() -> TISInputSource? {
+        let previous = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+        for identifier in ["com.apple.keylayout.ABC", "com.apple.keylayout.US"] {
+            let criteria = [kTISPropertyInputSourceID as String: identifier] as CFDictionary
+            guard let list = TISCreateInputSourceList(criteria, false)?
+                .takeRetainedValue() as? [TISInputSource],
+                let source = list.first else { continue }
+            if TISSelectInputSource(source) == noErr {
+                return previous
+            }
+        }
+        return nil
+    }
+
+    static func restore(_ source: TISInputSource?) {
+        guard let source else { return }
+        TISSelectInputSource(source)
     }
 }

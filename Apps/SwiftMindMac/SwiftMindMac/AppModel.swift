@@ -39,6 +39,23 @@ final class AppModel: ObservableObject {
         didBootstrap = true
         library.ensureDefaultLibraryVault()
 
+        // UI tests opt into a disposable scratch map so keystroke-driven
+        // tests never touch the user's last-opened document.
+        if ProcessInfo.processInfo.arguments.contains("-uitesting-scratch-map") {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("uitesting.swiftmind.html")
+            try? FileManager.default.removeItem(at: url)
+            do {
+                // Same root title as a fresh map — tests assert on "Central Idea".
+                try VaultLibrary.createEmptyMapIfNeeded(at: url, title: "Central Idea")
+                openMap(at: url, recordAsLast: false)
+            } catch {
+                showBrain()
+            }
+            agentBridge.start(appModel: self)
+            return
+        }
+
         // Prefer last map when valid; else create/open default library map.
         if let last = library.lastMapURL,
            FileManager.default.fileExists(atPath: last.path),
@@ -141,6 +158,11 @@ final class AppModel: ObservableObject {
             suppressAutosave = false
         } catch {
             library.removeRecentMap(url)
+            // Drop it as "last map" too — otherwise every launch retries the
+            // doomed open (and autosave keeps toasting permission errors).
+            if library.lastMapURL == url {
+                library.lastMapURL = nil
+            }
             session.showToast("Could not open map: \(error.localizedDescription)", kind: .error)
             // Fall back to brain if open fails.
             showBrain()
@@ -254,6 +276,15 @@ final class AppModel: ObservableObject {
             lastKnownFileHash = data.hashValue
             library.lastMapURL = url
         } catch {
+            // A map we can read but not write (e.g. outside the sandbox via a
+            // launch-event handoff) must not stay "last map": every launch
+            // would reopen it and every autosave would toast this error.
+            if (error as? CocoaError)?.code == .fileWriteNoPermission {
+                if library.lastMapURL == url {
+                    library.lastMapURL = nil
+                }
+                library.removeRecentMap(url)
+            }
             session.showToast("Save failed: \(error.localizedDescription)", kind: .error)
         }
     }

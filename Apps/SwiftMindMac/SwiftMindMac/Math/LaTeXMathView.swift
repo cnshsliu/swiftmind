@@ -85,6 +85,9 @@ private struct CommandView: View {
                     .frame(height: 0.8)
                 RowView(atoms: args.count > 1 ? args[1] : [], size: inner, block: block)
             }
+            // The fraction bar is the math baseline: without this guide the
+            // surrounding row would align its text with the denominator.
+            .alignmentGuide(.firstTextBaseline) { $0.height / 2 }
         case "sqrt":
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("√")
@@ -96,6 +99,7 @@ private struct CommandView: View {
                         .frame(height: 1)
                     RowView(atoms: args.first ?? [], size: size, block: block)
                 }
+                .alignmentGuide(.firstTextBaseline) { $0.height / 2 }
             }
         default:
             // Unknown command: show the source so nothing silently
