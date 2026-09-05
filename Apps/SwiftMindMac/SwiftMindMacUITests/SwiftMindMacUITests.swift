@@ -365,4 +365,24 @@ final class SwiftMindMacUITests: XCTestCase {
             "Pasted node should be selected; got \(selected.value ?? "nil")"
         )
     }
+
+    func testNoteEditorTypingKeepsEditorOpen() throws {
+        let canvas = element("mapCanvas")
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        canvas.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        // E opens the floating editor; typing letters (especially "e"/"x")
+        // must go into the editor, not toggle it closed.
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        app.typeText("hello")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(editor.exists, "Typing \"hello\" (contains e) must not close the editor")
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(editor.exists, "Esc should close the note editor")
+    }
 }

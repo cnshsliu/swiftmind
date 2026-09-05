@@ -150,7 +150,7 @@ struct MapCanvasView: View {
             .focused($canvasFocused)
             .focusEffectDisabled()
             .onKeyPress(.return) {
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 if session.isBrainMode {
                     // Brain: select under pointer, then open map / toggle folder.
                     if let hover = hoverLocation,
@@ -165,18 +165,18 @@ struct MapCanvasView: View {
                 return .handled
             }
             .onKeyPress(.delete) {
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 deleteSelectionIfAllowed()
                 return .handled
             }
             .onKeyPress(.init("\u{7F}")) { // forward delete on some keyboards
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 deleteSelectionIfAllowed()
                 return .handled
             }
             // Esc clears the current focus (editing handles Esc itself).
             .onKeyPress(.escape) {
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 session.clearSelection()
                 return .handled
             }
@@ -193,19 +193,24 @@ struct MapCanvasView: View {
             .onKeyPress(.init("k")) { navigateKey(.up) }
             // Follow mode toggle: active node stays centered while navigating.
             .onKeyPress(.init("f")) {
-                guard editingNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 toggleFollowMode()
                 return .handled
             }
             // Note editor (E) and note card expansion (X) for the primary node.
             // Brain pseudo-nodes must not get CompositeAgentCommand mutations.
+            // Both are blocked while any editor (title or note) owns the
+            // keyboard — otherwise typing "e" inside the note editor would
+            // close it.
             .onKeyPress(.init("e")) {
-                guard editingNodeID == nil, !session.isBrainMode else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil,
+                      !session.isBrainMode else { return .ignored }
                 toggleNoteEditor()
                 return .handled
             }
             .onKeyPress(.init("x")) {
-                guard editingNodeID == nil, !session.isBrainMode else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil,
+                      !session.isBrainMode else { return .ignored }
                 toggleNoteExpansion()
                 return .handled
             }
@@ -303,11 +308,11 @@ struct MapCanvasView: View {
             session.liveNoteDocument = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
-            guard editingNodeID == nil else { return }
+            guard editingNodeID == nil, noteEditorNodeID == nil else { return }
             beginEditPreferringHover(snapshot: session.store.snapshot())
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasDelete)) { _ in
-            guard editingNodeID == nil else { return }
+            guard editingNodeID == nil, noteEditorNodeID == nil else { return }
             deleteSelectionIfAllowed()
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteEditor)) { _ in
@@ -380,7 +385,7 @@ struct MapCanvasView: View {
     private enum NavDirection { case left, right, up, down }
 
     private func navigateKey(_ direction: NavDirection) -> KeyPress.Result {
-        guard editingNodeID == nil else { return .ignored }
+        guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
         navigate(direction)
         return .handled
     }
