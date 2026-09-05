@@ -443,12 +443,39 @@ struct MapCanvasView: View {
             return outwardChild(of: current, preferredSide: wanted, snapshot: snapshot)
         }
         // Outward = away from the center on this branch's side:
-        // left branch → h is outward, l is parent; right branch reversed.
+        // left branch → h is outward, l is toward the center; right branch reversed.
         let outward = (visual.side == .left) == (direction == .left)
         if outward {
             return outwardChild(of: current, preferredSide: nil, snapshot: snapshot)
         }
+        // First-level "inward" crosses to the mirror node on the OTHER side
+        // (same column index, clamped to the last when that side is
+        // shorter) instead of landing on the center node.
+        if visual.depth == 1,
+           let mirror = mirrorFirstLevelNode(of: current, visual: visual, snapshot: snapshot) {
+            return mirror
+        }
         return map.parentID(of: current)
+    }
+
+    /// The same-index node on the opposite side among the root's first-level
+    /// children (column order per side; clamped to the last if shorter).
+    private func mirrorFirstLevelNode(
+        of current: NodeID, visual: NodeVisual, snapshot: MapSnapshot
+    ) -> NodeID? {
+        let map = session.store.map
+        let children = map.root.children
+        func side(of id: NodeID) -> NodeSide? {
+            snapshot.nodes.first { $0.id == id }?.side
+        }
+        let other: NodeSide = visual.side == .left ? .right : .left
+        let ownColumn = children.filter { side(of: $0.id) == visual.side }
+        let otherColumn = children.filter { side(of: $0.id) == other }
+        guard !otherColumn.isEmpty,
+              let index = ownColumn.firstIndex(where: { $0.id == current }) else {
+            return nil
+        }
+        return otherColumn[min(index, otherColumn.count - 1)].id
     }
 
     /// Child to move to. A folded node unfolds instead of moving (next press
