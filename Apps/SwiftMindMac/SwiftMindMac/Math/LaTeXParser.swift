@@ -17,8 +17,15 @@ indirect enum MathAST: Equatable {
 }
 
 enum LaTeXParser {
+    private static var cache: [String: [[MathAST]]] = [:]
+    private static let cacheLimit = 256
+
     static func rows(_ latex: String) -> [[MathAST]] {
-        parseTokens(Array(latex)).rows
+        if let cached = cache[latex] { return cached }
+        let parsed = parseTokens(Array(latex)).rows
+        if cache.count >= cacheLimit { cache.removeValue(forKey: cache.keys.first!) }
+        cache[latex] = parsed
+        return parsed
     }
 
     static func parse(_ latex: String) -> [MathAST] {

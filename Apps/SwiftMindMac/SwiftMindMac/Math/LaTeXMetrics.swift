@@ -52,18 +52,18 @@ enum LaTeXMetrics {
             return Box(height: 1, baseline: 0)
         case .scripts(let base, let sup, let sub):
             var parts: [Box] = [atomBox(base, size: size)]
-            let scriptSize = size * 0.62
+            let scriptSize = size * MathTypography.scriptScale
             let script = textBox(scriptSize)
             if sup != nil {
                 // Renderer: baselineOffset(+0.32*size) above the base line.
                 parts.append(Box(
-                    height: script.height + 0.32 * size,
-                    baseline: 0.32 * size
+                    height: script.height + MathTypography.superscriptShift * size,
+                    baseline: MathTypography.superscriptShift * size
                 ))
             }
             if sub != nil {
                 parts.append(Box(
-                    height: script.height + 0.18 * size,
+                    height: script.height + MathTypography.subscriptShift * size,
                     baseline: 0
                 ))
             }
@@ -81,11 +81,11 @@ enum LaTeXMetrics {
                 // Baseline = the TRUE bar position (not height/2 when the
                 // numerator is taller) + math axis (~0.28em).
                 let bar = num.height + 1 + 0.4
-                return Box(height: height, baseline: bar + size * 0.28)
+                return Box(height: height, baseline: bar + size * MathTypography.axis)
             case "sqrt":
                 let content = row(args.first ?? [], size: size)
                 let height = 1 + content.height // overline + content
-                return Box(height: height, baseline: height / 2 + size * 0.28)
+                return Box(height: height, baseline: height / 2 + size * MathTypography.axis)
             default:
                 var parts = [textBox(size)]
                 for _ in args { parts.append(textBox(size)) }

@@ -54,12 +54,12 @@ private struct AtomView: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 AtomView(atom: base, size: size, block: block)
                 if let sup {
-                    AtomView(atom: sup, size: size * 0.62, block: block)
-                        .baselineOffset(size * 0.32)
+                        AtomView(atom: sup, size: size * MathTypography.scriptScale, block: block)
+                        .baselineOffset(size * MathTypography.superscriptShift)
                 }
                 if let sub {
-                    AtomView(atom: sub, size: size * 0.62, block: block)
-                        .baselineOffset(-size * 0.18)
+                        AtomView(atom: sub, size: size * MathTypography.scriptScale, block: block)
+                        .baselineOffset(-size * MathTypography.subscriptShift)
                 }
             }
         case .command(let name, let args):
@@ -90,7 +90,7 @@ private struct CommandView: View {
                     RowView(atoms: args.first ?? [], size: size, block: block)
                 }
                 .fixedSize(horizontal: true, vertical: false)
-                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.28 }
+                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * MathTypography.axis }
             }
         default:
             // Unknown command: show the source so nothing silently
@@ -150,7 +150,7 @@ private struct FracView: View {
         // where '=' is optically centered). First frame falls back to
         // height/2; the preference corrects it from the next frame.
         .alignmentGuide(.firstTextBaseline) { d in
-            (barY ?? d.height / 2) + size * 0.28
+            (barY ?? d.height / 2) + size * MathTypography.axis
         }
     }
 }

@@ -399,14 +399,35 @@ struct MapCanvasView: View {
         let target: NodeID?
         switch direction {
         case .up:
-            target = SpatialNavigator.sibling(of: current, in: map, offset: -1)
+            target = sameSideSibling(of: current, visual: visual, offset: -1, snapshot: snapshot)
         case .down:
-            target = SpatialNavigator.sibling(of: current, in: map, offset: 1)
+            target = sameSideSibling(of: current, visual: visual, offset: 1, snapshot: snapshot)
         case .left, .right:
             target = horizontalTarget(from: current, visual: visual, direction: direction, snapshot: snapshot)
         }
         guard let target, target != current else { return }
         session.select(target)
+    }
+
+    /// Next/previous sibling restricted to the CURRENT BRANCH SIDE — j/k
+    /// walk one visual column (children alternate left/right around the
+    /// center, plain sibling order zigzags between the columns).
+    private func sameSideSibling(
+        of current: NodeID, visual: NodeVisual, offset: Int, snapshot: MapSnapshot
+    ) -> NodeID? {
+        let map = session.store.map
+        guard let parentID = map.parentID(of: current),
+              let parent = map.node(id: parentID) else { return nil }
+        func side(of id: NodeID) -> NodeSide? {
+            snapshot.nodes.first { $0.id == id }?.side
+        }
+        let column = parent.children.filter { side(of: $0.id) == visual.side }
+        guard let index = column.firstIndex(where: { $0.id == current }) else {
+            return SpatialNavigator.sibling(of: current, in: map, offset: offset)
+        }
+        let target = index + offset
+        guard column.indices.contains(target) else { return nil }
+        return column[target].id
     }
 
     private func horizontalTarget(
