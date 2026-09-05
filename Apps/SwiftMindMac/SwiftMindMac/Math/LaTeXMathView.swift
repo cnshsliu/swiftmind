@@ -8,9 +8,6 @@ struct LaTeXMathView: View {
     let latex: String
     var fontSize: CGFloat = 12
     var block: Bool = false
-    /// Measurement pass (MathBitmapRenderer): bars render pure red so the
-    /// baseline can be located from pixels exactly.
-    var measure = false
 
     var body: some View {
         let rows = LaTeXParser.rows(latex)
@@ -20,7 +17,7 @@ struct LaTeXMathView: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     ForEach(Array(row.enumerated()), id: \.offset) { _, atom in
-                        AtomView(atom: atom, size: size, block: block, measure: measure)
+                        AtomView(atom: atom, size: size, block: block)
                     }
                 }
             }
@@ -36,7 +33,6 @@ private struct AtomView: View {
     let atom: MathAST
     let size: CGFloat
     let block: Bool
-    var measure: Bool = false
 
     var body: some View {
         switch atom {
@@ -67,7 +63,7 @@ private struct AtomView: View {
                 }
             }
         case .command(let name, let args):
-            CommandView(name: name, args: args, size: size, block: block, measure: measure)
+            CommandView(name: name, args: args, size: size, block: block)
         }
     }
 }
@@ -77,11 +73,6 @@ private struct CommandView: View {
     let args: [[MathAST]]
     let size: CGFloat
     let block: Bool
-    var measure: Bool = false
-
-    private var barColor: Color {
-        measure ? Color(red: 1, green: 0, blue: 0) : .primary
-    }
 
     var body: some View {
         switch name {
@@ -90,18 +81,17 @@ private struct CommandView: View {
             VStack(spacing: 1) {
                 RowView(atoms: args.first ?? [], size: inner, block: block)
                 Rectangle()
-                    .fill(barColor)
+                    .fill(.primary)
                     .frame(height: 0.8)
                 RowView(atoms: args.count > 1 ? args[1] : [], size: inner, block: block)
             }
             // Rectangle is greedy: without fixedSize the bar stretches to
             // the full proposed width instead of the numerator's width.
             .fixedSize(horizontal: true, vertical: false)
-            // The fraction bar sits on the MATH AXIS (~0.25em above the
-            // text baseline) — the same height where '=' and '+' are
-            // centered. Aligning the bar to the plain baseline makes every
-            // relation operator look floated above the fraction.
-            .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.25 }
+            // The fraction bar sits on the MATH AXIS — the height where
+            // '=' and '+' are optically centered. Measured on the system
+            // font: ~0.20em above the text baseline.
+            .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.20 }
         case "sqrt":
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("√")
@@ -109,12 +99,12 @@ private struct CommandView: View {
                     .baselineOffset(size * 0.08)
                 VStack(spacing: 0) {
                     Rectangle()
-                        .fill(barColor)
+                        .fill(.primary)
                         .frame(height: 1)
                     RowView(atoms: args.first ?? [], size: size, block: block)
                 }
                 .fixedSize(horizontal: true, vertical: false)
-                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.25 }
+                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * 0.20 }
             }
         default:
             // Unknown command: show the source so nothing silently
