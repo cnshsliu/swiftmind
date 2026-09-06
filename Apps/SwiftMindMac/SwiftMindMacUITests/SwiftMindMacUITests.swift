@@ -416,6 +416,66 @@ final class SwiftMindMacUITests: XCTestCase {
         try shot.pngRepresentation.write(to: URL(fileURLWithPath: "/tmp/uitest_shot.png"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: "/tmp/uitest_shot.png"))
     }
+
+    /// App Store listing screenshots: relaunch WITHOUT the scratch map so the
+    /// default launch behavior opens the bundled Welcome map (a good demo
+    /// backdrop) and capture canvas / outline / note-editor / My Brain.
+    /// PNGs land in /tmp/appstore-shots; a script step crops them to an
+    /// accepted App Store size afterwards (no AX window resizing — that
+    /// triggers an Accessibility permission prompt that blocks the app).
+    func testZZAppStoreScreenshots() throws {
+        app.terminate()
+        app.launchArguments = ["-uitesting"]
+        app.launch()
+        _ = app.wait(for: .runningForeground, timeout: 8)
+        XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 10))
+        RunLoop.current.run(until: Date().addingTimeInterval(2))
+
+        let window = app.windows.firstMatch
+        let out = URL(fileURLWithPath: "/tmp/appstore-shots")
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        func shot(_ name: String) {
+            RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+            try? window.screenshot().pngRepresentation
+                .write(to: out.appendingPathComponent(name))
+        }
+
+        shot("1-canvas.png")
+
+        // Outline view via the segmented picker (segments expose as radio
+        // buttons on macOS).
+        let picker = element("viewModePicker")
+        if picker.waitForExistence(timeout: 3) {
+            let segment = picker.radioButtons["Outline"].firstMatch
+            if segment.exists { segment.click() }
+            shot("2-outline.png")
+            let map = picker.radioButtons["Map"].firstMatch
+            if map.exists { map.click() }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        }
+
+        // Floating note editor on the root (Markdown + LaTeX demo). Click a
+        // node card directly — canvas-center clicks miss the root on the
+        // wide Welcome map.
+        let card = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'noteCard-'"))
+            .firstMatch
+        if card.waitForExistence(timeout: 3) { card.click() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.typeKey(.init("e"), modifierFlags: [])
+        if element("noteEditor").waitForExistence(timeout: 3) {
+            shot("3-note-editor.png")
+            app.typeKey(.escape, modifierFlags: [])
+        }
+
+        // My Brain vault navigator.
+        app.typeKey("b", modifierFlags: [.command, .shift])
+        RunLoop.current.run(until: Date().addingTimeInterval(1.2))
+        shot("4-mybrain.png")
+
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []
+        XCTAssertGreaterThanOrEqual(files.count, 4, "expected screenshots in \(out.path)")
+    }
 }
 
 
