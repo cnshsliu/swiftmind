@@ -69,6 +69,10 @@ swift test
 # CI-style gate: unit tests + CLI smoke + app build + XCUITest smoke
 ./scripts/verify.sh               # add --skip-ui to skip XCUITest
 
+# Mac App Store archive + .pkg export (needs the Apple ID for team
+# 5MFYYSM9G3 in Xcode > Settings > Accounts; see script header)
+./scripts/archive-appstore.sh
+
 # UI tests only (requires a GUI session, not headless)
 ./scripts/test-ui.sh
 
@@ -94,7 +98,8 @@ Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xc
 - **Settings (⌘,) live in `SettingsView.swift`.** Persisted keys: `swiftmind.launchBehavior` (`help` default / `last` / `brain`) and `swiftmind.agentBridge` (Bool, default true; takes effect at next launch). Register new defaults in `SwiftMindMacApp.init`.
 - **The bundled Welcome map is user-facing documentation.** `Resources/Welcome to SwiftMind.swiftmind.html` is both the app help and a live demo; it is the default launch map (`HelpMapInstaller` copies it into the default library and refreshes it on app updates unless the user made *content* edits — fold/expand browsing state is stripped before hashing; Help → SwiftMind Help reinstalls a fresh copy). **When user-facing features or shortcuts change, update `Resources/help-map.ops.json` and regenerate with `scripts/make-help-map.sh`** (dogfoods the CLI `batch` path; pins stable map/root ids so updates stay diffable; never hand-edit the generated HTML).
 - **External map edits go through the CLI.** `swiftmind` (Sources/SwiftMindCLI) decodes, applies `MapOp`s via `BatchOps` (all-or-nothing, through the existing commands), and atomically rewrites the file — refusing to save (exit 2) if the file changed on disk between its read and write. The app watches the open document's parent directory and hot-reloads external changes; this clears the undo stack (spec §hot reload). Never hand-edit `.swiftmind.html` in automation.
-- **Agent bridge (live edits).** `AgentBridge` in the app serves a Unix socket inside the app's own sandbox container (`~/Library/Containers/<bundleID>/Data/Library/SwiftMind/agent.sock`; token file next to it, 0600, regenerated per launch). `swiftmind mcp` bridges stdio MCP to the **Release** container (`app.swiftmind.mac`) by default; reach a dev instance via `SWIFTMIND_BRIDGE_DIR`. `applyOps` dispatches one `CompositeAgentCommand` = one undo step. Socket IO is hardened (MSG_NOSIGNAL, send/recv timeouts, 4 MB frame cap). No network entitlement. Kill switch: `defaults write app.swiftmind.mac swiftmind.agentBridge -bool false` (dev: use the `app.swiftmind.mac.dev` domain).
+- **Agent bridge (live edits).** `AgentBridge` in the app serves a Unix socket inside the app's own sandbox container (`~/Library/Containers/<bundleID>/Data/Library/SwiftMind/agent.sock`; token file next to it, 0600, regenerated per launch). `swiftmind mcp` bridges stdio MCP to the **Release** container (`app.swiftmind.mac`) by default; reach a dev instance via `SWIFTMIND_BRIDGE_DIR`. `applyOps` dispatches one `CompositeAgentCommand` = one undo step. Socket IO is hardened (MSG_NOSIGNAL, send/recv timeouts, 4 MB frame cap). No network entitlement. Kill switch: Settings → Agent, or `defaults write app.swiftmind.mac swiftmind.agentBridge -bool false` (dev: use the `app.swiftmind.mac.dev` domain).
+- **Two entitlement sets:** `SwiftMindMac.entitlements` (direct distribution; includes a `/Documents/` temporary exception for the real `~/Documents/SwiftMind` default library) and `SwiftMindMac-AppStore.entitlements` (used by `scripts/archive-appstore.sh`; no temporary exceptions — App Review rejects them — so the App Store build's default library lives in the container's Documents). `PrivacyInfo.xcprivacy` declares UserDefaults access (CA92.1); the app uses no other required-reason APIs.
 - **Xcode gotcha:** `debugDocumentVersioning` must be `false` in the scheme. When true, Xcode injects `-NSDocumentRevisionsDebugMode YES` and `DocumentGroup` opens "YES" as a file path. `scripts/patch-xcode-scheme.sh` fixes this after every `xcodegen generate` (already wired into `rerun-mac.sh`); the app also defensively sets the default to false in `SwiftMindMacApp.init`.
 
 ## Code style guidelines
