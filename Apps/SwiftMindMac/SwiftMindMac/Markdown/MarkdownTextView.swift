@@ -4,16 +4,15 @@ import SwiftMindCore
 /// Shared markdown renderer for notes: block-structured markdown (headers,
 /// lists, code fences, quotes) via SwiftUI `AttributedString(markdown:)`
 /// for inline spans, `LaTeXMathView` for `$…$`/`$$…$$` segments,
-/// `MarkdownImageView` for standalone image lines. Blocks are memoized —
-/// the canvas re-renders note cards on every keystroke while the floating
-/// editor is open.
+/// `MarkdownImageView` for standalone image lines. Block assembly is a pure
+/// function of the input — no cached @State: mutating state from `body`
+/// (even async) can land inside an AppKit layout pass and crash on an
+/// exclusivity violation.
 struct MarkdownTextView: View {
     let markdown: String
     var fontSize: CGFloat = 12
     var maxImageHeight: CGFloat = 200
 
-    @State private var lastInput: String = ""
-    @State private var blocks: [Block] = []
     @Environment(\.colorScheme) private var colorScheme
 
     enum Block {
@@ -32,7 +31,7 @@ struct MarkdownTextView: View {
     }
 
     var body: some View {
-        let resolved = resolvedBlocks
+        let resolved = MarkdownTextView.blocks(from: markdown)
         VStack(alignment: .leading, spacing: fontSize * 0.45) {
             ForEach(Array(resolved.enumerated()), id: \.offset) { _, block in
                 blockView(block)
@@ -41,17 +40,6 @@ struct MarkdownTextView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(markdown)
-    }
-
-    private var resolvedBlocks: [Block] {
-        if lastInput == markdown { return blocks }
-        let computed = MarkdownTextView.blocks(from: markdown)
-        // Mutation during view update is safe for @State used only as a cache.
-        DispatchQueue.main.async {
-            lastInput = markdown
-            blocks = computed
-        }
-        return computed
     }
 
     @ViewBuilder

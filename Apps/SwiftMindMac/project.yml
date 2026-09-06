@@ -16,7 +16,10 @@ targets:
     type: application
     platform: macOS
     sources:
-      - SwiftMindMac
+      - path: SwiftMindMac
+        # Generator input for the bundled Welcome map — not a runtime resource.
+        excludes:
+          - "Resources/help-map.ops.json"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.swiftmind.mac

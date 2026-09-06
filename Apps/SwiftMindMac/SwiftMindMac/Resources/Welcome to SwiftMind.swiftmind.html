@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en" data-swiftmind-version="1">
+<head>
+<meta charset="utf-8"/>
+<title>Welcome to SwiftMind</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --sm-bg: #f5f5f7;
+  --sm-fg: #1d1d1f;
+  --sm-muted: #6e6e73;
+  --sm-card: #ffffff;
+  --sm-border: #e5e5ea;
+  --sm-line: #d2d2d7;
+  --sm-accent: #0071e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sm-bg: #1c1c1e;
+    --sm-fg: #f5f5f7;
+    --sm-muted: #98989d;
+    --sm-card: #2c2c2e;
+    --sm-border: #3a3a3c;
+    --sm-line: #48484a;
+    --sm-accent: #0a84ff;
+  }
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  margin: 0;
+  padding: 28px 24px 48px;
+  line-height: 1.45;
+  color: var(--sm-fg);
+  background: var(--sm-bg);
+  -webkit-font-smoothing: antialiased;
+}
+.swiftmind-map {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+.swiftmind-map ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.15rem;
+  border-left: 2px solid var(--sm-line);
+}
+.swiftmind-map > ul {
+  padding-left: 0;
+  border-left: none;
+}
+.swiftmind-map li {
+  margin: 0.45rem 0;
+}
+.node-title {
+  display: inline-block;
+  padding: 0.28rem 0.65rem;
+  border-radius: 8px;
+  background: var(--sm-card);
+  border: 1px solid var(--sm-border);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.swiftmind-map > ul > li > .node-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--sm-accent) 35%, var(--sm-border));
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.node-note[hidden] {
+  display: block !important;
+  opacity: 0.82;
+  font-size: 0.9em;
+  margin: 0.3rem 0 0.35rem 0.55rem;
+  white-space: pre-wrap;
+  color: var(--sm-muted);
+  max-width: 36rem;
+}
+.node-links[hidden] {
+  display: none !important;
+}
+</style>
+</head>
+<body>
+<article class="swiftmind-map" data-schema="1" data-map-id="m_help_welcome">
+<ul>
+  <li data-node-id="n_help_root" data-side="auto" data-folded="false" data-font-size="22" data-bold="true" data-text-color="#FFFFFF" data-fill-color="#0000FF">
+    <span class="node-title">Welcome to SwiftMind</span>
+    <div class="node-note" hidden="hidden">Welcome! This map **is** the user guide — and a live demo.
+
+Everything here is editable: select any node and press `⌘T` to add a child, drag branches around, unfold the folded ones.
+
+Notes render Markdown and even math: $e^{i\pi}+1=0$
+
+*Deleted or broke something? Help → SwiftMind Help reinstalls a fresh copy.*</div>
+    <ul>
+      <li data-node-id="n_help_start" data-side="right" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Start Here</span>
+        <div class="node-note" hidden="hidden">SwiftMind is a native macOS mind-mapping app. Your maps are plain `.swiftmind.html` files — they open read-only in any browser, no app required.</div>
+        <ul>
+          <li data-node-id="n_help_start_file" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘N new map · ⌘O open · File → Open Recent</span>
+          </li>
+          <li data-node-id="n_help_start_brain" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⇧⌘B My Brain: vaults of maps</span>
+            <div class="node-note" hidden="hidden">**My Brain** is a mind-map view of your folders.
+
+- Add Vault… registers any folder (security-scoped)
+- Double-click a map node to open it
+- Double-click a folder to fold/unfold it
+- Default library: `~/Documents/SwiftMind`</div>
+          </li>
+          <li data-node-id="n_help_start_settings" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘, Settings: launch behavior, vaults, agent bridge</span>
+          </li>
+          <li data-node-id="n_help_start_views" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Toolbar: switch canvas ⇄ outline, both stay in sync</span>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_editing" data-side="right" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Editing</span>
+        <ul>
+          <li data-node-id="n_help_edit_add" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘T child · ⇧⌘T sibling · ⌫ delete · ⌘Z undo</span>
+          </li>
+          <li data-node-id="n_help_edit_drag" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Drag a node onto another to reparent</span>
+          </li>
+          <li data-node-id="n_help_edit_rename" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Double-click a node to rename · ⌘. folds a branch</span>
+          </li>
+          <li data-node-id="n_help_edit_pin" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⇧⌘P pins a node · Option+drag places it freely</span>
+            <div class="node-note" hidden="hidden">Auto layout positions everything for you. **Pin** a node to freeze its spot; **Option+drag** moves the pin; **Unpin** hands it back to auto layout.</div>
+          </li>
+          <li data-node-id="n_help_edit_clip" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘C/⌘X/⌘V copy whole subtrees</span>
+            <div class="node-note" hidden="hidden">Paste is smart:
+
+- Markdown bullets → nested nodes
+- A URL → a link node
+- An image → embedded in the note
+- HTML from other apps → plain text
+
+Every paste is one undo step.</div>
+          </li>
+          <li data-node-id="n_help_edit_drop" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Drop text, URLs, images or files right onto the canvas</span>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_navigate" data-side="right" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Navigate</span>
+        <ul>
+          <li data-node-id="n_help_nav_keys" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Arrows or hjkl move spatially · f = follow mode</span>
+            <div class="node-note" hidden="hidden">`j`/`k` walk siblings, `h`/`l` follow the branch inward/outward. Press `f` and the canvas keeps the active node centered as you navigate. `Esc` clears focus.</div>
+          </li>
+          <li data-node-id="n_help_nav_search" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘F searches titles and notes</span>
+          </li>
+          <li data-node-id="n_help_nav_palette" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘K command palette: every action + jump to node</span>
+          </li>
+          <li data-node-id="n_help_nav_bookmarks" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Bookmark nodes, jump back from the sidebar</span>
+          </li>
+          <li data-node-id="n_help_keys" data-side="right" data-folded="true" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Keyboard reference (folded — select me, press ⌘.)</span>
+            <ul>
+              <li data-node-id="n_help_k1" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Double-click a node — rename (folding is ⌘.)</span>
+              </li>
+              <li data-node-id="n_help_k2" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘N / ⌘O / ⌘S — new / open / save</span>
+              </li>
+              <li data-node-id="n_help_k3" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘T / ⇧⌘T — add child / sibling</span>
+              </li>
+              <li data-node-id="n_help_k4" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘Z / ⇧⌘Z — undo / redo</span>
+              </li>
+              <li data-node-id="n_help_k5" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘C / ⌘X / ⌘V — copy / cut / paste nodes</span>
+              </li>
+              <li data-node-id="n_help_k6" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘. — fold or unfold</span>
+              </li>
+              <li data-node-id="n_help_k7" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⇧⌘P — pin / unpin</span>
+              </li>
+              <li data-node-id="n_help_k8" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘F — search · ⌘K — command palette</span>
+              </li>
+              <li data-node-id="n_help_k9" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⇧⌘E — note editor · ⌥⌘E — expand note card</span>
+              </li>
+              <li data-node-id="n_help_k10" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">f — follow mode · Esc — clear focus</span>
+              </li>
+              <li data-node-id="n_help_k11" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⇧⌘B — My Brain · ⌘, — Settings</span>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_notes" data-side="right" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="" data-note-expanded="true">
+        <span class="node-title">Notes &amp; Markdown</span>
+        <div class="node-note" hidden="hidden">Every node carries a **Markdown note**.
+
+- **Bold**, *italic*, `code`, lists
+
+&gt; Quotes and
+&gt; everything else you&apos;d expect
+
+Inline math $\sqrt{x^2+y^2}$ and block math:
+
+$$\frac{-b \pm \sqrt{b^2-4ac}}{2a}$$
+
+Select a node, press `⇧⌘E` for a floating editor, `⌥⌘E` to pin the rendered card onto the canvas (like this one).</div>
+        <ul>
+          <li data-node-id="n_help_notes_how" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Or edit notes in the inspector sidebar</span>
+          </li>
+          <li data-node-id="n_help_notes_math" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">LaTeX subset: Greek, fractions, √, super/subscripts</span>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_organize" data-side="left" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Organize</span>
+        <ul>
+          <li data-node-id="n_help_org_attrs" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Attributes: name=value on any node</span>
+            <div class="node-note" hidden="hidden">The three tasks below carry a `status` attribute. Type `status=done` into the sidebar **Filter** field to see filtering in action — switch between **Hide** and **Highlight**.</div>
+            <ul>
+              <li data-node-id="n_help_task_a" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Write draft</span>
+                <ul class="node-attrs" hidden="hidden">
+                  <li data-attr-name="status" data-attr-value="done"></li>
+                </ul>
+              </li>
+              <li data-node-id="n_help_task_b" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Review feedback</span>
+                <ul class="node-attrs" hidden="hidden">
+                  <li data-attr-name="status" data-attr-value="doing"></li>
+                </ul>
+              </li>
+              <li data-node-id="n_help_task_c" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Ship it</span>
+                <ul class="node-attrs" hidden="hidden">
+                  <li data-attr-name="status" data-attr-value="todo"></li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+          <li data-node-id="n_help_org_styles" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Named styles + conditional rules in the inspector</span>
+          </li>
+          <li data-node-id="n_help_org_icons" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Icons: check, flag, star, warning, idea, todo…</span>
+          </li>
+          <li data-node-id="n_help_org_links" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Links: open a web page or jump across the map</span>
+            <div class="node-note" hidden="hidden">This node has two links (see the inspector): a web page about mind mapping, and a **node link** that jumps straight to the formula demo.</div>
+            <ul class="node-links" hidden="hidden">
+              <li data-link-kind="url" data-href="https://en.wikipedia.org/wiki/Mind_map"></li>
+              <li data-link-kind="node" data-node-ref="n_help_formulas"></li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_formulas" data-side="left" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Formulas — live results</span>
+        <div class="node-note" hidden="hidden">A small, safe expression DSL — never arbitrary code. Results are **derived**: they recompute live and are never stored in the file.
+
+Broken formula? You get `#ERR: reason` inline, nothing crashes.
+
+DSL: `attr(&quot;cost&quot;)`, `sum|avg|min|max(children, attr: &quot;cost&quot;)`, `count(children)`, `progress()`, arithmetic, comparisons, `and/or/not`, `if(c, t, e)`.</div>
+        <ul>
+          <li data-node-id="n_help_budget" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="" data-formula="sum(children, attr: &quot;cost&quot;)">
+            <span class="node-title">Project budget (sums children)</span>
+            <ul>
+              <li data-node-id="n_help_cost1" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Design</span>
+                <ul class="node-attrs" hidden="hidden">
+                  <li data-attr-name="cost" data-attr-value="1200"></li>
+                </ul>
+              </li>
+              <li data-node-id="n_help_cost2" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Development</span>
+                <ul class="node-attrs" hidden="hidden">
+                  <li data-attr-name="cost" data-attr-value="3400"></li>
+                </ul>
+              </li>
+              <li data-node-id="n_help_cost3" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Testing</span>
+                <ul class="node-attrs" hidden="hidden">
+                  <li data-attr-name="cost" data-attr-value="800"></li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+          <li data-node-id="n_help_count" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="" data-formula="count(children)">
+            <span class="node-title">Team size (counts children)</span>
+            <ul>
+              <li data-node-id="n_help_member1" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Ada</span>
+              </li>
+              <li data-node-id="n_help_member2" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Grace</span>
+              </li>
+              <li data-node-id="n_help_member3" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Alan</span>
+              </li>
+            </ul>
+          </li>
+          <li data-node-id="n_help_formula_hint" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Edit a cost value — watch the badge update</span>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_automation" data-side="left" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Automation &amp; Agents</span>
+        <ul>
+          <li data-node-id="n_help_auto_cli" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">swiftmind CLI: read, find, batch-edit map files</span>
+            <div class="node-note" hidden="hidden">`swiftmind read map.swiftmind.html` prints the map as JSON; `batch` applies JSON ops all-or-nothing; edits are refused if the file changed on disk in between. The app hot-reloads external changes.</div>
+          </li>
+          <li data-node-id="n_help_auto_mcp" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">swiftmind mcp: agents drive the live app</span>
+            <div class="node-note" hidden="hidden">A local Unix-socket bridge (no network) lets an AI agent read and edit the map you have open — as **one undo step** per batch. Toggle it in Settings (⌘,) → Agent.</div>
+          </li>
+          <li data-node-id="n_help_auto_bulk" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Bulk actions: restyle every filter match at once</span>
+          </li>
+          <li data-node-id="n_help_auto_scripts" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Sandboxed JavaScript from the ⌘K palette</span>
+            <div class="node-note" hidden="hidden">Scripts use the `mindmap` API to record *intents* — applied as one undoable batch only if the script finishes cleanly. No network, file, or process access exists inside the sandbox.</div>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_data" data-side="left" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Your Data</span>
+        <ul>
+          <li data-node-id="n_help_data_html" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Maps are plain HTML — double-click one, it opens in your browser</span>
+          </li>
+          <li data-node-id="n_help_data_import" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘O also imports Freeplane .mm files</span>
+          </li>
+          <li data-node-id="n_help_data_privacy" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Sandboxed: no network, only files you choose</span>
+          </li>
+          <li data-node-id="n_help_data_icloud" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Save into iCloud Drive folders for sync</span>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+<section class="attribute-registry" hidden="hidden">
+  <attr data-name="cost" data-type="string"/>
+  <attr data-name="status" data-type="string"/>
+</section>
+</article>
+</body>
+</html>

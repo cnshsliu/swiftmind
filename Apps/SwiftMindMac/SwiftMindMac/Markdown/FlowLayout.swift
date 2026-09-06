@@ -7,6 +7,12 @@ import SwiftMindCore
 ///
 /// Baselines are supplied per item (index-aligned with the subviews):
 /// plain text uses font metrics, math views use `LaTeXMetrics`.
+///
+/// A single item wider than the proposed width (e.g. a long paragraph of
+/// text in the narrow inspector) is placed with a bounded width proposal so
+/// `Text` wraps internally. Never report a size wider than the proposal —
+/// doing so puts the inspector's AppKit constraint pass into a re-layout
+/// loop that ends in a crash.
 struct ParagraphFlowLayout: Layout {
     enum ItemKind {
         case text(fontSize: CGFloat)
@@ -23,15 +29,16 @@ struct ParagraphFlowLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let (_, positions) = layout(subviews: subviews, maxWidth: bounds.width)
+        let (_, placements) = layout(subviews: subviews, maxWidth: bounds.width)
         for (index, subview) in subviews.enumerated() {
-            guard index < positions.count else { break }
+            guard index < placements.count else { break }
+            let placement = placements[index]
             subview.place(
                 at: CGPoint(
-                    x: bounds.minX + positions[index].x,
-                    y: bounds.minY + positions[index].y
+                    x: bounds.minX + placement.position.x,
+                    y: bounds.minY + placement.position.y
                 ),
-                proposal: .unspecified
+                proposal: placement.proposal
             )
         }
     }
@@ -49,56 +56,77 @@ struct ParagraphFlowLayout: Layout {
         }
     }
 
+    private struct Placement {
+        var position: CGPoint
+        var proposal: ProposedViewSize
+    }
+
+    /// A piece that alone exceeds `maxWidth` is re-measured with that width
+    /// so text wraps (math views keep their size and are clipped by the
+    /// parent, as before). The reported width never exceeds `maxWidth`.
+    private func measuredSize(of subview: Subviews.Element, maxWidth: CGFloat) -> (CGSize, Bool) {
+        let ideal = subview.sizeThatFits(.unspecified)
+        guard maxWidth.isFinite, ideal.width > maxWidth else { return (ideal, false) }
+        let wrapped = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+        return (CGSize(width: min(wrapped.width, maxWidth), height: wrapped.height), true)
+    }
+
     private func layout(
         subviews: Subviews, maxWidth: CGFloat
-    ) -> (CGSize, [CGPoint]) {
-        var lineBaselines: [CGFloat] = []
-        var lineHeights: [CGFloat] = []
-        var lineWidths: [CGFloat] = []
-
-        var lineWidth: CGFloat = 0
-        var lineBaseline: CGFloat = 0
-        var lineBelow: CGFloat = 0
-
-        for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
-            let itemBaseline = baseline(at: index, height: size.height)
-            if lineWidth > 0, lineWidth + size.width > maxWidth, maxWidth.isFinite {
-                lineBaselines.append(lineBaseline)
-                lineHeights.append(lineBaseline + lineBelow)
-                lineWidths.append(lineWidth)
-                lineWidth = 0
-                lineBaseline = 0
-                lineBelow = 0
-            }
-            lineBaseline = max(lineBaseline, itemBaseline)
-            lineBelow = max(lineBelow, size.height - itemBaseline)
-            lineWidth += size.width + spacing
+    ) -> (CGSize, [Placement]) {
+        // Pass 1: assign pieces to lines, measuring wrap-aware sizes.
+        struct LineItem {
+            var index: Int
+            var size: CGSize
+            var wrapped: Bool
+            var baseline: CGFloat
         }
-        lineBaselines.append(lineBaseline)
-        lineHeights.append(lineBaseline + lineBelow)
-        lineWidths.append(lineWidth)
+        struct Line {
+            var width: CGFloat = 0
+            var baseline: CGFloat = 0
+            var below: CGFloat = 0
+            var items: [LineItem] = []
+            var height: CGFloat { baseline + below }
+        }
 
-        // Second pass: positions (same wrap condition as pass one).
-        var positions: [CGPoint] = []
+        var lines: [Line] = [Line()]
+        for (index, subview) in subviews.enumerated() {
+            let ideal = subview.sizeThatFits(.unspecified)
+            if lines[lines.count - 1].width > 0,
+               lines[lines.count - 1].width + ideal.width > maxWidth,
+               maxWidth.isFinite {
+                lines.append(Line())
+            }
+            let (size, wrapped) = measuredSize(of: subview, maxWidth: maxWidth)
+            let itemBaseline = baseline(at: index, height: size.height)
+            var line = lines[lines.count - 1]
+            line.baseline = max(line.baseline, itemBaseline)
+            line.below = max(line.below, size.height - itemBaseline)
+            line.width += size.width + spacing
+            line.items.append(LineItem(index: index, size: size, wrapped: wrapped, baseline: itemBaseline))
+            lines[lines.count - 1] = line
+        }
+
+        // Pass 2: positions.
+        var placements: [Placement] = []
         var y: CGFloat = 0
-        var lineIndex = 0
-        var x: CGFloat = 0
-        for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
-            let itemBaseline = baseline(at: index, height: size.height)
-            if x > 0, x + size.width > maxWidth, maxWidth.isFinite {
-                y += lineHeights[lineIndex]
-                lineIndex += 1
-                x = 0
+        for line in lines {
+            var x: CGFloat = 0
+            for item in line.items {
+                placements.append(Placement(
+                    position: CGPoint(x: x, y: y + line.baseline - item.baseline),
+                    proposal: item.wrapped ? ProposedViewSize(width: maxWidth, height: nil) : .unspecified
+                ))
+                x += item.size.width + spacing
             }
-            positions.append(CGPoint(x: x, y: y + lineBaselines[lineIndex] - itemBaseline))
-            x += size.width + spacing
+            y += line.height
         }
+
+        let maxLineWidth = lines.map { max(0, $0.width - spacing) }.max() ?? 0
         let total = CGSize(
-            width: max(0, (lineWidths.max() ?? 0) - spacing),
-            height: y + (lineHeights.last ?? 0)
+            width: maxWidth.isFinite ? min(maxLineWidth, maxWidth) : maxLineWidth,
+            height: y
         )
-        return (total, positions)
+        return (total, placements)
     }
 }

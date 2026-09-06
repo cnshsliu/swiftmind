@@ -176,6 +176,18 @@ final class SwiftMindMacUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
     }
 
+    func testSettingsWindowOpens() throws {
+        app.typeKey(",", modifierFlags: .command)
+        let pickerLabel = app.descendants(matching: .any)["On launch, open:"]
+        XCTAssertTrue(
+            pickerLabel.waitForExistence(timeout: 4),
+            "⌘, should open Settings with the launch-behavior picker"
+        )
+        // Close the settings window so later tests see the document window.
+        app.typeKey("w", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    }
+
     // MARK: - Agent bridge loopback
 
     private struct BridgeClientError: Error {

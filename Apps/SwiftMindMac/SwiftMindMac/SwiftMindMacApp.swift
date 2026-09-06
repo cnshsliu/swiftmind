@@ -15,6 +15,10 @@ struct SwiftMindMacApp: App {
         }
         // Never let debugger boolean tokens be treated as open-document paths.
         UserDefaults.standard.set(false, forKey: "NSDocumentRevisionsDebugMode")
+        UserDefaults.standard.register(defaults: [
+            "swiftmind.agentBridge": true,
+            LaunchBehavior.defaultsKey: LaunchBehavior.help.rawValue,
+        ])
     }
 
     var body: some Scene {
@@ -26,6 +30,11 @@ struct SwiftMindMacApp: App {
                 }
         }
         .commands {
+            CommandGroup(replacing: .help) {
+                Button("SwiftMind Help") {
+                    appModel.openHelpMap(fresh: true)
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Map") {
                     appModel.createAndOpenMap()
@@ -76,6 +85,11 @@ struct SwiftMindMacApp: App {
             CommandMenu("Node") {
                 SessionNodeCommands()
             }
+        }
+
+        Settings {
+            SettingsView()
+                .environmentObject(appModel)
         }
     }
 }

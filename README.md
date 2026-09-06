@@ -6,7 +6,8 @@ Architecture: **SwiftMindCore** (model, commands, layout, HTML codec) + **SwiftM
 
 ### Startup & My Brain
 
-- **No Open panel** on launch: reopens the **last map**, or creates `~/Documents/SwiftMind/Untitled.swiftmind.html` and opens it.
+- **No Open panel** on launch: opens the bundled **Welcome map** (the user guide as a live, editable demo map, installed into the default library and refreshed on updates unless you edited it). Settings (⌘,) can switch launch behavior to **last open map** or **My Brain**. Help → **SwiftMind Help** reinstalls a fresh copy anytime.
+- **Settings** (⌘,): launch behavior, vault management, recent-maps cleanup, and the agent-bridge on/off switch.
 - **My Brain** (toolbar / **⇧⌘B**): mind-map navigator whose root is **My Brain**; **vault folders** you add are first-level children; **subfolders** and **`.swiftmind.html` / `.html` maps** nest underneath.
 - Double-click (or Return) a **map** node to open it; double-click a **folder/vault** to fold/unfold. **Add Vault…** registers more folders (security-scoped bookmarks).
 - Autosave writes the current map file while editing.
@@ -52,6 +53,7 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 - Theme-aware canvas (dark/light), cubic edges, system **Accent** root node
 - Drop target = accent, pin = orange (semantic split)
 - Slim toolbar; status toast for delete/errors; single status selection strip
+- Note renderer: long paragraphs wrap correctly in narrow containers (inspector/cards); the flow layout never reports a size wider than proposed (an oversize report looped AppKit constraint passes and crashed)
 - Map title / inspector title commit on blur (not per-keystroke undo spam)
 - Empty-map coach: `⌘T` / double-click / `⌘K`
 - HTML share skin: `prefers-color-scheme: light dark`

@@ -33,7 +33,7 @@ final class AppModel: ObservableObject {
 
     // MARK: - Launch
 
-    /// Call once from the root view: open last map, or create default in ~/Documents/SwiftMind.
+    /// Call once from the root view: open per launch behavior (Welcome map by default).
     func bootstrap() {
         guard !didBootstrap else { return }
         didBootstrap = true
@@ -56,7 +56,31 @@ final class AppModel: ObservableObject {
             return
         }
 
-        // Prefer last map when valid; else create/open default library map.
+        switch LaunchBehavior.current {
+        case .help:
+            openHelpMap()
+        case .brain:
+            showBrain()
+        case .last:
+            openLastMapOrDefault()
+        }
+
+        agentBridge.start(appModel: self)
+    }
+
+    /// Open the bundled Welcome map (help + live demo) in the default library.
+    /// `fresh: true` (Help menu) reinstalls the bundled copy first.
+    func openHelpMap(fresh: Bool = false) {
+        let installed = fresh ? HelpMapInstaller.reinstall() : HelpMapInstaller.installIfNeeded()
+        guard let url = installed, FileManager.default.fileExists(atPath: url.path) else {
+            openLastMapOrDefault()
+            return
+        }
+        openMap(at: url)
+    }
+
+    /// Prefer last map when valid; else create/open default library map.
+    private func openLastMapOrDefault() {
         if let last = library.lastMapURL,
            FileManager.default.fileExists(atPath: last.path),
            VaultLibrary.isMindMapFile(last) {
@@ -79,8 +103,6 @@ final class AppModel: ObservableObject {
                 suppressAutosave = false
             }
         }
-
-        agentBridge.start(appModel: self)
     }
 
     // MARK: - My Brain
