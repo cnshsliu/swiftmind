@@ -22,6 +22,7 @@
 
   {"op": "add-child", "parent": "__ROOT__", "id": "n_help_navigate", "text": "Navigate", "side": "right"},
   {"op": "add-child", "parent": "n_help_navigate", "id": "n_help_nav_keys", "text": "Arrows or hjkl move spatially · f = follow mode"},
+  {"op": "add-child", "parent": "n_help_navigate", "id": "n_help_nav_zoom", "text": "⌘+ / ⌘- / ⌘0 zoom · pinch · ⌥-scroll · two-finger pan"},
   {"op": "set-note", "id": "n_help_nav_keys", "markdown": "`j`/`k` walk siblings, `h`/`l` follow the branch inward/outward. Press `f` and the canvas keeps the active node centered as you navigate. `Esc` clears focus."},
   {"op": "add-child", "parent": "n_help_navigate", "id": "n_help_nav_search", "text": "⌘F searches titles and notes"},
   {"op": "add-child", "parent": "n_help_navigate", "id": "n_help_nav_palette", "text": "⌘K command palette: every action + jump to node"},
@@ -39,6 +40,7 @@
   {"op": "add-child", "parent": "n_help_keys", "id": "n_help_k9", "text": "⇧⌘E — note editor · ⌥⌘E — expand note card"},
   {"op": "add-child", "parent": "n_help_keys", "id": "n_help_k10", "text": "f — follow mode · Esc — clear focus"},
   {"op": "add-child", "parent": "n_help_keys", "id": "n_help_k11", "text": "⇧⌘B — My Brain · ⌘, — Settings"},
+  {"op": "add-child", "parent": "n_help_keys", "id": "n_help_k12", "text": "⌘+ / ⌘- / ⌘0 — zoom in / out / actual size"},
 
   {"op": "add-child", "parent": "__ROOT__", "id": "n_help_notes", "text": "Notes & Markdown", "side": "right"},
   {"op": "set-note", "id": "n_help_notes", "markdown": "Every node carries a **Markdown note**.\n\n- **Bold**, *italic*, `code`, lists\n\n> Quotes and\n> everything else you'd expect\n\nInline math $\\sqrt{x^2+y^2}$ and block math:\n\n$$\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$\n\nSelect a node, press `⇧⌘E` for a floating editor, `⌥⌘E` to pin the rendered card onto the canvas (like this one)."},

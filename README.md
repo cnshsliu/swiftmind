@@ -115,9 +115,13 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 | Drag **non-root node** onto another | Reparent (ghost + orange target) |
 | **Option+drag** node | Pin at release point |
 | Pinch | Zoom |
+| **⌥ + scroll** | Zoom around the pointer |
+| Two-finger scroll | Pan |
 | Double-click node | Rename |
 | Click node | Select |
 | **Drag text/URL/file/image in** from any app | Add node(s) — drop on a node = child of it; empty canvas = child of selection pinned at the drop point |
+
+- **Zoom:** ⌘+ in, ⌘- out, ⌘0 actual size (100%). Also View menu, toolbar, and ⌘K. Pinch still zooms. Range 25%–300%.
 
 ## M3 features (power layer)
 
