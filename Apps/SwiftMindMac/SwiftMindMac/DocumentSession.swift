@@ -15,6 +15,14 @@ final class DocumentSession: ObservableObject {
     /// is open; rendered views prefer it over the stored model values.
     @Published var liveNoteDocument: (nodeID: NodeID, document: String)?
 
+    /// Canvas pan/zoom. View-state only — not persisted, not undoable.
+    @Published var viewport = CanvasViewport()
+    /// Last laid-out canvas size (for keyboard zoom when the canvas is unmounted).
+    private(set) var lastCanvasWidth: Double = 0
+    private(set) var lastCanvasHeight: Double = 0
+    private(set) var lastAnchorView: Point2D?
+    private(set) var pointerIsOverCanvas = false
+
     /// True when showing the My Brain vault navigator (not a map file).
     var isBrainMode: Bool = false
     /// Double-click / Return activation (open map or toggle folder in brain mode).
@@ -113,6 +121,77 @@ final class DocumentSession: ObservableObject {
         store.clearSelection()
         selectionRevision = store.selectionRevision
         objectWillChange.send()
+    }
+
+    func rememberCanvasLayout(width: Double, height: Double) {
+        lastCanvasWidth = width
+        lastCanvasHeight = height
+    }
+
+    func rememberCanvasPointer(overCanvas: Bool, viewPoint: Point2D?) {
+        pointerIsOverCanvas = overCanvas
+        if overCanvas {
+            lastAnchorView = viewPoint
+        }
+    }
+
+    func setCanvasOffset(_ offset: Point2D) {
+        var next = viewport
+        next.offset = offset
+        viewport = next
+    }
+
+    func setCanvasScale(_ scale: Double, around viewPoint: Point2D, width: Double, height: Double) {
+        var next = viewport
+        next.setScale(scale, anchorView: viewPoint, viewWidth: width, viewHeight: height)
+        viewport = next
+    }
+
+    func panCanvas(by delta: Point2D) {
+        var next = viewport
+        next.pan(by: delta)
+        viewport = next
+    }
+
+    func zoomIn() {
+        applyZoomStep(.in)
+    }
+
+    func zoomOut() {
+        applyZoomStep(.out)
+    }
+
+    func resetToActualSize() {
+        guard !isBrainMode else { return }
+        var next = viewport
+        let anchor = zoomAnchor()
+        next.resetToActualSize(
+            anchorView: anchor,
+            viewWidth: lastCanvasWidth,
+            viewHeight: lastCanvasHeight
+        )
+        viewport = next
+    }
+
+    private func applyZoomStep(_ step: ZoomStep) {
+        guard !isBrainMode else { return }
+        var next = viewport
+        next.zoomByStepping(
+            step,
+            anchorView: zoomAnchor(),
+            viewWidth: lastCanvasWidth,
+            viewHeight: lastCanvasHeight
+        )
+        viewport = next
+    }
+
+    private func zoomAnchor() -> Point2D {
+        CanvasViewport.commandAnchor(
+            pointerOverCanvas: pointerIsOverCanvas,
+            lastAnchorView: lastAnchorView,
+            viewWidth: lastCanvasWidth,
+            viewHeight: lastCanvasHeight
+        )
     }
 
     var canUndo: Bool { store.canUndo }
