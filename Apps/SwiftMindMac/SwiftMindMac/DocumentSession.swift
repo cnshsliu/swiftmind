@@ -133,6 +133,8 @@ final class DocumentSession: ObservableObject {
         pointerIsOverCanvas = overCanvas
         if overCanvas {
             lastAnchorView = viewPoint
+        } else {
+            optionScrollRemainder = 0
         }
     }
 

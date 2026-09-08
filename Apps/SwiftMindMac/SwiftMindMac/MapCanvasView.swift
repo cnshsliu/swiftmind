@@ -370,20 +370,23 @@ struct MapCanvasView: View {
         }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [session] event in
             guard session.pointerIsOverCanvas else { return event }
+            if session.isBrainMode { return event }
             if let fr = event.window?.firstResponder as? NSView,
                fr is NSTextView || fr is NSTextField,
                let content = event.window?.contentView {
                 let p = content.convert(event.locationInWindow, from: nil)
-                if let hit = content.hitTest(p), hit === fr || hit.isDescendant(of: fr) {
+                if let hit = content.hitTest(p),
+                   hit === fr || hit.isDescendant(of: fr) || fr.isDescendant(of: hit) {
                     return event
                 }
             }
             if event.modifierFlags.contains(.option) {
                 session.handleOptionScroll(
-                    deltaY: Double(event.scrollingDeltaY),
+                    deltaY: Double(event.deltaY),
                     precise: event.hasPreciseScrollingDeltas
                 )
             } else {
+                session.optionScrollRemainder = 0
                 session.panCanvas(
                     by: Point2D(x: Double(event.scrollingDeltaX), y: Double(event.scrollingDeltaY))
                 )
