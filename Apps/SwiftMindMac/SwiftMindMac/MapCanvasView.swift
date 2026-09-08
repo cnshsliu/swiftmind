@@ -8,13 +8,22 @@ struct MapCanvasView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var scale: CGFloat = 1
-    @State private var offset: CGSize = .zero
     /// Base scale captured at magnify gesture begin (so magnification multiplies, not replaces).
     @State private var magnifyBase: CGFloat = 1
     /// Base pan offset captured at drag gesture begin.
     @State private var panBase: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
+
+    private var scale: CGFloat { CGFloat(session.viewport.scale) }
+
+    private var offset: CGSize {
+        get {
+            CGSize(width: session.viewport.offset.x, height: session.viewport.offset.y)
+        }
+        nonmutating set {
+            session.setCanvasOffset(Point2D(x: Double(newValue.width), y: Double(newValue.height)))
+        }
+    }
 
     // MARK: Drag reparent / pin / pan
     @State private var dragNodeID: NodeID?
@@ -57,8 +66,6 @@ struct MapCanvasView: View {
     @FocusState private var noteEditorFocused: Bool
     private static let noteEditorWidth: CGFloat = 420
 
-    private static let minScale: CGFloat = 0.25
-    private static let maxScale: CGFloat = 3
     private static let badgeFontSize: CGFloat = 11
     private static let iconSlot: CGFloat = 14
     /// Extra hit padding in map space (apple-design: ~hysteresis around targets).
@@ -97,8 +104,13 @@ struct MapCanvasView: View {
                         switch phase {
                         case .active(let point):
                             hoverLocation = point
+                            session.rememberCanvasPointer(
+                                overCanvas: true,
+                                viewPoint: Point2D(x: Double(point.x), y: Double(point.y))
+                            )
                         case .ended:
                             hoverLocation = nil
+                            session.rememberCanvasPointer(overCanvas: false, viewPoint: nil)
                         }
                     }
                     // High-priority tap for snappy selection; drag only after real movement.
@@ -141,9 +153,11 @@ struct MapCanvasView: View {
             }
             .onAppear {
                 canvasSize = geo.size
+                session.rememberCanvasLayout(width: Double(geo.size.width), height: Double(geo.size.height))
             }
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
+                session.rememberCanvasLayout(width: Double(newSize.width), height: Double(newSize.height))
             }
             // Focus target for keyboard: Return = rename, Delete = remove (non-root).
             .focusable()
@@ -306,6 +320,7 @@ struct MapCanvasView: View {
                 closeNoteEditor(committing: true)
             }
             session.liveNoteDocument = nil
+            session.rememberCanvasPointer(overCanvas: false, viewPoint: nil)
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil else { return }
@@ -1205,8 +1220,19 @@ struct MapCanvasView: View {
     private var magnifyGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                let next = magnifyBase * value.magnification
-                scale = min(Self.maxScale, max(Self.minScale, next))
+                let next = Double(magnifyBase) * Double(value.magnification)
+                let anchor: Point2D = {
+                    if let hover = hoverLocation {
+                        return Point2D(x: Double(hover.x), y: Double(hover.y))
+                    }
+                    return Point2D(x: Double(canvasSize.width) / 2, y: Double(canvasSize.height) / 2)
+                }()
+                session.setCanvasScale(
+                    next,
+                    around: anchor,
+                    width: Double(canvasSize.width),
+                    height: Double(canvasSize.height)
+                )
             }
             .onEnded { _ in
                 magnifyBase = scale
