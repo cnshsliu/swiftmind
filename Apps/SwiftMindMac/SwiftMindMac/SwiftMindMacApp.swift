@@ -82,6 +82,10 @@ struct SwiftMindMacApp: App {
                 SessionCommandPaletteCommands()
             }
 
+            CommandGroup(after: .toolbar) {
+                SessionZoomCommands()
+            }
+
             CommandMenu("Node") {
                 SessionNodeCommands()
             }
@@ -303,5 +307,29 @@ private struct SessionNodeCommands: View {
         } else {
             session.apply(SetPinCommand(nodeID: primary, positionPin: .zero))
         }
+    }
+}
+
+private struct SessionZoomCommands: View {
+    @FocusedValue(\.documentSession) private var session
+
+    var body: some View {
+        Button("Zoom In") {
+            session?.zoomIn()
+        }
+        .keyboardShortcut("=", modifiers: .command)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
+
+        Button("Zoom Out") {
+            session?.zoomOut()
+        }
+        .keyboardShortcut("-", modifiers: .command)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
+
+        Button("Actual Size") {
+            session?.resetToActualSize()
+        }
+        .keyboardShortcut("0", modifiers: .command)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
     }
 }
