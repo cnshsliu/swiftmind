@@ -88,6 +88,21 @@ enum PaletteBuilder {
             dismiss()
         })
 
+        if !session.isBrainMode {
+            items.append(PaletteItem(id: "zoom-in", title: "Zoom In", subtitle: "⌘+", systemImage: "plus.magnifyingglass") {
+                session.zoomIn()
+                dismiss()
+            })
+            items.append(PaletteItem(id: "zoom-out", title: "Zoom Out", subtitle: "⌘-", systemImage: "minus.magnifyingglass") {
+                session.zoomOut()
+                dismiss()
+            })
+            items.append(PaletteItem(id: "zoom-actual", title: "Actual Size", subtitle: "⌘0", systemImage: "1.magnifyingglass") {
+                session.resetToActualSize()
+                dismiss()
+            })
+        }
+
         items.append(PaletteItem(id: "bookmark", title: "Bookmark Selection", subtitle: nil, systemImage: "bookmark") {
             guard let id = session.store.selection.primary,
                   let node = session.store.map.node(id: id) else { return }
