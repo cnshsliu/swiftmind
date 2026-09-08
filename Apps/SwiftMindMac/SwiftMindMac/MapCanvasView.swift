@@ -8,8 +8,9 @@ struct MapCanvasView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Base scale captured at magnify gesture begin (so magnification multiplies, not replaces).
+    /// Base scale captured on the first pinch tick (so magnification multiplies, not replaces).
     @State private var magnifyBase: CGFloat = 1
+    @State private var magnifyGestureActive = false
     /// Base pan offset captured at drag gesture begin.
     @State private var panBase: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
@@ -1220,6 +1221,10 @@ struct MapCanvasView: View {
     private var magnifyGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
+                if !magnifyGestureActive {
+                    magnifyGestureActive = true
+                    magnifyBase = scale
+                }
                 let next = Double(magnifyBase) * Double(value.magnification)
                 let anchor: Point2D = {
                     if let hover = hoverLocation {
@@ -1236,6 +1241,7 @@ struct MapCanvasView: View {
             }
             .onEnded { _ in
                 magnifyBase = scale
+                magnifyGestureActive = false
             }
     }
 
