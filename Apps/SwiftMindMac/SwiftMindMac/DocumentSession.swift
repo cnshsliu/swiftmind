@@ -22,6 +22,7 @@ final class DocumentSession: ObservableObject {
     private(set) var lastCanvasHeight: Double = 0
     private(set) var lastAnchorView: Point2D?
     private(set) var pointerIsOverCanvas = false
+    var optionScrollRemainder: Double = 0
 
     /// True when showing the My Brain vault navigator (not a map file).
     var isBrainMode: Bool = false
@@ -159,6 +160,24 @@ final class DocumentSession: ObservableObject {
 
     func zoomOut() {
         applyZoomStep(.out)
+    }
+
+    func handleOptionScroll(deltaY: Double, precise: Bool) {
+        guard !isBrainMode else { return }
+        if precise {
+            optionScrollRemainder += deltaY
+            while optionScrollRemainder >= 1 {
+                optionScrollRemainder -= 1
+                zoomIn()
+            }
+            while optionScrollRemainder <= -1 {
+                optionScrollRemainder += 1
+                zoomOut()
+            }
+        } else {
+            if deltaY > 0 { zoomIn() }
+            else if deltaY < 0 { zoomOut() }
+        }
     }
 
     func resetToActualSize() {

@@ -48,6 +48,7 @@ struct MapCanvasView: View {
     @State private var hoverLocation: CGPoint?
     /// Fallback when SwiftUI focus does not deliver key events to the canvas.
     @State private var keyMonitor: Any?
+    @State private var scrollMonitor: Any?
     /// Spatial navigation memory: parent → last focused child (h/l returns to it).
     @State private var lastChildByParent: [NodeID: NodeID] = [:]
     /// Follow mode (F): the active node is always panned to the viewport center.
@@ -322,6 +323,7 @@ struct MapCanvasView: View {
             }
             session.liveNoteDocument = nil
             session.rememberCanvasPointer(overCanvas: false, viewPoint: nil)
+            session.optionScrollRemainder = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil else { return }
@@ -366,12 +368,38 @@ struct MapCanvasView: View {
             }
             return event
         }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [session] event in
+            guard session.pointerIsOverCanvas else { return event }
+            if let fr = event.window?.firstResponder as? NSView,
+               fr is NSTextView || fr is NSTextField,
+               let content = event.window?.contentView {
+                let p = content.convert(event.locationInWindow, from: nil)
+                if let hit = content.hitTest(p), hit === fr || hit.isDescendant(of: fr) {
+                    return event
+                }
+            }
+            if event.modifierFlags.contains(.option) {
+                session.handleOptionScroll(
+                    deltaY: Double(event.scrollingDeltaY),
+                    precise: event.hasPreciseScrollingDeltas
+                )
+            } else {
+                session.panCanvas(
+                    by: Point2D(x: Double(event.scrollingDeltaX), y: Double(event.scrollingDeltaY))
+                )
+            }
+            return nil
+        }
     }
 
     private func removeKeyMonitor() {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
+        }
+        if let scrollMonitor {
+            NSEvent.removeMonitor(scrollMonitor)
+            self.scrollMonitor = nil
         }
     }
 
