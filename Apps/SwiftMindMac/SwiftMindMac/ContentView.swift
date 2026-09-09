@@ -106,37 +106,6 @@ private struct SessionWorkspace: View {
 
             if !session.isBrainMode {
                 EditorToolbar(session: session)
-
-                ToolbarItem(placement: .automatic) {
-                    ControlGroup {
-                        Button {
-                            session.zoomOut()
-                        } label: {
-                            Label("Zoom Out", systemImage: "minus.magnifyingglass")
-                        }
-                        .help("Zoom Out (⌘-)")
-                        .disabled(session.viewport.isAtMinScale)
-                        .accessibilityIdentifier("toolbarZoomOut")
-
-                        Button {
-                            session.zoomIn()
-                        } label: {
-                            Label("Zoom In", systemImage: "plus.magnifyingglass")
-                        }
-                        .help("Zoom In (⌘+)")
-                        .disabled(session.viewport.isAtMaxScale)
-                        .accessibilityIdentifier("toolbarZoomIn")
-
-                        Button {
-                            session.resetToActualSize()
-                        } label: {
-                            Label("Actual Size", systemImage: "1.magnifyingglass")
-                        }
-                        .help("Actual Size (⌘0)")
-                        .disabled(session.viewport.isActualSize)
-                        .accessibilityIdentifier("toolbarActualSize")
-                    }
-                }
             } else {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
@@ -164,29 +133,27 @@ private struct SessionWorkspace: View {
                 }
             }
 
-            ToolbarItem(placement: .automatic) {
-                ControlGroup {
-                    Button {
-                        palettePresented = true
-                    } label: {
-                        Label("Commands", systemImage: "command")
-                    }
-                    .help("Command palette (⌘K)")
-
-                    Button {
-                        searchFocused = true
-                    } label: {
-                        Label("Search", systemImage: "magnifyingglass")
-                    }
-                    .help("Focus search (⌘F)")
-
-                    Button {
-                        inspectorPresented.toggle()
-                    } label: {
-                        Label("Inspector", systemImage: "sidebar.trailing")
-                    }
-                    .help("Toggle inspector")
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    palettePresented = true
+                } label: {
+                    Label("Commands", systemImage: "command")
                 }
+                .help("Command palette (⌘K)")
+
+                Button {
+                    searchFocused = true
+                } label: {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                .help("Focus search (⌘F)")
+
+                Button {
+                    inspectorPresented.toggle()
+                } label: {
+                    Label("Inspector", systemImage: "sidebar.trailing")
+                }
+                .help("Toggle inspector")
             }
         }
         .inspector(isPresented: $inspectorPresented) {
@@ -337,7 +304,38 @@ private struct SessionWorkspace: View {
 
                 Spacer()
 
-                if session.isBrainMode {
+                if !session.isBrainMode, session.viewMode == .map {
+                    ControlGroup {
+                        Button {
+                            session.zoomOut()
+                        } label: {
+                            Label("Zoom Out", systemImage: "minus.magnifyingglass")
+                        }
+                        .help("Zoom Out (⌘-)")
+                        .disabled(session.viewport.isAtMinScale)
+                        .accessibilityIdentifier("toolbarZoomOut")
+
+                        Button {
+                            session.zoomIn()
+                        } label: {
+                            Label("Zoom In", systemImage: "plus.magnifyingglass")
+                        }
+                        .help("Zoom In (⌘+)")
+                        .disabled(session.viewport.isAtMaxScale)
+                        .accessibilityIdentifier("toolbarZoomIn")
+
+                        Button {
+                            session.resetToActualSize()
+                        } label: {
+                            Label("Actual Size", systemImage: "1.magnifyingglass")
+                        }
+                        .help("Actual Size (⌘0)")
+                        .disabled(session.viewport.isActualSize)
+                        .accessibilityIdentifier("toolbarActualSize")
+                    }
+                    .labelStyle(.iconOnly)
+                    .controlSize(.small)
+                } else if session.isBrainMode {
                     Text("My Brain")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)

@@ -103,7 +103,7 @@ Enable when `documentSession != nil && !isBrainMode`. Do **not** disable Zoom In
 
 ### Toolbar
 
-On map documents only (same `if !session.isBrainMode` as `EditorToolbar`), a separate `ControlGroup` in `.automatic` placement (compact cluster, not mixed into Add/Delete/Undo):
+On map documents only, a compact `ControlGroup` in the **canvas chrome bar** (next to Map/Outline), not the window toolbar — window-toolbar `.automatic` items overflow into the inspector `>>` menu:
 
 - Zoom Out (`minus.magnifyingglass`) — `toolbarZoomOut`
 - Zoom In (`plus.magnifyingglass`) — `toolbarZoomIn`
