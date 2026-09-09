@@ -23,7 +23,7 @@ Give the map canvas the same zoom controls a Mac document app is expected to hav
 |-------|----------|
 | Approach | Viewport lives on `DocumentSession`, not `@State` in `MapCanvasView` |
 | Anchor | Cursor’s map-space point stays under the cursor; if there is no cursor, use the viewport center |
-| Wheel | ⌘ + scroll zooms; unmodified scroll/trackpad pan (2× AppKit deltas) |
+| Wheel | ⌘ + scroll zooms; unmodified scroll/trackpad pan (8× AppKit deltas) |
 | Pinch | Unchanged (already zoom); writes the session viewport |
 | Discrete step | Multiply/divide by **1.25**, then clamp to **0.25…3** |
 | ⌘0 Actual Size | Scale = **1.0**, still around the cursor (or center) |
@@ -120,7 +120,7 @@ Three items: Zoom In, Zoom Out, Actual Size, with the same shortcuts in the subt
 Install an `NSEvent` scroll monitor while the canvas is the hit target (pointer over `mapCanvas`):
 
 - `command` down → zoom around the cursor (convert `NSEvent` location into view space). Mouse wheel: one notch = one 1.25 step (same as ⌘+/-). Trackpad ⌘+scroll: accumulate `deltaY` (line units) and fire one 1.25 step each time the absolute remainder crosses 1.0.
-- otherwise → `pan(by:)` using the scroll deltas × 2 (natural-scroll direction as AppKit reports).
+- otherwise → `pan(by:)` using the scroll deltas × 8 (natural-scroll direction as AppKit reports).
 
 Existing drag-pan (empty/root, Space+drag, ⌘+drag) stays. Unmodified two-finger scroll is **new** pan, not a replacement for drag-pan.
 

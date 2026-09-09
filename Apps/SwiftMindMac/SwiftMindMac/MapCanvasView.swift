@@ -67,6 +67,8 @@ struct MapCanvasView: View {
     @State private var editorPanTarget: CGSize?
     @FocusState private var noteEditorFocused: Bool
     private static let noteEditorWidth: CGFloat = 420
+    /// Unmodified wheel / two-finger pan vs AppKit `scrollingDelta`.
+    private static let scrollPanSpeed = 8.0
 
     private static let badgeFontSize: CGFloat = 11
     private static let iconSlot: CGFloat = 14
@@ -389,8 +391,8 @@ struct MapCanvasView: View {
                 session.commandScrollRemainder = 0
                 session.panCanvas(
                     by: Point2D(
-                        x: Double(event.scrollingDeltaX) * 2,
-                        y: Double(event.scrollingDeltaY) * 2
+                        x: Double(event.scrollingDeltaX) * Self.scrollPanSpeed,
+                        y: Double(event.scrollingDeltaY) * Self.scrollPanSpeed
                     )
                 )
             }
