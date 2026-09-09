@@ -323,7 +323,7 @@ struct MapCanvasView: View {
             }
             session.liveNoteDocument = nil
             session.rememberCanvasPointer(overCanvas: false, viewPoint: nil)
-            session.optionScrollRemainder = 0
+            session.commandScrollRemainder = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil else { return }
@@ -380,15 +380,18 @@ struct MapCanvasView: View {
                     return event
                 }
             }
-            if event.modifierFlags.contains(.option) {
-                session.handleOptionScroll(
+            if event.modifierFlags.contains(.command) {
+                session.handleCommandScroll(
                     deltaY: Double(event.deltaY),
                     precise: event.hasPreciseScrollingDeltas
                 )
             } else {
-                session.optionScrollRemainder = 0
+                session.commandScrollRemainder = 0
                 session.panCanvas(
-                    by: Point2D(x: Double(event.scrollingDeltaX), y: Double(event.scrollingDeltaY))
+                    by: Point2D(
+                        x: Double(event.scrollingDeltaX) * 2,
+                        y: Double(event.scrollingDeltaY) * 2
+                    )
                 )
             }
             return nil

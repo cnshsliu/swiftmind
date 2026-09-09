@@ -3,7 +3,7 @@
 Date: 2026-09-08
 Status: approved (brainstorming complete), pre-implementation
 
-Pinch-to-zoom already exists on the map canvas (`MagnifyGesture`, clamp 0.25–3). This spec adds the remaining Mac-document zoom surfaces: View menu, ⌘+/⌘-/⌘0, toolbar buttons, Option+scroll zoom, and unmodified-scroll pan.
+Pinch-to-zoom already exists on the map canvas (`MagnifyGesture`, clamp 0.25–3). This spec adds the remaining Mac-document zoom surfaces: View menu, ⌘+/⌘-/⌘0, toolbar buttons, ⌘+scroll zoom, and unmodified-scroll pan.
 
 ## Goal
 
@@ -23,7 +23,7 @@ Give the map canvas the same zoom controls a Mac document app is expected to hav
 |-------|----------|
 | Approach | Viewport lives on `DocumentSession`, not `@State` in `MapCanvasView` |
 | Anchor | Cursor’s map-space point stays under the cursor; if there is no cursor, use the viewport center |
-| Wheel | ⌥ + scroll zooms; unmodified scroll/trackpad pan |
+| Wheel | ⌘ + scroll zooms; unmodified scroll/trackpad pan (2× AppKit deltas) |
 | Pinch | Unchanged (already zoom); writes the session viewport |
 | Discrete step | Multiply/divide by **1.25**, then clamp to **0.25…3** |
 | ⌘0 Actual Size | Scale = **1.0**, still around the cursor (or center) |
@@ -119,18 +119,18 @@ Three items: Zoom In, Zoom Out, Actual Size, with the same shortcuts in the subt
 
 Install an `NSEvent` scroll monitor while the canvas is the hit target (pointer over `mapCanvas`):
 
-- `option` down → zoom around the cursor (convert `NSEvent` location into view space). Mouse wheel: one notch = one 1.25 step (same as ⌘+/-). Trackpad Option+scroll: accumulate `scrollingDeltaY` and fire one 1.25 step each time the absolute remainder crosses 1.0 (so a flick does not apply dozens of steps at once).
-- otherwise → `pan(by:)` using the scroll deltas (natural-scroll direction as AppKit reports).
+- `command` down → zoom around the cursor (convert `NSEvent` location into view space). Mouse wheel: one notch = one 1.25 step (same as ⌘+/-). Trackpad ⌘+scroll: accumulate `deltaY` (line units) and fire one 1.25 step each time the absolute remainder crosses 1.0.
+- otherwise → `pan(by:)` using the scroll deltas × 2 (natural-scroll direction as AppKit reports).
 
 Existing drag-pan (empty/root, Space+drag, ⌘+drag) stays. Unmodified two-finger scroll is **new** pan, not a replacement for drag-pan.
 
 Pinch continues via `MagnifyGesture`.
 
-Text fields (title editor, note editor, search, inspector) keep their own scrolling. The monitor only acts when the pointer is over the canvas, so Option+scroll over a note editor does not steal the editor’s scroll.
+Text fields (title editor, note editor, search, inspector) keep their own scrolling. The monitor only acts when the pointer is over the canvas, so ⌘+scroll over a note editor does not steal the editor’s scroll.
 
 ## Edge cases
 
-- In-place node title edit: canvas zoom shortcuts still fire (they are app commands). Option+scroll zooms only if the pointer is over the canvas, not over the field.
+- In-place node title edit: canvas zoom shortcuts still fire (they are app commands). ⌘+scroll zooms only if the pointer is over the canvas, not over the field.
 - Follow mode: after any viewport change, existing follow recentering still runs if F is on.
 - External file reload: viewport unchanged.
 - Multi-window: today one `AppModel`/`DocumentSession` is shared; one viewport is correct.
