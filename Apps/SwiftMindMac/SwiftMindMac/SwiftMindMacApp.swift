@@ -29,6 +29,7 @@ struct SwiftMindMacApp: App {
                     appModel.bootstrap()
                 }
         }
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .help) {
                 Button("SwiftMind Help") {

@@ -79,19 +79,7 @@ private struct CommandView: View {
         case "frac":
             FracView(args: args, size: size, block: block)
         case "sqrt":
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text("√")
-                    .font(.system(size: size * 1.25))
-                    .baselineOffset(size * 0.08)
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(.primary)
-                        .frame(height: 1)
-                    RowView(atoms: args.first ?? [], size: size, block: block)
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .alignmentGuide(.firstTextBaseline) { $0.height / 2 + size * MathTypography.axis }
-            }
+            SqrtView(args: args, size: size, block: block)
         default:
             // Unknown command: show the source so nothing silently
             // disappears, followed by any arguments.
@@ -152,6 +140,51 @@ private struct FracView: View {
         .alignmentGuide(.firstTextBaseline) { d in
             (barY ?? d.height / 2) + size * MathTypography.axis
         }
+    }
+}
+
+/// One path for the surd + vinculum so the check meets the overbar.
+private struct SqrtView: View {
+    let args: [[MathAST]]
+    let size: CGFloat
+    let block: Bool
+
+    var body: some View {
+        let bar = max(1.0, size * 0.07)
+        RowView(atoms: args.first ?? [], size: size, block: block)
+            .padding(.top, size * 0.14)
+            .padding(.leading, size * 0.62)
+            .padding(.trailing, size * 0.08)
+            .overlay {
+                GeometryReader { _ in
+                    RadicalVinculum(bar: bar)
+                        .stroke(
+                            Color.primary,
+                            style: StrokeStyle(
+                                lineWidth: bar,
+                                lineCap: .butt,
+                                lineJoin: .miter
+                            )
+                        )
+                }
+            }
+            .fixedSize()
+    }
+}
+
+private struct RadicalVinculum: Shape {
+    var bar: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let h = rect.height
+        let yBar = rect.minY + bar / 2
+        let surdW = min(max(rect.width * 0.22, bar * 8), h * 0.46)
+        p.move(to: CGPoint(x: rect.minX + bar * 0.2, y: h * 0.56))
+        p.addLine(to: CGPoint(x: rect.minX + surdW * 0.36, y: h - bar * 0.55))
+        p.addLine(to: CGPoint(x: rect.minX + surdW, y: yBar))
+        p.addLine(to: CGPoint(x: rect.maxX - bar * 0.15, y: yBar))
+        return p
     }
 }
 

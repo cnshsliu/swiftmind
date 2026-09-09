@@ -84,8 +84,9 @@ enum LaTeXMetrics {
                 return Box(height: height, baseline: bar + size * MathTypography.axis)
             case "sqrt":
                 let content = row(args.first ?? [], size: size)
-                let height = 1 + content.height // overline + content
-                return Box(height: height, baseline: height / 2 + size * MathTypography.axis)
+                let top = size * 0.14
+                let height = top + content.height
+                return Box(height: height, baseline: top + content.baseline)
             default:
                 var parts = [textBox(size)]
                 for _ in args { parts.append(textBox(size)) }

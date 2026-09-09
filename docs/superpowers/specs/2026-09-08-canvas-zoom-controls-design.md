@@ -103,7 +103,7 @@ Enable when `documentSession != nil && !isBrainMode`. Do **not** disable Zoom In
 
 ### Toolbar
 
-On map documents only, a compact `ControlGroup` in the **canvas chrome bar** (next to Map/Outline), not the window toolbar — window-toolbar `.automatic` items overflow into the inspector `>>` menu:
+On map documents only, a compact `ControlGroup` in the **window toolbar** (`.primaryAction`, with `.windowToolbarStyle(.unified)` so it sits on the same row as the traffic lights, like Notes). Do not use `.automatic` placement — that overflows into the inspector `>>` menu:
 
 - Zoom Out (`minus.magnifyingglass`) — `toolbarZoomOut`
 - Zoom In (`plus.magnifyingglass`) — `toolbarZoomIn`
