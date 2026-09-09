@@ -156,17 +156,15 @@ private struct SqrtView: View {
             .padding(.leading, size * 0.62)
             .padding(.trailing, size * 0.08)
             .overlay {
-                GeometryReader { _ in
-                    RadicalVinculum(bar: bar)
-                        .stroke(
-                            Color.primary,
-                            style: StrokeStyle(
-                                lineWidth: bar,
-                                lineCap: .butt,
-                                lineJoin: .miter
-                            )
+                RadicalVinculum(bar: bar)
+                    .stroke(
+                        Color.primary,
+                        style: StrokeStyle(
+                            lineWidth: bar,
+                            lineCap: .butt,
+                            lineJoin: .miter
                         )
-                }
+                    )
             }
             .fixedSize()
     }
