@@ -101,10 +101,23 @@ private struct SessionWorkspace: View {
                     Label("My Brain", systemImage: "brain.head.profile")
                 }
                 .help("My Brain — vaults and maps")
+                .accessibilityLabel("My Brain")
                 .accessibilityIdentifier("toolbarMyBrain")
             }
 
             if !session.isBrainMode {
+                ToolbarItem(placement: .principal) {
+                    Picker("View", selection: $session.viewMode) {
+                        ForEach(DocumentSession.ViewMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 180)
+                    .labelsHidden()
+                    .accessibilityLabel("View mode")
+                    .accessibilityIdentifier("viewModePicker")
+                }
                 EditorToolbar(session: session)
             } else {
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -140,13 +153,7 @@ private struct SessionWorkspace: View {
                     Label("Commands", systemImage: "command")
                 }
                 .help("Command palette (⌘K)")
-
-                Button {
-                    searchFocused = true
-                } label: {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .help("Focus search (⌘F)")
+                .accessibilityLabel("Command palette")
 
                 Button {
                     inspectorPresented.toggle()
@@ -154,6 +161,7 @@ private struct SessionWorkspace: View {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
                 .help("Toggle inspector")
+                .accessibilityLabel("Toggle inspector")
             }
         }
         .inspector(isPresented: $inspectorPresented) {
@@ -163,15 +171,15 @@ private struct SessionWorkspace: View {
         .focusedSceneValue(\.documentSession, session)
         .focusedSceneValue(\.presentCommandPalette, $palettePresented)
         .focusedSceneValue(\.appModel, appModel)
+        .modifier(MapSearchableModifier(
+            enabled: !session.isBrainMode,
+            query: $searchQuery,
+            hits: mapSearchHits,
+            onPick: { session.select($0) }
+        ))
         .background(
             Button("") { palettePresented = true }
                 .keyboardShortcut("k", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
-        )
-        .background(
-            Button("") { searchFocused = true }
-                .keyboardShortcut("f", modifiers: .command)
                 .opacity(0)
                 .allowsHitTesting(false)
         )
@@ -222,13 +230,15 @@ private struct SessionWorkspace: View {
             if session.isBrainMode {
                 brainVaultList
             } else {
-                SearchBarView(
-                    session: session,
-                    query: $searchQuery,
-                    isSearchFocused: $searchFocused
-                )
-
-                Divider().opacity(0.5)
+                if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    SearchBarView(
+                        session: session,
+                        query: $searchQuery,
+                        isSearchFocused: $searchFocused,
+                        showsField: false
+                    )
+                    Divider().opacity(0.5)
+                }
 
                 FilterBarView(session: session)
 
@@ -288,34 +298,12 @@ private struct SessionWorkspace: View {
 
     // MARK: - Detail
 
+    private var mapSearchHits: [MapSearchHit] {
+        MapSearch.search(map: session.store.map, query: searchQuery)
+    }
+
     private var detail: some View {
         VStack(spacing: 0) {
-            HStack {
-                Picker("View", selection: $session.viewMode) {
-                    ForEach(DocumentSession.ViewMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 220)
-                .labelsHidden()
-                .accessibilityLabel("View mode")
-                .accessibilityIdentifier("viewModePicker")
-
-                Spacer()
-
-                if session.isBrainMode {
-                    Text("My Brain")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.bar)
-
-            Divider().opacity(0.4)
-
             ZStack {
                 Group {
                     switch session.viewMode {
@@ -416,6 +404,41 @@ private struct SessionWorkspace: View {
         }
         if let id = find(session.store.map.root) {
             session.select(id)
+        }
+    }
+}
+
+/// Toolbar search (HIG 3.4) without attaching `.searchable` in Brain mode.
+private struct MapSearchableModifier: ViewModifier {
+    let enabled: Bool
+    @Binding var query: String
+    let hits: [MapSearchHit]
+    let onPick: (NodeID) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .searchable(text: $query, placement: .toolbar, prompt: "Titles & notes")
+                .searchSuggestions {
+                    ForEach(hits.prefix(12)) { hit in
+                        Button {
+                            onPick(hit.nodeID)
+                        } label: {
+                            Label(
+                                hit.title.isEmpty ? "(untitled)" : hit.title,
+                                systemImage: hit.matchInNote ? "note.text" : "circle"
+                            )
+                        }
+                        .searchCompletion(hit.title)
+                    }
+                }
+                .onSubmit(of: .search) {
+                    if let first = hits.first {
+                        onPick(first.nodeID)
+                    }
+                }
+        } else {
+            content
         }
     }
 }

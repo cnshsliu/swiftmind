@@ -51,6 +51,12 @@ struct BookmarksSidebar: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("bookmark-\(bookmark.id)")
+                        .contextMenu {
+                            Button("Jump") { jump(to: bookmark) }
+                            Button("Remove Bookmark", role: .destructive) {
+                                session.apply(RemoveBookmarkCommand(bookmarkID: bookmark.id))
+                            }
+                        }
 
                         Button(role: .destructive) {
                             session.apply(RemoveBookmarkCommand(bookmarkID: bookmark.id))

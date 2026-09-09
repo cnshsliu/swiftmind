@@ -6,61 +6,61 @@ struct SearchBarView: View {
     @ObservedObject var session: DocumentSession
     @Binding var query: String
     var isSearchFocused: FocusState<Bool>.Binding
+    /// When false, only the hit list is shown (query lives in the window toolbar).
+    var showsField: Bool = true
 
     @State private var hits: [MapSearchHit] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("SEARCH")
-                .font(Theme.sidebarCaption)
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
+            if showsField {
+                Text("SEARCH")
+                    .font(Theme.sidebarCaption)
+                    .foregroundStyle(.secondary)
+                    .tracking(0.6)
 
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.tertiary)
-                    .font(.body)
-                TextField("Titles & notes", text: $query)
-                    .textFieldStyle(.plain)
-                    .focused(isSearchFocused)
-                    .onSubmit {
-                        if let first = hits.first {
-                            session.select(first.nodeID)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.tertiary)
+                        .font(.body)
+                    TextField("Titles & notes", text: $query)
+                        .textFieldStyle(.plain)
+                        .focused(isSearchFocused)
+                        .onSubmit {
+                            if let first = hits.first {
+                                session.select(first.nodeID)
+                            }
                         }
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                            hits = []
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear search")
                     }
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                        hits = []
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Clear search")
                 }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                    .strokeBorder(Theme.hairline.opacity(0.6), lineWidth: 0.5)
-            )
-            .onChange(of: query) { _, q in
-                refreshHits(query: q)
-            }
-            .onChange(of: session.revision) { _, _ in
-                refreshHits(query: query)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .strokeBorder(Theme.hairline.opacity(0.6), lineWidth: 0.5)
+                )
             }
 
             if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("⌘F to focus")
-                    .font(.caption2)
-                    .foregroundStyle(.quaternary)
+                if showsField {
+                    Text("⌘F to focus")
+                        .font(.caption2)
+                        .foregroundStyle(.quaternary)
+                }
             } else if hits.isEmpty {
                 Text("No matches")
                     .font(.caption)
@@ -107,6 +107,13 @@ struct SearchBarView: View {
                 .frame(maxHeight: .infinity)
             }
         }
+        .onChange(of: query) { _, q in
+            refreshHits(query: q)
+        }
+        .onChange(of: session.revision) { _, _ in
+            refreshHits(query: query)
+        }
+        .onAppear { refreshHits(query: query) }
     }
 
     private func isSelected(_ hit: MapSearchHit) -> Bool {

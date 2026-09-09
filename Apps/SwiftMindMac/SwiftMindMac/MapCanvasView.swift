@@ -124,6 +124,12 @@ struct MapCanvasView: View {
                     .gesture(combinedDragGesture(snapshot: snapshot))
                     .simultaneousGesture(magnifyGesture)
                     .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
+                    .contextMenu {
+                        if !session.isBrainMode,
+                           let id = hoveredNodeID(in: snapshot) ?? session.store.selection.primary {
+                            NodeContextMenu(session: session, nodeID: id)
+                        }
+                    }
 
                 // Below the edit overlay: editing a title must not sit behind a card.
                 ForEach(snapshot.nodes.filter(\.isNoteExpanded)) { visual in
@@ -343,9 +349,13 @@ struct MapCanvasView: View {
             guard editingNodeID == nil else { return }
             toggleNoteEditor()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .swiftMindEditNoteInPlace)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindEditNoteInPlace)) { note in
             guard !session.isBrainMode else { return }
-            beginEditPreferringHover(snapshot: session.store.snapshot())
+            if let id = note.object as? NodeID {
+                beginEdit(nodeID: id, snapshot: session.store.snapshot())
+            } else {
+                beginEditPreferringHover(snapshot: session.store.snapshot())
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteExpansion)) { _ in
             guard editingNodeID == nil else { return }

@@ -107,6 +107,11 @@ struct OutlineRow: View {
             .onTapGesture {
                 session.select(node.id)
             }
+            .contextMenu {
+                if !session.isBrainMode {
+                    NodeContextMenu(session: session, nodeID: node.id)
+                }
+            }
         }
         .onChange(of: node.text) { _, newValue in
             if !titleFocused, draftText != newValue {
