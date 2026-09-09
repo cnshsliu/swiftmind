@@ -70,7 +70,15 @@ private struct SessionWorkspace: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detail
+            HStack(spacing: 0) {
+                detail
+                if inspectorPresented {
+                    Divider()
+                    InspectorView(session: session)
+                        .frame(minWidth: 240, ideal: 280, maxWidth: 380)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                }
+            }
         }
         .frame(minWidth: 780, minHeight: 480)
         .navigationTitle(windowTitle)
@@ -157,10 +165,6 @@ private struct SessionWorkspace: View {
                     .labelStyle(.iconOnly)
                 }
             }
-        }
-        .inspector(isPresented: $inspectorPresented) {
-            InspectorView(session: session)
-                .inspectorColumnWidth(min: 240, ideal: 280, max: 380)
         }
         .focusedSceneValue(\.documentSession, session)
         .focusedSceneValue(\.presentCommandPalette, $palettePresented)
