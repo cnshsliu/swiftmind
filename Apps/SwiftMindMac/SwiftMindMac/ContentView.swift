@@ -23,6 +23,7 @@ private struct SessionWorkspace: View {
 
     @State private var inspectorPresented = true
     @State private var searchQuery = ""
+    @State private var searchPresented = false
     @State private var palettePresented = false
     @State private var mapTitleDraft = ""
     @FocusState private var searchFocused: Bool
@@ -93,8 +94,9 @@ private struct SessionWorkspace: View {
             CommandPaletteView(session: session, isPresented: $palettePresented)
                 .presentationBackground(.regularMaterial)
         }
+        .toolbarRole(.editor)
         .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
+            ToolbarItem(placement: .navigation) {
                 Button {
                     appModel.showBrain()
                 } label: {
@@ -108,60 +110,52 @@ private struct SessionWorkspace: View {
             if !session.isBrainMode {
                 ToolbarItem(placement: .principal) {
                     Picker("View", selection: $session.viewMode) {
-                        ForEach(DocumentSession.ViewMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
+                        Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                            .tag(DocumentSession.ViewMode.map)
+                            .help("Map")
+                        Image(systemName: "list.bullet")
+                            .tag(DocumentSession.ViewMode.outline)
+                            .help("Outline")
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 180)
+                    .frame(maxWidth: 88)
                     .labelsHidden()
                     .accessibilityLabel("View mode")
                     .accessibilityIdentifier("viewModePicker")
                 }
-                EditorToolbar(session: session)
+                EditorToolbar(
+                    session: session,
+                    onCommands: { palettePresented = true },
+                    onInspector: { inspectorPresented.toggle() }
+                )
             } else {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        appModel.addVaultPanel()
-                    } label: {
-                        Label("Add Vault", systemImage: "folder.badge.plus")
+                ToolbarItem(placement: .primaryAction) {
+                    ControlGroup {
+                        Button {
+                            appModel.addVaultPanel()
+                        } label: {
+                            Label("Add Vault", systemImage: "folder.badge.plus")
+                        }
+                        .help("Add a folder as a mindmap vault")
+                        .accessibilityIdentifier("toolbarAddVault")
+
+                        Button {
+                            appModel.createMapNearSelection()
+                        } label: {
+                            Label("New Map", systemImage: "doc.badge.plus")
+                        }
+                        .help("New map in selected vault/folder")
+                        .accessibilityIdentifier("toolbarNewMap")
+
+                        Button {
+                            appModel.activateSelection()
+                        } label: {
+                            Label("Open", systemImage: "arrow.right.circle")
+                        }
+                        .help("Open map or expand folder (Return)")
                     }
-                    .help("Add a folder as a mindmap vault")
-                    .accessibilityIdentifier("toolbarAddVault")
-
-                    Button {
-                        appModel.createMapNearSelection()
-                    } label: {
-                        Label("New Map", systemImage: "doc.badge.plus")
-                    }
-                    .help("New map in selected vault/folder")
-                    .accessibilityIdentifier("toolbarNewMap")
-
-                    Button {
-                        appModel.activateSelection()
-                    } label: {
-                        Label("Open", systemImage: "arrow.right.circle")
-                    }
-                    .help("Open map or expand folder (Return)")
+                    .labelStyle(.iconOnly)
                 }
-            }
-
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    palettePresented = true
-                } label: {
-                    Label("Commands", systemImage: "command")
-                }
-                .help("Command palette (⌘K)")
-                .accessibilityLabel("Command palette")
-
-                Button {
-                    inspectorPresented.toggle()
-                } label: {
-                    Label("Inspector", systemImage: "sidebar.trailing")
-                }
-                .help("Toggle inspector")
-                .accessibilityLabel("Toggle inspector")
             }
         }
         .inspector(isPresented: $inspectorPresented) {
@@ -174,12 +168,19 @@ private struct SessionWorkspace: View {
         .modifier(MapSearchableModifier(
             enabled: !session.isBrainMode,
             query: $searchQuery,
+            isPresented: $searchPresented,
             hits: mapSearchHits,
             onPick: { session.select($0) }
         ))
         .background(
             Button("") { palettePresented = true }
                 .keyboardShortcut("k", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+        )
+        .background(
+            Button("") { searchPresented = true }
+                .keyboardShortcut("f", modifiers: .command)
                 .opacity(0)
                 .allowsHitTesting(false)
         )
@@ -412,13 +413,19 @@ private struct SessionWorkspace: View {
 private struct MapSearchableModifier: ViewModifier {
     let enabled: Bool
     @Binding var query: String
+    @Binding var isPresented: Bool
     let hits: [MapSearchHit]
     let onPick: (NodeID) -> Void
 
     func body(content: Content) -> some View {
         if enabled {
             content
-                .searchable(text: $query, placement: .toolbar, prompt: "Titles & notes")
+                .searchable(
+                    text: $query,
+                    isPresented: $isPresented,
+                    placement: .toolbar,
+                    prompt: "Titles & notes"
+                )
                 .searchSuggestions {
                     ForEach(hits.prefix(12)) { hit in
                         Button {

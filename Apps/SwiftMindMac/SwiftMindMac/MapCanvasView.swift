@@ -213,12 +213,13 @@ struct MapCanvasView: View {
             .onKeyPress(.rightArrow) { navigateKey(.right) }
             .onKeyPress(.downArrow) { navigateKey(.down) }
             .onKeyPress(.upArrow) { navigateKey(.up) }
-            .onKeyPress(.init("h")) { navigateKey(.left) }
-            .onKeyPress(.init("l")) { navigateKey(.right) }
-            .onKeyPress(.init("j")) { navigateKey(.down) }
-            .onKeyPress(.init("k")) { navigateKey(.up) }
-            // Follow mode toggle: active node stays centered while navigating.
+            .onKeyPress(.init("h")) { plainLetterKey { navigateKey(.left) } }
+            .onKeyPress(.init("l")) { plainLetterKey { navigateKey(.right) } }
+            .onKeyPress(.init("j")) { plainLetterKey { navigateKey(.down) } }
+            .onKeyPress(.init("k")) { plainLetterKey { navigateKey(.up) } }
+            // Follow mode: bare `f` only. ⌘F is search (must not be stolen).
             .onKeyPress(.init("f")) {
+                guard modifiersAreBare() else { return .ignored }
                 guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 toggleFollowMode()
                 return .handled
@@ -237,6 +238,7 @@ struct MapCanvasView: View {
                 return .handled
             }
             .onKeyPress(.init("x")) {
+                guard modifiersAreBare() else { return .ignored }
                 guard editingNodeID == nil, noteEditorNodeID == nil,
                       !session.isBrainMode else { return .ignored }
                 toggleNoteExpansion()
@@ -1309,6 +1311,16 @@ struct MapCanvasView: View {
                     MoveNodeCommand(nodeID: dragID, newParentID: target, index: index)
                 )
             }
+    }
+
+    /// Letter shortcuts (f/h/j/k/l/x) must not swallow ⌘F / ⌘L / etc.
+    private func modifiersAreBare() -> Bool {
+        NSEvent.modifierFlags.intersection([.command, .option, .control]).isEmpty
+    }
+
+    private func plainLetterKey(_ action: () -> KeyPress.Result) -> KeyPress.Result {
+        guard modifiersAreBare() else { return .ignored }
+        return action()
     }
 
     /// True while space is physically held (for pan-over-node).

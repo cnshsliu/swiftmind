@@ -1,9 +1,11 @@
 import SwiftUI
 import SwiftMindCore
 
-/// Primary actions only — fold/pin live in Node menu + ⌘K (apple-design: slim chrome).
+/// One Notes-style capsule of icon-only actions (a single toolbar item, not an overflow menu).
 struct EditorToolbar: ToolbarContent {
     @ObservedObject var session: DocumentSession
+    var onCommands: () -> Void
+    var onInspector: () -> Void
 
     private var primary: NodeID? {
         session.store.selection.primary
@@ -23,42 +25,28 @@ struct EditorToolbar: ToolbarContent {
     }
 
     var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button(action: addChild) {
-                Label("Add Child", systemImage: "plus.circle")
-            }
-            .help("Add child (⌘T)")
-            .accessibilityIdentifier("toolbarAddChild")
-
-            Button(action: addSibling) {
-                Label("Add Sibling", systemImage: "plus.square.on.square")
-            }
-            .help("Add sibling (⇧⌘T)")
-            .disabled(!canAddSibling)
-            .accessibilityIdentifier("toolbarAddSibling")
-
-            Button(action: deleteSelection) {
-                Label("Delete", systemImage: "trash")
-            }
-            .help("Delete selection · ⌘Z to undo")
-            .disabled(!canDelete)
-            .accessibilityIdentifier("toolbarDelete")
-
-            Button(action: { session.undo() }) {
-                Label("Undo", systemImage: "arrow.uturn.backward")
-            }
-            .help("Undo (⌘Z)")
-            .disabled(!session.canUndo)
-            .accessibilityIdentifier("toolbarUndo")
-
-            Button(action: { session.redo() }) {
-                Label("Redo", systemImage: "arrow.uturn.forward")
-            }
-            .help("Redo (⇧⌘Z)")
-            .disabled(!session.canRedo)
-            .accessibilityIdentifier("toolbarRedo")
-
+        ToolbarItem(placement: .primaryAction) {
             ControlGroup {
+                Button(action: addChild) {
+                    Label("Add Child", systemImage: "plus.circle")
+                }
+                .help("Add child (⌘T)")
+                .accessibilityIdentifier("toolbarAddChild")
+
+                Button(action: addSibling) {
+                    Label("Add Sibling", systemImage: "plus.square.on.square")
+                }
+                .help("Add sibling (⇧⌘T)")
+                .disabled(!canAddSibling)
+                .accessibilityIdentifier("toolbarAddSibling")
+
+                Button(action: deleteSelection) {
+                    Label("Delete", systemImage: "trash")
+                }
+                .help("Delete selection · ⌘Z to undo")
+                .disabled(!canDelete)
+                .accessibilityIdentifier("toolbarDelete")
+
                 Button {
                     session.zoomOut()
                 } label: {
@@ -85,7 +73,20 @@ struct EditorToolbar: ToolbarContent {
                 .help("Actual Size (⌘0)")
                 .disabled(session.viewport.isActualSize)
                 .accessibilityIdentifier("toolbarActualSize")
+
+                Button(action: onCommands) {
+                    Label("Commands", systemImage: "command")
+                }
+                .help("Command palette (⌘K)")
+                .accessibilityLabel("Command palette")
+
+                Button(action: onInspector) {
+                    Label("Inspector", systemImage: "sidebar.trailing")
+                }
+                .help("Toggle inspector")
+                .accessibilityLabel("Toggle inspector")
             }
+            .labelStyle(.iconOnly)
         }
     }
 
