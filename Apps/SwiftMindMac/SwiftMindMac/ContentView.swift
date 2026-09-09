@@ -70,15 +70,7 @@ private struct SessionWorkspace: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            HStack(spacing: 0) {
-                detail
-                if inspectorPresented {
-                    Divider()
-                    InspectorView(session: session)
-                        .frame(minWidth: 240, ideal: 280, maxWidth: 380)
-                        .background(Color(nsColor: .windowBackgroundColor))
-                }
-            }
+            detailWithInspector
         }
         .frame(minWidth: 780, minHeight: 480)
         .navigationTitle(windowTitle)
@@ -302,6 +294,18 @@ private struct SessionWorkspace: View {
     }
 
     // MARK: - Detail
+
+    private var detailWithInspector: some View {
+        HStack(spacing: 0) {
+            detail
+            if inspectorPresented {
+                Divider()
+                InspectorView(session: session)
+                    .frame(minWidth: 240, idealWidth: 280, maxWidth: 380)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            }
+        }
+    }
 
     private var mapSearchHits: [MapSearchHit] {
         MapSearch.search(map: session.store.map, query: searchQuery)
