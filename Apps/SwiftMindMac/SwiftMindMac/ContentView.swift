@@ -444,7 +444,6 @@ private struct MapSearchableModifier: ViewModifier {
                                 systemImage: hit.matchInNote ? "note.text" : "circle"
                             )
                         }
-                        .searchCompletion(hit.title)
                     }
                 }
                 .onSubmit(of: .search) {
