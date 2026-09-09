@@ -258,6 +258,12 @@ private struct SessionNodeCommands: View {
         .keyboardShortcut(".", modifiers: .command)
         .disabled(session?.store.selection.primary == nil)
 
+        Button("Edit Note at Node") {
+            NotificationCenter.default.post(name: .swiftMindEditNoteInPlace, object: nil)
+        }
+        .keyboardShortcut("e", modifiers: .command)
+        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+
         Button("Edit Note") {
             NotificationCenter.default.post(name: .swiftMindToggleNoteEditor, object: nil)
         }

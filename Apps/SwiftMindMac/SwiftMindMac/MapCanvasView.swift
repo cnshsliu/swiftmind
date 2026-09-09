@@ -57,6 +57,8 @@ struct MapCanvasView: View {
     // MARK: Floating note editor
     @State private var noteEditorNodeID: NodeID?
     @State private var noteEditorDraft: String = ""
+    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is double-click / ⌘E on a markdown node.
+    @State private var noteEditorPlacement: NoteEditorPlacement = .floatingRight
     @State private var noteCommitTask: Task<Void, Never>?
     /// Normal-form document of the last committed model state; contentRevision
     /// changes that move the model off this baseline came from outside.
@@ -221,6 +223,8 @@ struct MapCanvasView: View {
             // keyboard — otherwise typing "e" inside the note editor would
             // close it.
             .onKeyPress(.init("e")) {
+                let mods = NSEvent.modifierFlags.intersection([.command, .shift, .option])
+                guard mods.isEmpty else { return .ignored }
                 guard editingNodeID == nil, noteEditorNodeID == nil,
                       !session.isBrainMode else { return .ignored }
                 toggleNoteEditor()
@@ -338,6 +342,10 @@ struct MapCanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteEditor)) { _ in
             guard editingNodeID == nil else { return }
             toggleNoteEditor()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindEditNoteInPlace)) { _ in
+            guard !session.isBrainMode else { return }
+            beginEditPreferringHover(snapshot: session.store.snapshot())
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteExpansion)) { _ in
             guard editingNodeID == nil else { return }
@@ -966,13 +974,24 @@ struct MapCanvasView: View {
         .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
     }
 
-    /// Floating markdown editor: right of the node, top-aligned. The first
-    /// line is the virtual H1 (the node title) — see NoteDocument.
+    /// Markdown editor: floating to the right (`e`) or covering the node (double-click / ⌘E).
     @ViewBuilder
     private func noteEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
-        let width = Self.noteEditorWidth
-        let height = min(480, max(200, viewSize.height - frame.minY - 24))
+        let inPlace = noteEditorPlacement == .inPlace
+        let width: CGFloat = inPlace ? max(frame.width, 320) : Self.noteEditorWidth
+        let height: CGFloat = {
+            if inPlace {
+                return min(max(frame.height, 220), max(160, viewSize.height - 24))
+            }
+            return min(480, max(200, viewSize.height - frame.minY - 24))
+        }()
+        let centerX: CGFloat = inPlace
+            ? frame.minX + width / 2
+            : frame.maxX + 16 + width / 2
+        let centerY: CGFloat = inPlace
+            ? frame.minY + height / 2
+            : frame.minY + height / 2
         TextEditor(text: $noteEditorDraft)
             .font(.system(size: 13, design: .monospaced))
             .padding(8)
@@ -983,7 +1002,7 @@ struct MapCanvasView: View {
                     .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
             )
             .shadow(color: .black.opacity(0.2), radius: 8, y: 2)
-            .position(x: frame.maxX + 16 + width / 2, y: frame.minY + height / 2)
+            .position(x: centerX, y: centerY)
             .focused($noteEditorFocused)
             .focusEffectDisabled()
             .onExitCommand { closeNoteEditor() }
@@ -994,18 +1013,41 @@ struct MapCanvasView: View {
             .accessibilityIdentifier("noteEditor")
     }
 
+    private func hasMarkdownBody(_ node: Node) -> Bool {
+        !node.noteMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// `e` / ⇧⌘E: floating editor to the right of the selected node.
     private func toggleNoteEditor() {
-        if noteEditorNodeID != nil {
+        if noteEditorNodeID != nil, noteEditorPlacement == .floatingRight {
             closeNoteEditor()
             return
         }
-        guard let primary = session.store.selection.primary,
-              let node = session.store.map.node(id: primary) else { return }
-        noteEditorNodeID = primary
+        guard let primary = session.store.selection.primary else { return }
+        openNoteEditor(nodeID: primary, placement: .floatingRight)
+    }
+
+    private func openNoteEditor(nodeID: NodeID, placement: NoteEditorPlacement) {
+        if noteEditorNodeID == nodeID, noteEditorPlacement == placement {
+            closeNoteEditor()
+            return
+        }
+        if noteEditorNodeID != nil {
+            closeNoteEditor(committing: true)
+        }
+        if editingNodeID != nil {
+            commitEdit()
+        }
+        guard let node = session.store.map.node(id: nodeID) else { return }
+        session.select(nodeID)
+        noteEditorPlacement = placement
+        noteEditorNodeID = nodeID
         noteEditorDraft = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
         lastCommittedNoteDocument = noteEditorDraft
-        session.liveNoteDocument = (primary, noteEditorDraft)
-        stashAndPanForEditor()
+        session.liveNoteDocument = (nodeID, noteEditorDraft)
+        if placement == .floatingRight {
+            stashAndPanForEditor()
+        }
         DispatchQueue.main.async { noteEditorFocused = true }
     }
 
@@ -1114,6 +1156,18 @@ struct MapCanvasView: View {
     }
 
     private func beginEdit(nodeID: NodeID, snapshot: MapSnapshot) {
+        guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
+        if noteEditorNodeID == nodeID, noteEditorPlacement == .inPlace {
+            closeNoteEditor()
+            return
+        }
+        if let node = session.store.map.node(id: nodeID), hasMarkdownBody(node) {
+            openNoteEditor(nodeID: nodeID, placement: .inPlace)
+            return
+        }
+        if noteEditorNodeID != nil {
+            closeNoteEditor()
+        }
         guard editingNodeID == nil,
               let visual = snapshot.nodes.first(where: { $0.id == nodeID }) else {
             return
@@ -1121,7 +1175,6 @@ struct MapCanvasView: View {
         session.select(nodeID)
         editingNodeID = nodeID
         editDraft = visual.text
-        // Ensure next frame focuses the field.
         DispatchQueue.main.async {
             editFieldFocused = true
         }
@@ -1330,10 +1383,7 @@ struct MapCanvasView: View {
                     }
                     return
                 }
-                // Don't stack the in-place title editor on an open note editor.
-                if noteEditorNodeID == nil {
-                    beginEdit(at: event.location, snapshot: snapshot)
-                }
+                beginEdit(at: event.location, snapshot: snapshot)
             }
     }
 
@@ -1374,8 +1424,14 @@ struct MapCanvasView: View {
 
 // swiftMindToggleNoteEditor / swiftMindToggleNoteExpansion are posted from
 // SessionNodeCommands in SwiftMindMacApp, so they must not be file-private.
+private enum NoteEditorPlacement {
+    case floatingRight
+    case inPlace
+}
+
 extension Notification.Name {
     static let swiftMindToggleNoteEditor = Notification.Name("swiftMindToggleNoteEditor")
+    static let swiftMindEditNoteInPlace = Notification.Name("swiftMindEditNoteInPlace")
     static let swiftMindToggleNoteExpansion = Notification.Name("swiftMindToggleNoteExpansion")
 }
 

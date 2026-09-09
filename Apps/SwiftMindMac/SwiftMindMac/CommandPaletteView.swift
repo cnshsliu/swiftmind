@@ -78,6 +78,17 @@ enum PaletteBuilder {
             dismiss()
         })
 
+        if !session.isBrainMode {
+            items.append(PaletteItem(id: "edit-note-inplace", title: "Edit Note at Node", subtitle: "⌘E", systemImage: "square.and.pencil") {
+                NotificationCenter.default.post(name: .swiftMindEditNoteInPlace, object: nil)
+                dismiss()
+            })
+            items.append(PaletteItem(id: "edit-note", title: "Edit Note", subtitle: "E", systemImage: "text.alignleft") {
+                NotificationCenter.default.post(name: .swiftMindToggleNoteEditor, object: nil)
+                dismiss()
+            })
+        }
+
         items.append(PaletteItem(id: "undo", title: "Undo", subtitle: "⌘Z", systemImage: "arrow.uturn.backward") {
             session.undo()
             dismiss()

@@ -58,7 +58,7 @@ struct InspectorView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("notePreview")
                     } else {
-                        Text("No note — select the node on the canvas and press E to edit")
+                        Text("No note — select the node on the canvas and press E (or ⌘E) to edit")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
