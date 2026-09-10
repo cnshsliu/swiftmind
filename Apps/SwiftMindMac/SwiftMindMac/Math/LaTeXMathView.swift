@@ -22,6 +22,7 @@ struct LaTeXMathView: View {
                 }
             }
         }
+        .fixedSize(horizontal: true, vertical: true)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(latex)
     }
@@ -95,50 +96,32 @@ private struct CommandView: View {
     }
 }
 
-/// Fraction with a SELF-MEASURING bar: the bar reports its true vertical
-/// midpoint via PreferenceKey, and the alignment guide uses that measured
-/// position (plus the math axis) — exact for asymmetric numerators like
-/// \frac{\sqrt{\pi}}{2} where height/2 is wrong.
+/// Fraction aligned with `LaTeXMetrics.fracBarOffset` — never PreferenceKey /
+/// GeometryReader / `@State`. Writing state during an AppKit layout pass is
+/// what produced the exclusivity SIGSEGV / `_postWindowNeedsUpdateConstraints`
+/// abort (24 of 33 local crash reports).
 private struct FracView: View {
     let args: [[MathAST]]
     let size: CGFloat
     let block: Bool
-    @State private var barY: CGFloat?
-
-    private struct BarYKey: PreferenceKey {
-        static var defaultValue: CGFloat?
-        static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-            value = nextValue() ?? value
-        }
-    }
 
     var body: some View {
         let inner = size * 0.85
+        let num = args.first ?? []
+        let den = args.count > 1 ? args[1] : []
+        let barFromTop = LaTeXMetrics.fracBarOffset(
+            numerator: num, denominator: den, size: size
+        )
         VStack(spacing: 1) {
-            RowView(atoms: args.first ?? [], size: inner, block: block)
+            RowView(atoms: num, size: inner, block: block)
             Rectangle()
                 .fill(.primary)
                 .frame(height: 0.8)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: BarYKey.self,
-                            value: geo.frame(in: .named("fracSpace")).midY
-                        )
-                    }
-                )
-            RowView(atoms: args.count > 1 ? args[1] : [], size: inner, block: block)
+            RowView(atoms: den, size: inner, block: block)
         }
-        // Rectangle is greedy: without fixedSize the bar stretches to the
-        // full proposed width instead of the numerator's width.
-        .fixedSize(horizontal: true, vertical: false)
-        .coordinateSpace(name: "fracSpace")
-        .onPreferenceChange(BarYKey.self) { barY = $0 }
-        // The bar sits on the MATH AXIS (~0.28em above the text baseline,
-        // where '=' is optically centered). First frame falls back to
-        // height/2; the preference corrects it from the next frame.
+        .fixedSize(horizontal: true, vertical: true)
         .alignmentGuide(.firstTextBaseline) { d in
-            (barY ?? d.height / 2) + size * MathTypography.axis
+            min(d.height - 0.5, barFromTop + size * MathTypography.axis)
         }
     }
 }
