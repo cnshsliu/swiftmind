@@ -6,7 +6,7 @@
   {"op": "set-note", "id": "n_help_start", "markdown": "SwiftMind is a native macOS mind-mapping app. Your maps are plain `.swiftmind.html` files — they open read-only in any browser, no app required."},
   {"op": "add-child", "parent": "n_help_start", "id": "n_help_start_file", "text": "⌘N new map · ⌘O open · File → Open Recent"},
   {"op": "add-child", "parent": "n_help_start", "id": "n_help_start_brain", "text": "⇧⌘B My Brain: vaults of maps"},
-  {"op": "set-note", "id": "n_help_start_brain", "markdown": "**My Brain** is a mind-map view of your folders.\n\n- Add Vault… registers any folder (security-scoped)\n- Double-click a map node to open it\n- Double-click a folder to fold/unfold it\n- Default library: `~/Documents/SwiftMind`"},
+  {"op": "set-note", "id": "n_help_start_brain", "markdown": "**My Brain** is a mind-map view of your folders.\n\n- Add Vault… registers any folder (security-scoped)\n- Double-click a map node to open it\n- Double-click a folder to fold/unfold it\n- Default library: the app’s sandbox Documents/SwiftMind folder for the App Store edition; user-selected vault folders can be anywhere you authorize."},
   {"op": "add-child", "parent": "n_help_start", "id": "n_help_start_settings", "text": "⌘, Settings: launch behavior, vaults, agent bridge"},
   {"op": "add-child", "parent": "n_help_start", "id": "n_help_start_views", "text": "Toolbar: switch canvas ⇄ outline, both stay in sync"},
 
@@ -47,6 +47,26 @@
   {"op": "expand-note", "id": "n_help_notes"},
   {"op": "add-child", "parent": "n_help_notes", "id": "n_help_notes_how", "text": "Or edit notes in the inspector sidebar"},
   {"op": "add-child", "parent": "n_help_notes", "id": "n_help_notes_math", "text": "LaTeX subset: Greek, fractions, √, super/subscripts"},
+
+  {"op": "add-child", "parent": "__ROOT__", "id": "n_help_why", "text": "Why SwiftMind", "side": "left"},
+  {"op": "set-note", "id": "n_help_why", "markdown": "Most mind maps live in a closed format you cannot open without that app. SwiftMind is the opposite: **the file is the product**.\n\nA map is a plain `.swiftmind.html` file — nested lists a browser can already render, a text editor can grep, git can version, and an AI agent can read and edit without a special SDK."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_html", "text": "Plain HTML — nested lists, not a proprietary blob"},
+  {"op": "set-note", "id": "n_help_why_html", "markdown": "The model is serialized as `<ul>` / `<li>`. Open the file in Safari or Chrome and you get a readable hierarchy. No plugin, no account, no SwiftMind install required to *read*."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_open", "text": "Open format: copy, git, grep, email, backup"},
+  {"op": "set-note", "id": "n_help_why_open", "markdown": "Treat maps like any other document. Drop them in a folder, commit them, search them with ordinary tools, attach them to mail. You are not trapped in a vendor database."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_nolock", "text": "No lock-in — the file outlives the app"},
+  {"op": "set-note", "id": "n_help_why_nolock", "markdown": "Editing happens in SwiftMind; sharing does not. Send someone the `.swiftmind.html` and they can read it today. If you ever leave the app, the knowledge is still HTML."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_agents", "text": "Built for AI agents: CLI, MCP, one undo step"},
+  {"op": "set-note", "id": "n_help_why_agents", "markdown": "`swiftmind` reads and batch-edits map files. `swiftmind mcp` drives the *open* map over a local socket — no network. Agent edits land as **one ⌘Z**. Agents work on the same HTML humans share."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_offline", "text": "Offline by design: no account, no cloud, no telemetry"},
+  {"op": "set-note", "id": "n_help_why_offline", "markdown": "The app is sandboxed and has **no network entitlement**. Maps stay on disks you choose. Optional agent bridge is a Unix socket on this machine only."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_native", "text": "Native editor — Markdown, math, formulas, still just HTML"},
+  {"op": "set-note", "id": "n_help_why_native", "markdown": "Canvas and outline, notes with Markdown and a LaTeX subset, live formulas that are *derived* (never stored, never executed as code). Power stays in the file format, not a hidden database."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_orphan", "text": "This node is an orphan — filter `orphan` to find leaves nothing points at"},
+  {"op": "set-note", "id": "n_help_why_orphan", "markdown": "An **orphan** has no children, no links out, and nobody links in. Filter `orphan` (highlight) to see them. `swiftmind doctor` lists the same class of issues."},
+  {"op": "add-child", "parent": "n_help_why", "id": "n_help_why_dangle", "text": "This node has a dangling node-link — filter `dangling`"},
+  {"op": "set-links", "id": "n_help_why_dangle", "links": [{"node": {"_0": {"rawValue": "n_help_missing_nowhere"}}}]},
+  {"op": "set-note", "id": "n_help_why_dangle", "markdown": "Node links that point at a deleted or never-created id are **dangling**. Filter `dangling` or run Doctor from ⌘K."},
 
   {"op": "add-child", "parent": "__ROOT__", "id": "n_help_organize", "text": "Organize", "side": "left"},
   {"op": "add-child", "parent": "n_help_organize", "id": "n_help_org_attrs", "text": "Attributes: name=value on any node"},
@@ -93,5 +113,6 @@
   {"op": "add-child", "parent": "n_help_data", "id": "n_help_data_html", "text": "Maps are plain HTML — double-click one, it opens in your browser"},
   {"op": "add-child", "parent": "n_help_data", "id": "n_help_data_import", "text": "⌘O also imports Freeplane .mm files"},
   {"op": "add-child", "parent": "n_help_data", "id": "n_help_data_privacy", "text": "Sandboxed: no network, only files you choose"},
+  {"op": "set-note", "id": "n_help_data_privacy", "markdown": "Read the Privacy Policy from Help → Privacy Policy or Settings → General → Privacy Policy. These links open the policy in your default browser."},
   {"op": "add-child", "parent": "n_help_data", "id": "n_help_data_icloud", "text": "Save into iCloud Drive folders for sync"}
 ]

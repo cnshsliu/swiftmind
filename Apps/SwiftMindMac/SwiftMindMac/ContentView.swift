@@ -91,7 +91,7 @@ private struct SessionWorkspace: View {
             }
         }
         .sheet(isPresented: $palettePresented) {
-            CommandPaletteView(session: session, isPresented: $palettePresented)
+            CommandPaletteView(session: session, appModel: appModel, isPresented: $palettePresented)
                 .presentationBackground(.regularMaterial)
         }
         .toolbarRole(.editor)
@@ -368,9 +368,25 @@ private struct SessionWorkspace: View {
                 if session.isBrainMode {
                     Text("Return open · ⌘. fold")
                         .foregroundStyle(.tertiary)
-                } else if session.canUndo {
-                    Text("⌘Z undo")
-                        .foregroundStyle(.tertiary)
+                } else {
+                    let health = MapDoctor.inspect(session.store.map)
+                    let dangling = health.filter { $0.kind == .danglingNodeLink }.count
+                    let orphans = health.filter { $0.kind == .orphan }.count
+                    let formulaErr = health.filter { $0.kind == .formulaError }.count
+                    if dangling > 0 {
+                        Text("\(dangling) dangling")
+                            .foregroundStyle(Color.orange)
+                            .help("Filter dangling")
+                    }
+                    if orphans > 0 {
+                        Text("\(orphans) orphan")
+                            .foregroundStyle(Color.orange)
+                            .help("Filter orphan")
+                    }
+                    if formulaErr > 0 {
+                        Text("\(formulaErr) #ERR")
+                            .foregroundStyle(Color.orange)
+                    }
                 }
             }
             .font(.caption2)

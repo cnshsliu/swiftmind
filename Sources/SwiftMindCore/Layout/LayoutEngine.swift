@@ -18,6 +18,7 @@ public struct LayoutEngine: Sendable {
         var edges: [EdgeVisual] = []
 
         let filter = map.activeFilter
+        let graph = MapGraph.analyze(map)
         let sheet = map.styleSheet
         let root = map.root
 
@@ -47,6 +48,7 @@ public struct LayoutEngine: Sendable {
             selection: selection,
             sheet: sheet,
             filter: filter,
+            graph: graph,
             into: &nodes
         )
         // Root children: only place where L/R is decided.
@@ -56,6 +58,7 @@ public struct LayoutEngine: Sendable {
             selection: selection,
             sheet: sheet,
             filter: filter,
+            graph: graph,
             nodes: &nodes,
             edges: &edges
         )
@@ -67,18 +70,18 @@ public struct LayoutEngine: Sendable {
     // MARK: - Visibility
 
     /// Children shown under hide-mode filter (match or ancestor of match).
-    private func visibleChildren(of node: Node, filter: MapFilter?) -> [Node] {
+    private func visibleChildren(of node: Node, filter: MapFilter?, graph: MapGraph) -> [Node] {
         guard let filter, filter.mode == .hide else {
             return node.children
         }
         return node.children.filter {
-            FilterEvaluator.matchesIncludingDescendants($0, rule: filter.rule)
+            FilterEvaluator.matchesIncludingDescendants($0, rule: filter.rule, graph: graph)
         }
     }
 
-    private func isHighlighted(_ node: Node, filter: MapFilter?) -> Bool {
+    private func isHighlighted(_ node: Node, filter: MapFilter?, graph: MapGraph) -> Bool {
         guard let filter, filter.mode == .highlight else { return false }
-        return FilterEvaluator.matches(node, rule: filter.rule)
+        return FilterEvaluator.matches(node, rule: filter.rule, graph: graph)
     }
 
     // MARK: - Measure
@@ -122,7 +125,8 @@ public struct LayoutEngine: Sendable {
     private func assignRootChildSides(
         _ children: [Node],
         sheet: StyleSheet,
-        filter: MapFilter?
+        filter: MapFilter?,
+        graph: MapGraph
     ) -> [(Node, NodeSide)] {
         var rightWeight = 0.0
         var leftWeight = 0.0
@@ -137,7 +141,7 @@ public struct LayoutEngine: Sendable {
                 // Lighter side wins; prefer left when equal.
                 side = leftWeight <= rightWeight ? .left : .right
             }
-            let w = subtreeHeight(child, sheet: sheet, filter: filter)
+            let w = subtreeHeight(child, sheet: sheet, filter: filter, graph: graph)
             if side == .left {
                 leftWeight += w
             } else {
@@ -150,17 +154,17 @@ public struct LayoutEngine: Sendable {
 
     /// Vertical extent of a node plus all expanded unpinned descendants
     /// (single outward column — Mode 1 never splits a branch left+right).
-    private func subtreeHeight(_ node: Node, sheet: StyleSheet, filter: MapFilter?) -> Double {
+    private func subtreeHeight(_ node: Node, sheet: StyleSheet, filter: MapFilter?, graph: MapGraph) -> Double {
         let selfH = measure(node, sheet: sheet).height
         guard !node.isFolded else { return selfH }
-        let kids = visibleChildren(of: node, filter: filter).filter { $0.positionPin == nil }
+        let kids = visibleChildren(of: node, filter: filter, graph: graph).filter { $0.positionPin == nil }
         guard !kids.isEmpty else { return selfH }
-        return max(selfH, columnHeight(kids, sheet: sheet, filter: filter))
+        return max(selfH, columnHeight(kids, sheet: sheet, filter: filter, graph: graph))
     }
 
-    private func columnHeight(_ nodes: [Node], sheet: StyleSheet, filter: MapFilter?) -> Double {
+    private func columnHeight(_ nodes: [Node], sheet: StyleSheet, filter: MapFilter?, graph: MapGraph) -> Double {
         guard !nodes.isEmpty else { return 0 }
-        return nodes.map { subtreeHeight($0, sheet: sheet, filter: filter) }.reduce(0, +)
+        return nodes.map { subtreeHeight($0, sheet: sheet, filter: filter, graph: graph) }.reduce(0, +)
             + Double(max(0, nodes.count - 1)) * config.verticalGap
     }
 
@@ -173,13 +177,14 @@ public struct LayoutEngine: Sendable {
         selection: SelectionState,
         sheet: StyleSheet,
         filter: MapFilter?,
+        graph: MapGraph,
         nodes: inout [NodeVisual],
         edges: inout [EdgeVisual]
     ) {
         guard !root.isFolded else { return }
 
-        let children = visibleChildren(of: root, filter: filter)
-        let assigned = assignRootChildSides(children, sheet: sheet, filter: filter)
+        let children = visibleChildren(of: root, filter: filter, graph: graph)
+        let assigned = assignRootChildSides(children, sheet: sheet, filter: filter, graph: graph)
         let lefts = assigned.filter { $0.1 == .left }.map(\.0)
         let rights = assigned.filter { $0.1 == .right }.map(\.0)
 
@@ -192,6 +197,7 @@ public struct LayoutEngine: Sendable {
             selection: selection,
             sheet: sheet,
             filter: filter,
+            graph: graph,
             nodes: &nodes,
             edges: &edges
         )
@@ -204,6 +210,7 @@ public struct LayoutEngine: Sendable {
             selection: selection,
             sheet: sheet,
             filter: filter,
+            graph: graph,
             nodes: &nodes,
             edges: &edges
         )
@@ -218,13 +225,14 @@ public struct LayoutEngine: Sendable {
         selection: SelectionState,
         sheet: StyleSheet,
         filter: MapFilter?,
+        graph: MapGraph,
         nodes: inout [NodeVisual],
         edges: inout [EdgeVisual]
     ) {
         guard !parent.isFolded else { return }
         guard side == .left || side == .right else { return }
 
-        let children = visibleChildren(of: parent, filter: filter)
+        let children = visibleChildren(of: parent, filter: filter, graph: graph)
         packColumn(
             children,
             side: side,
@@ -234,6 +242,7 @@ public struct LayoutEngine: Sendable {
             selection: selection,
             sheet: sheet,
             filter: filter,
+            graph: graph,
             nodes: &nodes,
             edges: &edges
         )
@@ -248,18 +257,19 @@ public struct LayoutEngine: Sendable {
         selection: SelectionState,
         sheet: StyleSheet,
         filter: MapFilter?,
+        graph: MapGraph,
         nodes: inout [NodeVisual],
         edges: inout [EdgeVisual]
     ) {
         let auto = children.filter { $0.positionPin == nil }
         let pinned = children.filter { $0.positionPin != nil }
 
-        let totalH = columnHeight(auto, sheet: sheet, filter: filter)
+        let totalH = columnHeight(auto, sheet: sheet, filter: filter, graph: graph)
         var cursorY = parentFrame.midY - totalH / 2
 
         for child in auto {
             let size = measure(child, sheet: sheet)
-            let blockH = subtreeHeight(child, sheet: sheet, filter: filter)
+            let blockH = subtreeHeight(child, sheet: sheet, filter: filter, graph: graph)
             let centerY = cursorY + blockH / 2
             // Outward only: left branch → further left; right branch → further right.
             let x: Double
@@ -282,6 +292,7 @@ public struct LayoutEngine: Sendable {
                 selection: selection,
                 sheet: sheet,
                 filter: filter,
+            graph: graph,
                 into: &nodes
             )
             appendEdge(from: parent, parentFrame: parentFrame, to: child, frame: frame, side: side, edges: &edges)
@@ -293,6 +304,7 @@ public struct LayoutEngine: Sendable {
                 selection: selection,
                 sheet: sheet,
                 filter: filter,
+            graph: graph,
                 nodes: &nodes,
                 edges: &edges
             )
@@ -316,6 +328,7 @@ public struct LayoutEngine: Sendable {
                 selection: selection,
                 sheet: sheet,
                 filter: filter,
+            graph: graph,
                 into: &nodes
             )
             appendEdge(from: parent, parentFrame: parentFrame, to: child, frame: frame, side: side, edges: &edges)
@@ -328,6 +341,7 @@ public struct LayoutEngine: Sendable {
                 selection: selection,
                 sheet: sheet,
                 filter: filter,
+            graph: graph,
                 nodes: &nodes,
                 edges: &edges
             )
@@ -361,6 +375,7 @@ public struct LayoutEngine: Sendable {
         selection: SelectionState,
         sheet: StyleSheet,
         filter: MapFilter?,
+        graph: MapGraph,
         into nodes: inout [NodeVisual]
     ) {
         nodes.append(
@@ -376,7 +391,7 @@ public struct LayoutEngine: Sendable {
                 hasNote: !node.noteMarkdown.isEmpty,
                 iconIDs: node.icons.map(\.id),
                 isPinned: node.positionPin != nil,
-                isHighlighted: isHighlighted(node, filter: filter),
+                isHighlighted: isHighlighted(node, filter: filter, graph: graph),
                 isNoteExpanded: node.isNoteExpanded
             )
         )

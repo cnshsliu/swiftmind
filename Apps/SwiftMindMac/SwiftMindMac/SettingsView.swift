@@ -56,6 +56,8 @@ struct SettingsView: View {
                     library.clearRecentMaps()
                 }
             }
+            Link("Privacy Policy", destination: AppLinks.privacyPolicy)
+                .accessibilityIdentifier("privacyPolicyLink")
         }
         .padding()
         .tabItem { Label("General", systemImage: "gear") }

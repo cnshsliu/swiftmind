@@ -65,6 +65,10 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 - **URL and node links** (add/remove in inspector; open URL from the link list)
 - **Icons/tags** from a small built-in catalog; shown on the canvas
 - **Search** (⌘F): sidebar field matches node **titles** and **notes**; select a hit to jump
+- **Capture** (⇧⌘I): add a thought to `Inbox.swiftmind.html` in the default library without switching maps; CLI: `swiftmind capture <file> --text "…"`
+- **Orphans / dangling links**: filter `orphan` or `dangling`; status strip marks counts that need you; ⌘K lists `Doctor:` issues; CLI `swiftmind doctor <file>`
+- **Backlinks**: inspector **Linked from** lists nodes that link here
+- **Per-map zoom** is restored on reopen (stored as `preferences.swiftmind.html` in Application Support, not in the document)
 - **Pin / unpin** (⇧⌘P or toolbar): pin freezes layout position; Option+drag moves a pin; unpin restores auto layout
 - **Command Palette** (⌘K): filterable actions (Add Child/Sibling, Delete, Fold, Pin/Unpin, Undo, Redo) and **jump to node**
 - **Spatial navigation** (arrows or hjkl): `j`/`k` next/previous sibling **on the same side** (one visual column; no left/right zigzag); `h`/`l` follow the branch — on a **left**-side branch `h` goes outward to children and `l` to the parent, on a **right**-side branch reversed. From the root, `h`/`l` pick the left/right branch. At the **first level**, the inward key crosses to the **same-index node on the other side** (left no.4 ⇄ right no.4; clamped to the last when that side is shorter) instead of selecting the center. Deeper levels navigate to the parent. Outward moves remember the last focused child; a folded node unfolds first.

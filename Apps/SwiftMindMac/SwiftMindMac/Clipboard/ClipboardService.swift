@@ -74,8 +74,25 @@ enum ClipboardService {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    private static var firstResponderTextView: NSTextView? {
+    static var firstResponderTextView: NSTextView? {
         NSApp.keyWindow?.firstResponder as? NSTextView
+    }
+
+    /// True when the field editor / note editor actually has a text undo step.
+    static func undoFocusedTextIfPossible() -> Bool {
+        guard let view = firstResponderTextView, view.undoManager?.canUndo == true else {
+            return false
+        }
+        view.undoManager?.undo()
+        return true
+    }
+
+    static func redoFocusedTextIfPossible() -> Bool {
+        guard let view = firstResponderTextView, view.undoManager?.canRedo == true else {
+            return false
+        }
+        view.undoManager?.redo()
+        return true
     }
 
     private static func selectedTopmostNodes(in session: DocumentSession) -> [Node] {

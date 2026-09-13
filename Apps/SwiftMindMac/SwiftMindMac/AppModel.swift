@@ -25,6 +25,8 @@ final class AppModel: ObservableObject {
     private var lastKnownFileHash: Int?
     private var suppressAutosave = false
     private var didBootstrap = false
+    private let viewStateStore = ViewStateStore()
+    private var viewportTask: Task<Void, Never>?
 
     init() {
         // Placeholder until bootstrap; replaced immediately.
@@ -174,6 +176,9 @@ final class AppModel: ObservableObject {
             }
             session = DocumentSession(map: map)
             session.isBrainMode = false
+            if let saved = viewStateStore.viewport(for: map.id) {
+                session.viewport = saved
+            }
             wireSession()
             lastKnownFileHash = data.hashValue
             startWatching(url: url)
@@ -367,6 +372,74 @@ final class AppModel: ObservableObject {
         session.onContentChanged = { [weak self] in
             self?.scheduleAutosave()
         }
+        session.onViewportChanged = { [weak self] in
+            self?.scheduleViewportPersist()
+        }
+    }
+
+    private func scheduleViewportPersist() {
+        guard !isBrainMode, currentMapURL != nil else { return }
+        viewportTask?.cancel()
+        viewportTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self.persistViewport()
+        }
+    }
+
+    private func persistViewport() {
+        guard !isBrainMode else { return }
+        viewStateStore.save(
+            mapID: session.store.map.id,
+            title: session.store.map.title,
+            viewport: session.viewport
+        )
+    }
+
+    /// Append a thought to `Inbox.swiftmind.html` in the default library without switching maps.
+    func captureToInbox(text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let dir = VaultLibrary.defaultLibraryDirectory
+        _ = library.startAccessing(dir)
+        let url = dir.appendingPathComponent("Inbox.swiftmind.html")
+        if currentMapURL?.standardizedFileURL == url.standardizedFileURL {
+            session.apply(InsertChildCommand(parentID: session.store.map.root.id, text: trimmed, side: .auto))
+            session.showToast("Captured to Inbox", kind: .success)
+            return
+        }
+        do {
+            _ = try VaultLibrary.createEmptyMapIfNeeded(at: url, title: "Inbox")
+            let html = try String(contentsOf: url, encoding: .utf8)
+            var map = try HTMLCodec.decode(html)
+            if map.root.text == "Central Idea" {
+                map.root.text = "Inbox"
+            }
+            _ = try BatchOps.apply([
+                .addChild(parentID: map.root.id, newNodeID: .generate(), text: trimmed, side: .auto)
+            ], to: &map)
+            try Data(HTMLCodec.encode(map, includeSkin: true).utf8).write(to: url, options: .atomic)
+            session.showToast("Captured to Inbox", kind: .success)
+        } catch {
+            session.showToast("Capture failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func promptCapture() {
+        let alert = NSAlert()
+        alert.messageText = "Capture"
+        alert.informativeText = "Adds a child to Inbox in your library. The current map stays open."
+        let field = NSTextField(string: "")
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        field.placeholderString = "A thought…"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Capture")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            captureToInbox(text: field.stringValue)
+        }
     }
 
     private func scheduleAutosave() {
@@ -381,7 +454,9 @@ final class AppModel: ObservableObject {
 
     private func persistCurrentMapIfNeeded() {
         saveTask?.cancel()
+        viewportTask?.cancel()
         if !isBrainMode, currentMapURL != nil {
+            persistViewport()
             saveCurrentMap()
         }
     }

@@ -9,7 +9,7 @@ let args = Array(CommandLine.arguments.dropFirst())
 
 /// Bumped on every CLI behavior change; keep in sync before running
 /// scripts/install-cli.sh so `swiftmind --version` reflects the installed build.
-let swiftmindCLIVersion = "1.2.0"
+let swiftmindCLIVersion = "1.3.0"
 
 if args.first == "--version" || args.first == "version" {
     print("swiftmind \(swiftmindCLIVersion)")
@@ -25,7 +25,9 @@ func usage() -> Never {
     usage: swiftmind <command> <file> [flags]
       swiftmind --version              print the CLI version
       read <file>                      print the map as a JSON tree
-      find <file> --query <text>       search titles/notes, print matching node ids
+      find <file> --query <text> [--unique]  search titles/notes; --unique refuses 0 or many
+      doctor <file>                    dangling links, orphans, empty titles, formula errors
+      capture <file> --text <t>        add a child under the root (inbox-style)
       validate <file>                  decode + re-encode check
       new <file> [--title <t>]         create an empty map file (fails if it exists)
       mcp                              run a stdio MCP server bridged to the live app
@@ -89,9 +91,33 @@ do {
             throw CLIError.usage("find requires --query")
         }
         let map = try MapFile.load(path)
-        let hits = MapSearch.search(map: map, query: query)
-        MapFile.printJSON(hits.map {
-            ["id": $0.nodeID.rawValue, "title": $0.title, "matchInNote": $0.matchInNote]
+        if parsed.bare.contains("unique") {
+            switch MapSearch.resolveUnique(map: map, query: query) {
+            case .none:
+                throw CLIError.op("no match for \(query.debugDescription)")
+            case .one(let hit):
+                MapFile.printJSON([
+                    "id": hit.nodeID.rawValue,
+                    "title": hit.title,
+                    "matchInNote": hit.matchInNote,
+                ])
+            case .ambiguous(let hits):
+                let ids = hits.map(\.nodeID.rawValue).joined(separator: ", ")
+                throw CLIError.op("ambiguous query \(query.debugDescription): \(hits.count) matches (\(ids))")
+            }
+        } else {
+            let hits = MapSearch.search(map: map, query: query)
+            MapFile.printJSON(hits.map {
+                ["id": $0.nodeID.rawValue, "title": $0.title, "matchInNote": $0.matchInNote]
+            })
+        }
+    case "doctor":
+        let map = try MapFile.load(path)
+        let issues = MapDoctor.inspect(map)
+        MapFile.printJSON(issues.map { issue -> [String: Any] in
+            var row: [String: Any] = ["kind": issue.kind.rawValue, "message": issue.message]
+            if let id = issue.nodeID { row["id"] = id.rawValue }
+            return row
         })
     case "new":
         let title = flags["title"] ?? "Untitled"

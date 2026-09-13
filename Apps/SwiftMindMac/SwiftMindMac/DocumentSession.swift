@@ -30,6 +30,8 @@ final class DocumentSession: ObservableObject {
     var onPrimaryActivate: (() -> Void)?
     /// Fired after content mutations (for autosave).
     var onContentChanged: (() -> Void)?
+    /// Fired after pan/zoom (persisted separately from the map file).
+    var onViewportChanged: (() -> Void)?
 
     private var toastClearTask: Task<Void, Never>?
 
@@ -142,18 +144,21 @@ final class DocumentSession: ObservableObject {
         var next = viewport
         next.offset = offset
         viewport = next
+        onViewportChanged?()
     }
 
     func setCanvasScale(_ scale: Double, around viewPoint: Point2D, width: Double, height: Double) {
         var next = viewport
         next.setScale(scale, anchorView: viewPoint, viewWidth: width, viewHeight: height)
         viewport = next
+        onViewportChanged?()
     }
 
     func panCanvas(by delta: Point2D) {
         var next = viewport
         next.pan(by: delta)
         viewport = next
+        onViewportChanged?()
     }
 
     func zoomIn() {
@@ -192,6 +197,7 @@ final class DocumentSession: ObservableObject {
             viewHeight: lastCanvasHeight
         )
         viewport = next
+        onViewportChanged?()
     }
 
     private func applyZoomStep(_ step: ZoomStep) {
@@ -204,6 +210,7 @@ final class DocumentSession: ObservableObject {
             viewHeight: lastCanvasHeight
         )
         viewport = next
+        onViewportChanged?()
     }
 
     private func zoomAnchor() -> Point2D {

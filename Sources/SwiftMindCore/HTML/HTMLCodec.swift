@@ -128,6 +128,10 @@ public enum HTMLCodec {
             return " data-filter-kind=\"icon\" data-filter-query=\"\(escapeAttribute(id))\""
         case .attributeEquals(let name, let value):
             return " data-filter-kind=\"attr\" data-filter-name=\"\(escapeAttribute(name))\" data-filter-query=\"\(escapeAttribute(value))\""
+        case .orphan:
+            return " data-filter-kind=\"orphan\""
+        case .danglingLink:
+            return " data-filter-kind=\"dangling\""
         case .and, .or:
             // Composite rules: persist as text search of first textContains if any (M3 simplified).
             return " data-filter-kind=\"text\" data-filter-query=\"\""
@@ -349,6 +353,10 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
         case "attr":
             let name = attributeDict["data-filter-name"] ?? ""
             rule = .attributeEquals(name: name, value: query)
+        case "orphan":
+            rule = .orphan
+        case "dangling":
+            rule = .danglingLink
         default:
             rule = .textContains(query)
         }

@@ -34,7 +34,7 @@ struct FilterBarView: View {
             HStack(spacing: 6) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .foregroundStyle(isFilterOn ? Color.accentColor : Color.secondary)
-                TextField("Filter text…", text: $queryDraft)
+                TextField("Filter text, name=value, orphan, dangling…", text: $queryDraft)
                     .textFieldStyle(.plain)
                     .focused($queryFocused)
                     .accessibilityIdentifier("filterQueryField")
@@ -173,6 +173,10 @@ struct FilterBarView: View {
                 queryDraft = id
             case .attributeEquals(let name, let value):
                 queryDraft = "\(name)=\(value)"
+            case .orphan:
+                queryDraft = "orphan"
+            case .danglingLink:
+                queryDraft = "dangling"
             case .and, .or:
                 queryDraft = ""
             }
@@ -192,9 +196,13 @@ struct FilterBarView: View {
             }
             return
         }
-        // Attr shortcut: name=value
+        let lowered = trimmed.lowercased()
         let rule: FilterRule
-        if let eq = trimmed.firstIndex(of: "="),
+        if lowered == "orphan" || lowered == "is:orphan" {
+            rule = .orphan
+        } else if lowered == "dangling" || lowered == "is:dangling" {
+            rule = .danglingLink
+        } else if let eq = trimmed.firstIndex(of: "="),
            trimmed.distance(from: trimmed.startIndex, to: eq) > 0 {
             let name = String(trimmed[..<eq]).trimmingCharacters(in: .whitespaces)
             let value = String(trimmed[trimmed.index(after: eq)...]).trimmingCharacters(in: .whitespaces)

@@ -108,6 +108,26 @@ struct InspectorView: View {
                     }
                 }
 
+                Section("Linked from") {
+                    let backlinks = MapGraph.analyze(session.store.map).backlinks(to: node.id)
+                    if backlinks.isEmpty {
+                        Text("No incoming node links")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(backlinks, id: \.self) { id in
+                            Button {
+                                session.select(id)
+                            } label: {
+                                Text(session.store.map.node(id: id)?.text.isEmpty == false
+                                     ? (session.store.map.node(id: id)?.text ?? "")
+                                     : id.rawValue)
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 Section("Icons") {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 28))], spacing: 8) {
                         ForEach(NodeIcon.catalog) { icon in

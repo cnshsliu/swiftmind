@@ -25,8 +25,12 @@ on stderr, exit 1/2/3 (usage/file/operation).
 - `read <file>` — full map as a JSON tree (`root` → nested `children`; each
   node: `id`, `text`, optional `note`, `attributes`, `formula`, `folded`,
   `noteExpanded`, `side`, `pinned`).
-- `find <file> --query <text>` — case-insensitive title/note search; returns
-  matching nodes (`id`, `title`, `matchInNote`).
+- `find <file> --query <text> [--unique]` — case-insensitive title/note search; returns
+  matching nodes (`id`, `title`, `matchInNote`). `--unique` exits 3 unless exactly one
+  node matches (exact title wins among substring hits; two exact titles still refuse).
+- `doctor <file>` — JSON list of dangling node-links, orphans, empty titles, formula
+  errors, stale bookmarks, duplicate ids.
+- `capture <file> --text <t>` — add a child under the root (inbox-style capture).
 - `add-child <file> --parent <id> --text <t> [--side auto|left|right] [--id <newid>]`
 - `add-sibling <file> --of <id> --text <t> [--id <newid>]`
 - `set-text <file> --id <id> --text <t>`

@@ -14,6 +14,13 @@ public struct MapSearchHit: Equatable, Sendable, Identifiable {
     }
 }
 
+public enum UniqueSearchResult: Equatable, Sendable {
+    case none
+    case one(MapSearchHit)
+    /// Multiple hits after preferring an exact title match — do not guess.
+    case ambiguous([MapSearchHit])
+}
+
 public enum MapSearch {
     /// Case-insensitive substring match on title and noteMarkdown. Empty query → [].
     public static func search(map: MindMap, query: String) -> [MapSearchHit] {
@@ -32,6 +39,21 @@ public enum MapSearch {
         }
         for c in node.children {
             walk(c, query: query, into: &hits)
+        }
+    }
+
+    /// Resolve a query to at most one node. Exact title (case-insensitive) wins
+    /// when several substring hits exist; two exact titles still refuse.
+    public static func resolveUnique(map: MindMap, query: String) -> UniqueSearchResult {
+        let hits = search(map: map, query: query)
+        switch hits.count {
+        case 0: return .none
+        case 1: return .one(hits[0])
+        default:
+            let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            let exact = hits.filter { $0.title.compare(needle, options: .caseInsensitive) == .orderedSame }
+            if exact.count == 1 { return .one(exact[0]) }
+            return .ambiguous(exact.isEmpty ? hits : exact)
         }
     }
 }

@@ -32,6 +32,37 @@ final class MapSearchTests: XCTestCase {
         XCTAssertTrue(hits[0].matchInNote)
     }
 
+    func testResolveUniquePrefersExactTitle() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        let exact = NodeID(rawValue: "n_exact")
+        let other = NodeID(rawValue: "n_other")
+        try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: exact, text: "Zoom", side: .right), on: &map)
+        try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: other, text: "Zoom controls", side: .left), on: &map)
+        if case .one(let hit) = MapSearch.resolveUnique(map: map, query: "Zoom") {
+            XCTAssertEqual(hit.nodeID, exact)
+        } else {
+            XCTFail("expected unique exact title")
+        }
+    }
+
+    func testResolveUniqueRefusesTwoExactTitles() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_1"), text: "Same", side: .right), on: &map)
+        try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_2"), text: "Same", side: .left), on: &map)
+        if case .ambiguous(let hits) = MapSearch.resolveUnique(map: map, query: "Same") {
+            XCTAssertEqual(hits.count, 2)
+        } else {
+            XCTFail("expected ambiguous")
+        }
+    }
+
+    func testResolveUniqueNone() {
+        let map = MindMap.makeEmpty(title: "T")
+        XCTAssertEqual(MapSearch.resolveUnique(map: map, query: "nope"), UniqueSearchResult.none)
+    }
+
     func testEmptyQueryReturnsEmpty() {
         let map = MindMap.makeEmpty(title: "T")
         XCTAssertTrue(MapSearch.search(map: map, query: "").isEmpty)

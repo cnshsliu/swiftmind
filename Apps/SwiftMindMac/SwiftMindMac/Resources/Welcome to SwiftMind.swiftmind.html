@@ -108,7 +108,7 @@ Notes render Markdown and even math: $e^{i\pi}+1=0$
 - Add Vault… registers any folder (security-scoped)
 - Double-click a map node to open it
 - Double-click a folder to fold/unfold it
-- Default library: `~/Documents/SwiftMind`</div>
+- Default library: the app’s sandbox Documents/SwiftMind folder for the App Store edition; user-selected vault folders can be anywhere you authorize.</div>
           </li>
           <li data-node-id="n_help_start_settings" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">⌘, Settings: launch behavior, vaults, agent bridge</span>
@@ -232,6 +232,49 @@ Select a node, press `E` for a floating editor to the right, `⌘E` (or double-c
           </li>
           <li data-node-id="n_help_notes_math" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">LaTeX subset: Greek, fractions, √, super/subscripts</span>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_help_why" data-side="left" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">Why SwiftMind</span>
+        <div class="node-note" hidden="hidden">Most mind maps live in a closed format you cannot open without that app. SwiftMind is the opposite: **the file is the product**.
+
+A map is a plain `.swiftmind.html` file — nested lists a browser can already render, a text editor can grep, git can version, and an AI agent can read and edit without a special SDK.</div>
+        <ul>
+          <li data-node-id="n_help_why_html" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Plain HTML — nested lists, not a proprietary blob</span>
+            <div class="node-note" hidden="hidden">The model is serialized as `&lt;ul&gt;` / `&lt;li&gt;`. Open the file in Safari or Chrome and you get a readable hierarchy. No plugin, no account, no SwiftMind install required to *read*.</div>
+          </li>
+          <li data-node-id="n_help_why_open" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Open format: copy, git, grep, email, backup</span>
+            <div class="node-note" hidden="hidden">Treat maps like any other document. Drop them in a folder, commit them, search them with ordinary tools, attach them to mail. You are not trapped in a vendor database.</div>
+          </li>
+          <li data-node-id="n_help_why_nolock" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">No lock-in — the file outlives the app</span>
+            <div class="node-note" hidden="hidden">Editing happens in SwiftMind; sharing does not. Send someone the `.swiftmind.html` and they can read it today. If you ever leave the app, the knowledge is still HTML.</div>
+          </li>
+          <li data-node-id="n_help_why_agents" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Built for AI agents: CLI, MCP, one undo step</span>
+            <div class="node-note" hidden="hidden">`swiftmind` reads and batch-edits map files. `swiftmind mcp` drives the *open* map over a local socket — no network. Agent edits land as **one ⌘Z**. Agents work on the same HTML humans share.</div>
+          </li>
+          <li data-node-id="n_help_why_offline" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Offline by design: no account, no cloud, no telemetry</span>
+            <div class="node-note" hidden="hidden">The app is sandboxed and has **no network entitlement**. Maps stay on disks you choose. Optional agent bridge is a Unix socket on this machine only.</div>
+          </li>
+          <li data-node-id="n_help_why_native" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Native editor — Markdown, math, formulas, still just HTML</span>
+            <div class="node-note" hidden="hidden">Canvas and outline, notes with Markdown and a LaTeX subset, live formulas that are *derived* (never stored, never executed as code). Power stays in the file format, not a hidden database.</div>
+          </li>
+          <li data-node-id="n_help_why_orphan" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">This node is an orphan — filter `orphan` to find leaves nothing points at</span>
+            <div class="node-note" hidden="hidden">An **orphan** has no children, no links out, and nobody links in. Filter `orphan` (highlight) to see them. `swiftmind doctor` lists the same class of issues.</div>
+          </li>
+          <li data-node-id="n_help_why_dangle" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">This node has a dangling node-link — filter `dangling`</span>
+            <div class="node-note" hidden="hidden">Node links that point at a deleted or never-created id are **dangling**. Filter `dangling` or run Doctor from ⌘K.</div>
+            <ul class="node-links" hidden="hidden">
+              <li data-link-kind="node" data-node-ref="n_help_missing_nowhere"></li>
+            </ul>
           </li>
         </ul>
       </li>
@@ -359,6 +402,7 @@ DSL: `attr(&quot;cost&quot;)`, `sum|avg|min|max(children, attr: &quot;cost&quot;
           </li>
           <li data-node-id="n_help_data_privacy" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">Sandboxed: no network, only files you choose</span>
+            <div class="node-note" hidden="hidden">Read the Privacy Policy from Help → Privacy Policy or Settings → General → Privacy Policy. These links open the policy in your default browser.</div>
           </li>
           <li data-node-id="n_help_data_icloud" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">Save into iCloud Drive folders for sync</span>

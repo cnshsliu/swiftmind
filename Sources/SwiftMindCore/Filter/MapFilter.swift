@@ -13,6 +13,10 @@ public enum FilterRule: Equatable, Sendable, Codable {
     case textContains(String)
     case hasIcon(String)
     case attributeEquals(name: String, value: String)
+    /// Non-root, no children, no outbound links, nobody links here.
+    case orphan
+    /// Has a node-link whose target is missing.
+    case danglingLink
     case and([FilterRule])
     case or([FilterRule])
 }
@@ -29,6 +33,10 @@ public struct MapFilter: Equatable, Sendable, Codable {
 
 public enum FilterEvaluator {
     public static func matches(_ node: Node, rule: FilterRule) -> Bool {
+        matches(node, rule: rule, graph: nil)
+    }
+
+    public static func matches(_ node: Node, rule: FilterRule, graph: MapGraph?) -> Bool {
         switch rule {
         case .textContains(let q):
             let needle = q.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,17 +51,27 @@ public enum FilterEvaluator {
         case .attributeEquals(let name, let value):
             return node.attributes.contains { $0.name == name && $0.value == value }
 
+        case .orphan:
+            return graph?.orphans.contains(node.id) ?? false
+
+        case .danglingLink:
+            return graph?.danglingSources.contains(node.id) ?? false
+
         case .and(let rules):
-            return rules.allSatisfy { matches(node, rule: $0) }
+            return rules.allSatisfy { matches(node, rule: $0, graph: graph) }
 
         case .or(let rules):
-            return rules.contains { matches(node, rule: $0) }
+            return rules.contains { matches(node, rule: $0, graph: graph) }
         }
     }
 
     /// Node or any descendant matches (for hide-mode path-to-root visibility).
     public static func matchesIncludingDescendants(_ node: Node, rule: FilterRule) -> Bool {
-        if matches(node, rule: rule) { return true }
-        return node.children.contains { matchesIncludingDescendants($0, rule: rule) }
+        matchesIncludingDescendants(node, rule: rule, graph: nil)
+    }
+
+    public static func matchesIncludingDescendants(_ node: Node, rule: FilterRule, graph: MapGraph?) -> Bool {
+        if matches(node, rule: rule, graph: graph) { return true }
+        return node.children.contains { matchesIncludingDescendants($0, rule: rule, graph: graph) }
     }
 }

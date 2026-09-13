@@ -87,13 +87,28 @@ enum WriteCommands {
             ops = [.delete(nodeIDs: ids)]
         case "batch":
             ops = try loadBatchOps(positional: positional)
+        case "capture":
+            ops = [] // parent is the root; filled after load
         default:
             throw CLIError.usage("unknown command: \(command)")
         }
 
         var map = try MapFile.load(path)
+        let captureOps: [MapOp]
+        if command == "capture" {
+            let text = try required("text")
+            captureOps = [.addChild(
+                parentID: map.root.id,
+                newNodeID: flags["id"].map { NodeID(rawValue: $0) } ?? .generate(),
+                text: text,
+                side: .auto
+            )]
+        } else {
+            captureOps = ops
+        }
+        let applyOps = command == "capture" ? captureOps : ops
         let stamp = MapFile.modificationDate(path)
-        let affected = try BatchOps.apply(ops, to: &map)
+        let affected = try BatchOps.apply(applyOps, to: &map)
         // Clobber guard: someone (the app, another CLI) rewrote the file
         // between our read and write — refuse rather than lose their edits.
         guard MapFile.modificationDate(path) == stamp else {

@@ -35,6 +35,7 @@ struct SwiftMindMacApp: App {
                 Button("SwiftMind Help") {
                     appModel.openHelpMap(fresh: true)
                 }
+                Link("Privacy Policy", destination: AppLinks.privacyPolicy)
             }
             CommandGroup(replacing: .newItem) {
                 Button("New Map") {
@@ -61,6 +62,13 @@ struct SwiftMindMacApp: App {
                 Button("Add Vault…") {
                     appModel.addVaultPanel()
                 }
+
+                Divider()
+
+                Button("Capture…") {
+                    appModel.promptCapture()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
             }
 
             CommandGroup(replacing: .saveItem) {
@@ -137,17 +145,30 @@ private struct SessionUndoRedoCommands: View {
     @FocusedValue(\.documentSession) private var session
 
     var body: some View {
+        // Do not `.disabled(!canUndo)`: AppKit caches menu key-equivalent
+        // enablement, so ⌘Z after the first edit silently no-ops. Same
+        // pattern as SessionClipboardCommands.
         Button("Undo") {
-            session?.undo()
+            if ClipboardService.undoFocusedTextIfPossible() { return }
+            guard let session, !session.isBrainMode, session.canUndo else {
+                NSSound.beep()
+                return
+            }
+            session.undo()
         }
         .keyboardShortcut("z", modifiers: .command)
-        .disabled(!(session?.canUndo ?? false) || (session?.isBrainMode ?? false))
+        .disabled(session == nil)
 
         Button("Redo") {
-            session?.redo()
+            if ClipboardService.redoFocusedTextIfPossible() { return }
+            guard let session, !session.isBrainMode, session.canRedo else {
+                NSSound.beep()
+                return
+            }
+            session.redo()
         }
         .keyboardShortcut("z", modifiers: [.command, .shift])
-        .disabled(!(session?.canRedo ?? false) || (session?.isBrainMode ?? false))
+        .disabled(session == nil)
     }
 }
 
@@ -201,18 +222,6 @@ private struct SessionNodeCommands: View {
     @FocusedValue(\.documentSession) private var session
     @FocusedValue(\.appModel) private var appModel
 
-    private var canAddSibling: Bool {
-        guard let session, !session.isBrainMode,
-              let primary = session.store.selection.primary else { return false }
-        return primary != session.store.map.root.id
-    }
-
-    private var canDelete: Bool {
-        guard let session, !session.isBrainMode else { return false }
-        let root = session.store.map.root.id
-        return session.store.selection.selectedIDs.contains { $0 != root }
-    }
-
     var body: some View {
         Button("Add Child") {
             guard let session, !session.isBrainMode else { return }
@@ -229,7 +238,7 @@ private struct SessionNodeCommands: View {
             session.apply(InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto))
         }
         .keyboardShortcut("t", modifiers: [.command, .shift])
-        .disabled(!canAddSibling)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Delete") {
             guard let session, !session.isBrainMode else { return }
@@ -239,7 +248,7 @@ private struct SessionNodeCommands: View {
             session.apply(DeleteNodesCommand(nodeIDs: Array(ids)))
         }
         .keyboardShortcut(.delete, modifiers: [])
-        .disabled(!canDelete)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Open Selection") {
             appModel?.activateSelection()
@@ -257,25 +266,25 @@ private struct SessionNodeCommands: View {
             }
         }
         .keyboardShortcut(".", modifiers: .command)
-        .disabled(session?.store.selection.primary == nil)
+        .disabled(session == nil)
 
         Button("Edit Note at Node") {
             NotificationCenter.default.post(name: .swiftMindEditNoteInPlace, object: nil)
         }
         .keyboardShortcut("e", modifiers: .command)
-        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Edit Note") {
             NotificationCenter.default.post(name: .swiftMindToggleNoteEditor, object: nil)
         }
         .keyboardShortcut("e", modifiers: [.command, .shift])
-        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Toggle Note Expansion") {
             NotificationCenter.default.post(name: .swiftMindToggleNoteExpansion, object: nil)
         }
         .keyboardShortcut("e", modifiers: [.command, .option])
-        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Divider()
 
@@ -283,7 +292,7 @@ private struct SessionNodeCommands: View {
             togglePin()
         }
         .keyboardShortcut("p", modifiers: [.command, .shift])
-        .disabled(session?.store.selection.primary == nil || (session?.isBrainMode ?? false))
+        .disabled(session == nil || (session?.isBrainMode ?? false))
     }
 
     private var pinMenuTitle: String {

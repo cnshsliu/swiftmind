@@ -17,6 +17,7 @@ enum PaletteBuilder {
 
     static func items(
         session: DocumentSession,
+        appModel: AppModel?,
         query: String,
         dismiss: @escaping () -> Void
     ) -> [PaletteItem] {
@@ -136,6 +137,29 @@ enum PaletteBuilder {
             ScriptRunner.runViaOpenPanel(session: session)
         })
 
+        if !session.isBrainMode {
+            items.append(PaletteItem(id: "capture", title: "Capture…", subtitle: "⇧⌘I → Inbox", systemImage: "tray.and.arrow.down") {
+                dismiss()
+                appModel?.promptCapture()
+            })
+            items.append(PaletteItem(id: "filter-orphan", title: "Filter Orphans", subtitle: "is:orphan", systemImage: "circle.dotted") {
+                session.applyQuiet(SetFilterCommand(filter: MapFilter(mode: .highlight, rule: .orphan)))
+                dismiss()
+            })
+            items.append(PaletteItem(id: "filter-dangling", title: "Filter Dangling Links", subtitle: "is:dangling", systemImage: "link.badge.plus") {
+                session.applyQuiet(SetFilterCommand(filter: MapFilter(mode: .highlight, rule: .danglingLink)))
+                dismiss()
+            })
+            for issue in MapDoctor.inspect(session.store.map).prefix(20) {
+                let title = "Doctor: \(issue.message)"
+                let nodeID = issue.nodeID
+                items.append(PaletteItem(id: "doctor-\(issue.id)", title: title, subtitle: issue.kind.rawValue, systemImage: "stethoscope") {
+                    if let nodeID { session.select(nodeID) }
+                    dismiss()
+                })
+            }
+        }
+
         for (name, _) in session.store.map.styleSheet.styles.sorted(by: { $0.key < $1.key }) {
             let styleKey = name
             items.append(
@@ -240,6 +264,7 @@ enum PaletteBuilder {
 /// ⌘K command palette — instant keyboard UI (no open animation frills).
 struct CommandPaletteView: View {
     @ObservedObject var session: DocumentSession
+    var appModel: AppModel?
     @Binding var isPresented: Bool
 
     @State private var query = ""
@@ -247,7 +272,7 @@ struct CommandPaletteView: View {
     @FocusState private var queryFocused: Bool
 
     private var items: [PaletteItem] {
-        PaletteBuilder.items(session: session, query: query) {
+        PaletteBuilder.items(session: session, appModel: appModel, query: query) {
             isPresented = false
         }
     }

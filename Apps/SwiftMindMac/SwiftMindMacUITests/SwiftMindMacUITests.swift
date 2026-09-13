@@ -116,11 +116,21 @@ final class SwiftMindMacUITests: XCTestCase {
     }
 
     func testUndoAfterAddChild() throws {
-        app.typeKey("t", modifierFlags: .command)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        focusCanvasWithSelection()
+        let afterAdd = nodeCount()
+        XCTAssertGreaterThan(afterAdd, 1, "⌘T should add a child")
+
         app.typeKey("z", modifierFlags: .command)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        XCTAssertEqual(app.state, .runningForeground)
+        let undone = NSPredicate { _, _ in self.nodeCount() == afterAdd - 1 }
+        expectation(for: undone, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(nodeCount(), afterAdd - 1, "⌘Z must undo add-child")
+
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        let redone = NSPredicate { _, _ in self.nodeCount() == afterAdd }
+        expectation(for: redone, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(nodeCount(), afterAdd, "⇧⌘Z must redo add-child")
     }
 
     func testMyBrainToolbarExists() throws {
@@ -445,14 +455,13 @@ final class SwiftMindMacUITests: XCTestCase {
         // Outline view via the segmented picker (segments expose as radio
         // buttons on macOS).
         let picker = element("viewModePicker")
-        if picker.waitForExistence(timeout: 3) {
-            let segment = picker.radioButtons["Outline"].firstMatch
-            if segment.exists { segment.click() }
-            shot("2-outline.png")
-            let map = picker.radioButtons["Map"].firstMatch
-            if map.exists { map.click() }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
-        }
+        XCTAssertTrue(picker.waitForExistence(timeout: 3))
+        XCTAssertEqual(picker.radioButtons.count, 2)
+        picker.radioButtons.element(boundBy: 1).click()
+        XCTAssertTrue(element("outlineList").waitForExistence(timeout: 3))
+        shot("2-outline.png")
+        picker.radioButtons.element(boundBy: 0).click()
+        XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 3))
 
         // Floating note editor on the root (Markdown + LaTeX demo). Click a
         // node card directly — canvas-center clicks miss the root on the
@@ -481,20 +490,29 @@ final class SwiftMindMacUITests: XCTestCase {
 
 // MARK: - Canvas focus helper
 
-/// Clicks the canvas and retries until a node is selected (the root sits at
-/// the center of a fresh map; a click slightly off leaves no selection and
-/// subsequent hotkeys would no-op).
+/// Creates a selected node through the app command. The canvas accessibility
+/// frame can include the inspector, so its center is not a reliable node hit.
 extension SwiftMindMacUITests {
+    func nodeCount() -> Int {
+        let el = element("nodeCountLabel")
+        guard el.exists else { return 0 }
+        let raw = ((el.value as? String) ?? el.label)
+        let digits = raw.filter(\.isNumber)
+        return Int(digits) ?? 0
+    }
+
     func focusCanvasWithSelection() {
         let canvas = element("mapCanvas")
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "map canvas should exist")
+        canvas.click()
+        app.typeKey("t", modifierFlags: .command)
         let selected = element("selectedNodeLabel")
-        for _ in 0..<3 {
-            canvas.click()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-            let value = selected.exists ? ((selected.value as? String) ?? selected.label) : ""
-            if !value.isEmpty && value != "No selection" { return }
+        let hasSelection = NSPredicate { _, _ in
+            guard selected.exists else { return false }
+            return ((selected.value as? String) ?? selected.label) == "New Idea"
         }
+        expectation(for: hasSelection, evaluatedWith: selected)
+        waitForExpectations(timeout: 5)
     }
 }
 

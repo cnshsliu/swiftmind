@@ -23,4 +23,4 @@ If this policy ever changes, the updated version will be posted at this URL.
 
 ## Contact
 
-Questions: open an issue at https://github.com/cnshsliu/swiftmind or email liukehong@ai2nv.com.
+Questions: open an issue at https://github.com/cnshsliu/swiftmind or email liukehong@gmail.com.
