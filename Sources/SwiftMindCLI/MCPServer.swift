@@ -9,12 +9,12 @@ enum MCPServer {
     static let tools: [[String: Any]] = [
         [
             "name": "read_map",
-            "description": "Read the map currently open in SwiftMind as a JSON tree, including computed formula results.",
+            "description": "Read the mind map currently open in SwiftMind as a JSON tree, including computed formula results.",
             "inputSchema": ["type": "object", "properties": [:] as [String: Any]],
         ],
         [
             "name": "find_nodes",
-            "description": "Case-insensitive search of titles/notes in the open map.",
+            "description": "Case-insensitive search of titles/notes in the open mind map.",
             "inputSchema": [
                 "type": "object",
                 "properties": ["query": ["type": "string"]],
@@ -23,7 +23,7 @@ enum MCPServer {
         ],
         [
             "name": "apply_ops",
-            "description": "Apply a batch of map ops (same op objects as `swiftmind batch`) to the open map. All-or-nothing, one undo step in the app.",
+            "description": "Apply a batch of mind-map ops (same JSON objects as `swiftmind batch`) to the open mind map. All-or-nothing, one undo step in the app.",
             "inputSchema": [
                 "type": "object",
                 "properties": ["ops": ["type": "array", "items": ["type": "object"]]],
@@ -32,15 +32,32 @@ enum MCPServer {
         ],
         [
             "name": "get_session",
-            "description": "Session state: open map path/title, selection, undo depth, brain mode.",
+            "description": "Session state: open mind-map path/title, selection, undo depth, My Brain mode.",
             "inputSchema": ["type": "object", "properties": [:] as [String: Any]],
         ],
         [
             "name": "new_map",
-            "description": "Create a new map in the default library and open it in the app.",
+            "description": "Create a new mind map in the default library and open it in the app.",
             "inputSchema": [
                 "type": "object",
                 "properties": ["title": ["type": "string"]],
+            ],
+        ],
+        [
+            "name": "doctor",
+            "description": "Inspect the open mind map: dangling node-links, orphans, empty titles, formula errors, stale bookmarks, duplicate ids.",
+            "inputSchema": ["type": "object", "properties": [:] as [String: Any]],
+        ],
+        [
+            "name": "capture",
+            "description": "Capture a thought. Default: add a child under the open mind map root (one undo). If My Brain is showing, or inbox=true, append to Inbox.swiftmind.html in the default library without switching maps.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "text": ["type": "string"],
+                    "inbox": ["type": "boolean", "description": "If true, always write to Inbox.swiftmind.html"],
+                ],
+                "required": ["text"],
             ],
         ],
     ]
@@ -52,6 +69,8 @@ enum MCPServer {
         "apply_ops": "applyOps",
         "get_session": "session",
         "new_map": "new",
+        "doctor": "doctor",
+        "capture": "capture",
     ]
 
     static func run() -> Never {

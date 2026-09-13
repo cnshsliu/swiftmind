@@ -303,6 +303,31 @@ final class AgentBridge {
                 throw BridgeFailure(code: "file_error", message: "could not create map")
             }
             return ["path": url.path]
+        case "doctor":
+            let issues = MapDoctor.inspect(session.store.map)
+            return ["issues": issues.map { issue -> [String: Any] in
+                var row: [String: Any] = ["kind": issue.kind.rawValue, "message": issue.message]
+                if let id = issue.nodeID { row["id"] = id.rawValue }
+                return row
+            }]
+        case "capture":
+            guard let raw = params["text"] as? String else {
+                throw BridgeFailure(code: "usage", message: "capture requires text")
+            }
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                throw BridgeFailure(code: "usage", message: "capture text is empty")
+            }
+            let toInbox = (params["inbox"] as? Bool) == true
+            if session.isBrainMode || toInbox {
+                appModel.captureToInbox(text: text)
+                return ["inbox": true]
+            }
+            let newID = NodeID.generate()
+            try session.applyThrowing(
+                InsertChildCommand(parentID: session.store.map.root.id, newNodeID: newID, text: text, side: .auto)
+            )
+            return ["affected": [newID.rawValue], "inbox": false]
         default:
             throw BridgeFailure(code: "usage", message: "unknown method: \(method)")
         }

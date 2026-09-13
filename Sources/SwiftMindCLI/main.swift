@@ -9,7 +9,7 @@ let args = Array(CommandLine.arguments.dropFirst())
 
 /// Bumped on every CLI behavior change; keep in sync before running
 /// scripts/install-cli.sh so `swiftmind --version` reflects the installed build.
-let swiftmindCLIVersion = "1.3.0"
+let swiftmindCLIVersion = "1.3.1"
 
 if args.first == "--version" || args.first == "version" {
     print("swiftmind \(swiftmindCLIVersion)")
