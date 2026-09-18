@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2650"/>
+      <stop offset="0.55" stop-color="#1a1740"/>
+      <stop offset="1" stop-color="#0d0c22"/>
+    </linearGradient>
+    <radialGradient id="aurora" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#6e6bff" stop-opacity="0.5"/>
+      <stop offset="0.5" stop-color="#4d3fd6" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8f8cff"/>
+      <stop offset="1" stop-color="#5bd7ff"/>
+    </linearGradient>
+    <linearGradient id="beamR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#8f8cff"/>
+      <stop offset="1" stop-color="#5bd7ff"/>
+    </linearGradient>
+    <radialGradient id="ball" cx="0.35" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#b9b8ff"/>
+      <stop offset="0.45" stop-color="#7d79ff"/>
+      <stop offset="1" stop-color="#3f37c9"/>
+    </radialGradient>
+    <radialGradient id="ballC" cx="0.35" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#eafcff"/>
+      <stop offset="0.4" stop-color="#8ee3ff"/>
+      <stop offset="1" stop-color="#3f9fd6"/>
+    </radialGradient>
+    <radialGradient id="soft" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7d79ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#7d79ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="8" y="8" width="496" height="496" rx="118" fill="url(#bg)"/>
+  <rect x="8" y="8" width="496" height="496" rx="118" fill="url(#aurora)"/>
+  <rect x="11" y="11" width="490" height="490" rx="116" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="2"/>
+
+  <!-- branches: soft underlay then vivid core, left & right -->
+  <g fill="none" stroke-linecap="round">
+    <g stroke="url(#beam)" opacity="1">
+      <g stroke-width="16" opacity="0.16">
+        <path d="M 232 256 C 176 256, 176 154, 146 154"/>
+        <path d="M 232 256 C 188 256, 160 256, 128 256"/>
+        <path d="M 232 256 C 176 256, 176 358, 146 358"/>
+      </g>
+      <g stroke-width="6.5">
+        <path d="M 232 256 C 176 256, 176 154, 146 154"/>
+        <path d="M 232 256 C 188 256, 160 256, 128 256"/>
+        <path d="M 232 256 C 176 256, 176 358, 146 358"/>
+      </g>
+    </g>
+    <g stroke="url(#beamR)">
+      <g stroke-width="16" opacity="0.16">
+        <path d="M 280 256 C 336 256, 336 154, 366 154"/>
+        <path d="M 280 256 C 324 256, 352 256, 384 256"/>
+        <path d="M 280 256 C 336 256, 336 358, 366 358"/>
+      </g>
+      <g stroke-width="6.5">
+        <path d="M 280 256 C 336 256, 336 154, 366 154"/>
+        <path d="M 280 256 C 324 256, 352 256, 384 256"/>
+        <path d="M 280 256 C 336 256, 336 358, 366 358"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- satellite nodes: halo + ball + specular -->
+  <g>
+    <circle cx="146" cy="154" r="30" fill="url(#soft)"/><circle cx="146" cy="154" r="17" fill="url(#ball)"/><ellipse cx="140" cy="147" rx="6.5" ry="4.5" fill="#ffffff" opacity="0.85"/>
+    <circle cx="128" cy="256" r="30" fill="url(#soft)"/><circle cx="128" cy="256" r="17" fill="url(#ball)"/><ellipse cx="122" cy="249" rx="6.5" ry="4.5" fill="#ffffff" opacity="0.85"/>
+    <circle cx="146" cy="358" r="30" fill="url(#soft)"/><circle cx="146" cy="358" r="17" fill="url(#ball)"/><ellipse cx="140" cy="351" rx="6.5" ry="4.5" fill="#ffffff" opacity="0.85"/>
+    <circle cx="366" cy="154" r="30" fill="url(#soft)"/><circle cx="366" cy="154" r="17" fill="url(#ball)"/><ellipse cx="360" cy="147" rx="6.5" ry="4.5" fill="#ffffff" opacity="0.85"/>
+    <circle cx="384" cy="256" r="30" fill="url(#soft)"/><circle cx="384" cy="256" r="17" fill="url(#ball)"/><ellipse cx="378" cy="249" rx="6.5" ry="4.5" fill="#ffffff" opacity="0.85"/>
+    <circle cx="366" cy="358" r="30" fill="url(#soft)"/><circle cx="366" cy="358" r="17" fill="url(#ball)"/><ellipse cx="360" cy="351" rx="6.5" ry="4.5" fill="#ffffff" opacity="0.85"/>
+  </g>
+
+  <!-- hub: layered glow, cyan core, ring accent -->
+  <circle cx="256" cy="256" r="74" fill="url(#soft)"/>
+  <circle cx="256" cy="256" r="52" fill="url(#soft)" opacity="0.8"/>
+  <circle cx="256" cy="256" r="33" fill="url(#ballC)"/>
+  <ellipse cx="247" cy="244" rx="12" ry="8.5" fill="#ffffff" opacity="0.9"/>
+  <circle cx="256" cy="256" r="42" fill="none" stroke="#8ee3ff" stroke-opacity="0.5" stroke-width="2.5"/>
+</svg>

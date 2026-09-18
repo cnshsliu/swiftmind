@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t d">
+  <title id="t">SwiftMind — Hemispheres (Light)</title>
+  <desc id="d">Two mirrored columns of nodes joined by S-curves to a central diamond hub.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDFDFF"/>
+      <stop offset="1" stop-color="#E9E9F2"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5E5CE6"/>
+      <stop offset="1" stop-color="#64D2FF"/>
+    </linearGradient>
+    <linearGradient id="ln" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#64D2FF"/>
+      <stop offset="1" stop-color="#5E5CE6"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#64D2FF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#64D2FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="115" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="170" fill="url(#halo)"/>
+
+  <!-- S-synapses: left column to hub, mirrored right -->
+  <g fill="none" stroke="url(#ln)" stroke-width="9" stroke-linecap="round">
+    <path d="M 168 148 C 230 148, 200 256, 238 256"/>
+    <path d="M 158 256 C 196 256, 200 256, 236 256"/>
+    <path d="M 168 364 C 230 364, 200 256, 238 256"/>
+    <path d="M 344 148 C 282 148, 312 256, 274 256"/>
+    <path d="M 354 256 C 316 256, 312 256, 276 256"/>
+    <path d="M 344 364 C 282 364, 312 256, 274 256"/>
+  </g>
+
+  <g fill="url(#core)">
+    <circle cx="168" cy="148" r="21"/>
+    <circle cx="158" cy="256" r="21"/>
+    <circle cx="168" cy="364" r="21"/>
+    <circle cx="344" cy="148" r="21"/>
+    <circle cx="354" cy="256" r="21"/>
+    <circle cx="344" cy="364" r="21"/>
+  </g>
+
+  <!-- Central diamond hub -->
+  <g transform="translate(256 256) rotate(45)">
+    <rect x="-38" y="-38" width="76" height="76" rx="18" fill="url(#core)"/>
+  </g>
+</svg>

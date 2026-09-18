@@ -63,7 +63,7 @@ swift test
 # Full loop after ANY app-affecting change: stop app → test → rebuild → relaunch
 ./scripts/rerun-mac.sh            # Debug dev loop; add --no-test to skip tests, --no-launch to skip launch
 
-# Refresh the permanent install (Release build → /Volumes/WD/Applications, when mounted)
+# Refresh the permanent install (Release build → ~/Applications; override with SWIFTMIND_INSTALL_DIR)
 ./scripts/rerun-mac.sh --release  # Debug runs never touch that copy, so it stays Release
 
 # CI-style gate: unit tests + CLI smoke + app build + XCUITest smoke
@@ -82,7 +82,7 @@ cd Apps/SwiftMindMac && xcodegen generate && open SwiftMindMac.xcodeproj
 
 Requirements: macOS, Xcode with `xcodebuild`, and **XcodeGen** (`brew install xcodegen`). Builds use `CODE_SIGN_IDENTITY=-` (ad-hoc) so no Apple Developer account is needed. UI tests need a logged-in GUI session.
 
-**Canary split:** Debug builds use bundle id `app.swiftmind.mac.dev` (display name "SwiftMind Dev"), Release builds `app.swiftmind.mac`. They have separate sandbox containers, preferences and agent-bridge sockets, so the dev instance runs alongside the permanent Release install without either affecting the other. Scripts kill processes by executable path (DerivedData vs `/Volumes/WD/Applications`), never by bare process name.
+**Canary split:** Debug builds use bundle id `app.swiftmind.mac.dev` (display name "SwiftMind Dev"), Release builds `app.swiftmind.mac`. They have separate sandbox containers, preferences and agent-bridge sockets, so the dev instance runs alongside the permanent Release install without either affecting the other. Scripts kill processes by executable path (DerivedData vs `~/Applications`), never by bare process name.
 
 **Agent rule (from `docs/superpowers/AGENT-WORKFLOW.md`):** after any code change that affects the Mac app, always run `./scripts/rerun-mac.sh` yourself — never ask the user to stop Xcode and re-run. Before claiming a feature "done", run `./scripts/verify.sh` (or at minimum `swift test && ./scripts/rerun-mac.sh --no-test`).
 

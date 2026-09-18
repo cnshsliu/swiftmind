@@ -9,7 +9,7 @@ SCHEME="SwiftMindMac"
 RESULT_BUNDLE="/tmp/SwiftMindUITests.xcresult"
 
 # Stop only the dev (DerivedData) instance so UI tests own it — the
-# permanent Release install in /Volumes/WD/Applications keeps running.
+# permanent Release install (~/Applications) keeps running.
 pkill -f 'DerivedData.*SwiftMind\.app/Contents/MacOS/SwiftMind' 2>/dev/null || true
 sleep 0.3
 

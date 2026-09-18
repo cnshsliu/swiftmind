@@ -3,10 +3,11 @@
 # Usage: ./scripts/rerun-mac.sh [--no-test] [--no-launch] [--release]
 #
 # Default (Debug): dev loop — tests + Debug build, launched from DerivedData.
-# The permanent copy in /Volumes/WD/Applications is NOT touched in this mode.
-# --release: build -configuration Release, sync it to /Volumes/WD/Applications
-# (when the volume is present) and launch that copy. Use this to refresh the
-# permanent install; dev runs never downgrade it to Debug.
+# The permanent copy in $SWIFTMIND_INSTALL_DIR (default ~/Applications) is NOT
+# touched in this mode.
+# --release: build -configuration Release, sync it to the install dir and
+# launch that copy. Use this to refresh the permanent install; dev runs never
+# downgrade it to Debug.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,7 +33,7 @@ done
 # Match only the instance this run manages, by executable path — the Debug
 # dev instance (DerivedData) and the permanent Release install can run side
 # by side, so a bare `pkill -x SwiftMind` would kill the wrong one.
-INSTALL_DIR="/Volumes/WD/Applications"
+INSTALL_DIR="${SWIFTMIND_INSTALL_DIR:-$HOME/Applications}"
 if [ "$CONFIG" = "Release" ]; then
   PROC_PATTERN="${INSTALL_DIR}/SwiftMind\.app/Contents/MacOS/SwiftMind"
 else
@@ -137,8 +138,8 @@ fi
 
 echo "    App: $APP_PATH"
 
-# Sync the permanent copy only for Release builds — the install in
-# /Volumes/WD/Applications must stay Release; Debug dev loops never touch it.
+# Sync the permanent copy only for Release builds — the installed copy must
+# stay Release; Debug dev loops never touch it.
 if [ "$CONFIG" = "Release" ] && [ -d "$INSTALL_DIR" ]; then
   echo "==> Syncing to ${INSTALL_DIR}…"
   rsync -a --delete "$APP_PATH" "$INSTALL_DIR/"

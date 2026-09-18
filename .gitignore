@@ -4,3 +4,6 @@
 *.xcodeproj/
 DerivedData/
 xcuserdata/
+.claude/
+.superpowers/
+.tmp-upload/

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t d">
+  <title id="t">SwiftMind — Monoline Spark (Dark)</title>
+  <desc id="d">One continuous line rising to a central node, then splitting symmetrically, on dark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A2A30"/>
+      <stop offset="1" stop-color="#161618"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7D7AFF"/>
+      <stop offset="1" stop-color="#64D2FF"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7D7AFF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#7D7AFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="115" fill="url(#bg)"/>
+  <circle cx="256" cy="250" r="180" fill="url(#halo)"/>
+
+  <g fill="none" stroke="url(#ink)" stroke-width="16" stroke-linecap="round">
+    <path d="M 256 424 C 256 360, 256 320, 256 286"/>
+    <path d="M 256 226 C 256 176, 208 150, 168 138"/>
+    <path d="M 256 226 C 256 176, 304 150, 344 138"/>
+    <path d="M 256 226 C 236 210, 190 208, 148 232"/>
+    <path d="M 256 226 C 276 210, 322 208, 364 232"/>
+  </g>
+
+  <g fill="url(#ink)">
+    <circle cx="168" cy="138" r="19"/>
+    <circle cx="344" cy="138" r="19"/>
+    <circle cx="148" cy="232" r="19"/>
+    <circle cx="364" cy="232" r="19"/>
+  </g>
+  <circle cx="256" cy="252" r="40" fill="url(#ink)"/>
+</svg>
