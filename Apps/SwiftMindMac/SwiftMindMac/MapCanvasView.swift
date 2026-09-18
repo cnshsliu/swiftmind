@@ -69,6 +69,17 @@ struct MapCanvasView: View {
     @State private var editorPanTarget: CGSize?
     @FocusState private var noteEditorFocused: Bool
     private static let noteEditorWidth: CGFloat = 420
+
+    // MARK: Sketch (drawing) editor
+    @State private var drawingNodeID: NodeID?
+    @State private var sketchDraft: Data = Data()
+    /// Baseline of the last committed sketch payload; skips no-op commits and
+    /// detects external model changes while the editor is open.
+    @State private var lastCommittedSketch: Data?
+    @State private var sketchCommitTask: Task<Void, Never>?
+    /// Board the editing overlay currently shows (grows as strokes near edges).
+    @State private var sketchEditorSize: CGSize = CGSize(width: 800, height: 600)
+
     /// Unmodified wheel / two-finger pan vs AppKit `scrollingDelta`.
     private static let scrollPanSpeed = 8.0
 
@@ -815,8 +826,8 @@ struct MapCanvasView: View {
             }
 
             // Hide label while editing this node (overlay TextField shows it);
-            // expanded nodes render the note card instead of the plain title.
-            if editingNodeID != node.id && !node.isNoteExpanded {
+            // expanded nodes render the note card, sketch nodes the drawing board.
+            if editingNodeID != node.id && !node.isNoteExpanded && !node.hasSketch {
                 let textRect = rect.insetBy(dx: 6, dy: 4)
                 let adjustedTextRect = CGRect(
                     x: textRect.minX + iconStripWidth,
@@ -831,6 +842,51 @@ struct MapCanvasView: View {
                     ))
                     .foregroundColor(textColor)
                 context.draw(text, in: adjustedTextRect)
+            }
+
+            // Sketch node: title strip above a drawing board (the committed
+            // strokes, rasterized). The editing overlay draws its own canvas.
+            if node.hasSketch && drawingNodeID != node.id {
+                let cfg = LayoutConfig()
+                let titleH = node.text.isEmpty ? 0 : cfg.sketchTitleLineHeight
+                if !node.text.isEmpty {
+                    let title = Text(node.text)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(textColor)
+                    context.draw(
+                        title,
+                        in: CGRect(x: rect.minX, y: rect.minY + 2, width: rect.width, height: titleH)
+                    )
+                }
+                let boardW = rect.width - cfg.paddingX * 2
+                let boardH = rect.height - 16 - titleH
+                let boardRect = CGRect(
+                    x: rect.midX - boardW / 2,
+                    y: rect.minY + 8 + titleH,
+                    width: boardW,
+                    height: boardH
+                )
+                // Light card keeps black ink legible in dark mode.
+                context.fill(
+                    Path(roundedRect: boardRect, cornerRadius: 4),
+                    with: .color(Color(nsColor: .textBackgroundColor))
+                )
+                if let size = node.sketchSize,
+                   let data = session.store.map.node(id: node.id)?.sketch,
+                   let image = SketchSupport.image(
+                       nodeID: node.id,
+                       data: data,
+                       boardSize: CGSize(width: size.x, height: size.y),
+                       scale: scale
+                   ) {
+                    context.draw(Image(nsImage: image), in: boardRect)
+                } else {
+                    // Empty sketch: pencil placeholder.
+                    let hint = Text(Image(systemName: "scribble"))
+                        .font(.system(size: 16))
+                        .foregroundColor(Theme.badgeMuted)
+                    context.draw(hint, at: CGPoint(x: boardRect.midX, y: boardRect.midY), anchor: .center)
+                }
             }
 
             // Note glyph — top-right of frame.

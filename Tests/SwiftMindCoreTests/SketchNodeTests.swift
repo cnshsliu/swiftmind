@@ -131,6 +131,9 @@ final class SketchNodeTests: XCTestCase {
         let cfg = LayoutConfig()
         XCTAssertEqual(v.frame.width, cfg.sketchMaxSize + cfg.paddingX * 2, accuracy: 0.5)
         XCTAssertEqual(v.frame.height, cfg.sketchMaxSize + 16, accuracy: 0.5)
+        // The visual carries the clamped board so the view never re-clamps.
+        XCTAssertEqual(v.sketchSize?.x, cfg.sketchMaxSize)
+        XCTAssertEqual(v.sketchSize?.y, cfg.sketchMaxSize)
     }
 
     func testLayoutTitleStripAddedWhenTextPresent() throws {

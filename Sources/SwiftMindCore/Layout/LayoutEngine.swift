@@ -383,11 +383,14 @@ public struct LayoutEngine: Sendable {
         edges.append(EdgeVisual(from: parent.id, to: child.id, fromPoint: fromPt, toPoint: toPt))
     }
 
-    /// Trimmed sketch board size for the canvas render rect; nil while empty.
+    /// Clamped sketch board size for the canvas render rect; nil while empty.
     private func sketchSize(of node: Node) -> Point2D? {
         guard node.sketch != nil,
               let w = node.sketchWidth, let h = node.sketchHeight, w > 0, h > 0 else { return nil }
-        return Point2D(x: w, y: h)
+        return Point2D(
+            x: min(config.sketchMaxSize, max(config.sketchMinSize, w)),
+            y: min(config.sketchMaxSize, max(config.sketchMinSize, h))
+        )
     }
 
     private func appendNode(
