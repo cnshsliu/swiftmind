@@ -77,6 +77,11 @@ struct MapCanvasView: View {
     /// detects external model changes while the editor is open.
     @State private var lastCommittedSketch: Data?
     @State private var sketchCommitTask: Task<Void, Never>?
+    /// True once the user drew/erased since open/last commit — close without
+    /// edits must not push a redundant SetSketchCommand.
+    @State private var sketchIsDirty = false
+    @State private var sketchTool: SketchTool = .pen
+    @State private var sketchInkColor: NSColor = .black
     /// Board the editing overlay currently shows (grows as strokes near edges).
     @State private var sketchEditorSize: CGSize = CGSize(width: 800, height: 600)
 
@@ -157,6 +162,19 @@ struct MapCanvasView: View {
                     editOverlay(for: visual, viewSize: geo.size)
                 }
 
+                // Sketch editing: scrim eats canvas gestures, the large
+                // borderless board above it accepts strokes anywhere inside.
+                if drawingNodeID != nil {
+                    Rectangle()
+                        .fill(Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08))
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeSketchEditor() }
+                }
+                if let sketchID = drawingNodeID,
+                   let visual = snapshot.nodes.first(where: { $0.id == sketchID }) {
+                    sketchEditorOverlay(for: visual, viewSize: geo.size)
+                }
+
                 if followMode {
                     VStack {
                         HStack {
@@ -187,7 +205,7 @@ struct MapCanvasView: View {
             .focused($canvasFocused)
             .focusEffectDisabled()
             .onKeyPress(.return) {
-                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
                 if session.isBrainMode {
                     // Brain: select under pointer, then open map / toggle folder.
                     if let hover = hoverLocation,
@@ -202,17 +220,21 @@ struct MapCanvasView: View {
                 return .handled
             }
             .onKeyPress(.delete) {
-                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
                 deleteSelectionIfAllowed()
                 return .handled
             }
             .onKeyPress(.init("\u{7F}")) { // forward delete on some keyboards
-                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
                 deleteSelectionIfAllowed()
                 return .handled
             }
             // Esc clears the current focus (editing handles Esc itself).
             .onKeyPress(.escape) {
+                if drawingNodeID != nil {
+                    closeSketchEditor()
+                    return .handled
+                }
                 guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
                 session.clearSelection()
                 return .handled
@@ -231,7 +253,7 @@ struct MapCanvasView: View {
             // Follow mode: bare `f` only. ⌘F is search (must not be stolen).
             .onKeyPress(.init("f")) {
                 guard modifiersAreBare() else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
                 toggleFollowMode()
                 return .handled
             }
@@ -243,16 +265,25 @@ struct MapCanvasView: View {
             .onKeyPress(.init("e")) {
                 let mods = NSEvent.modifierFlags.intersection([.command, .shift, .option])
                 guard mods.isEmpty else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil,
+                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil,
                       !session.isBrainMode else { return .ignored }
                 toggleNoteEditor()
                 return .handled
             }
             .onKeyPress(.init("x")) {
                 guard modifiersAreBare() else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil,
+                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil,
                       !session.isBrainMode else { return .ignored }
                 toggleNoteExpansion()
+                return .handled
+            }
+            // Sketch (D): convert the selected node into a drawing node, or
+            // open/close the in-place editor when it already is one.
+            .onKeyPress(.init("d")) {
+                guard modifiersAreBare() else { return .ignored }
+                guard editingNodeID == nil, noteEditorNodeID == nil,
+                      !session.isBrainMode else { return .ignored }
+                toggleSketchMode()
                 return .handled
             }
         }
@@ -274,7 +305,7 @@ struct MapCanvasView: View {
             ],
             isTargeted: $isExternalDropTargeted
         ) { providers, location in
-            guard !session.isBrainMode, editingNodeID == nil else { return false }
+            guard !session.isBrainMode, editingNodeID == nil, drawingNodeID == nil else { return false }
             let snapshot = session.store.snapshot()
             // Drop onto a node = child of that node; empty canvas = child of
             // the selection (or root), pinned at the drop point.
@@ -316,6 +347,24 @@ struct MapCanvasView: View {
                session.store.map.node(id: editingNodeID) == nil {
                 cancelEdit()
             }
+            if let sketchID = drawingNodeID {
+                if let node = session.store.map.node(id: sketchID) {
+                    // External change (⌘Z, CLI, agent): the model moved off the
+                    // last-committed payload. Own commits land exactly on it.
+                    if node.sketch != lastCommittedSketch {
+                        sketchCommitTask?.cancel()
+                        sketchCommitTask = nil
+                        sketchDraft = node.sketch.map {
+                            SketchSupport.centered($0, in: sketchEditorSize)
+                        } ?? SketchSupport.emptyDrawingData()
+                        lastCommittedSketch = node.sketch
+                        sketchIsDirty = false
+                    }
+                } else {
+                    // Node vanished — close without committing.
+                    closeSketchEditor(committing: false)
+                }
+            }
             if let id = noteEditorNodeID {
                 if let node = session.store.map.node(id: id) {
                     // External change (⌘Z, CLI, agent bridge): the model moved
@@ -346,16 +395,19 @@ struct MapCanvasView: View {
             if noteEditorNodeID != nil {
                 closeNoteEditor(committing: true)
             }
+            if drawingNodeID != nil {
+                closeSketchEditor(committing: true)
+            }
             session.liveNoteDocument = nil
             session.rememberCanvasPointer(overCanvas: false, viewPoint: nil)
             session.commandScrollRemainder = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
-            guard editingNodeID == nil, noteEditorNodeID == nil else { return }
+            guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return }
             beginEditPreferringHover(snapshot: session.store.snapshot())
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasDelete)) { _ in
-            guard editingNodeID == nil, noteEditorNodeID == nil else { return }
+            guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return }
             deleteSelectionIfAllowed()
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteEditor)) { _ in
@@ -373,6 +425,15 @@ struct MapCanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleNoteExpansion)) { _ in
             guard editingNodeID == nil else { return }
             toggleNoteExpansion()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleSketch)) { note in
+            guard editingNodeID == nil, !session.isBrainMode else { return }
+            if let id = note.object as? NodeID {
+                session.select(id)
+                openSketchEditor(nodeID: id)
+            } else {
+                toggleSketchMode()
+            }
         }
     }
 
@@ -404,6 +465,8 @@ struct MapCanvasView: View {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [session] event in
             guard session.pointerIsOverCanvas else { return event }
             if session.isBrainMode { return event }
+            // No map panning under the open sketch editor.
+            if SketchEventGuard.editorIsActive { return event }
             if let fr = event.window?.firstResponder as? NSView,
                fr is NSTextView || fr is NSTextField,
                let content = event.window?.contentView {
@@ -468,7 +531,7 @@ struct MapCanvasView: View {
     private enum NavDirection { case left, right, up, down }
 
     private func navigateKey(_ direction: NavDirection) -> KeyPress.Result {
-        guard editingNodeID == nil, noteEditorNodeID == nil else { return .ignored }
+        guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
         navigate(direction)
         return .handled
     }
@@ -1193,6 +1256,167 @@ struct MapCanvasView: View {
         lastCommittedNoteDocument = NoteDocument.compose(title: title ?? node.text, body: body)
     }
 
+    // MARK: - Sketch editor (large borderless board, trim-to-content on commit)
+
+    /// `d` / ⇧⌘D: convert-or-edit. Closing is Esc / Done / scrim tap.
+    private func toggleSketchMode() {
+        if drawingNodeID != nil {
+            closeSketchEditor()
+            return
+        }
+        guard let primary = session.store.selection.primary,
+              session.store.map.node(id: primary) != nil else { return }
+        openSketchEditor(nodeID: primary)
+    }
+
+    private func openSketchEditor(nodeID: NodeID) {
+        if noteEditorNodeID != nil {
+            closeNoteEditor(committing: true)
+        }
+        if editingNodeID != nil {
+            commitEdit()
+        }
+        guard let node = session.store.map.node(id: nodeID) else { return }
+        session.select(nodeID)
+        sketchEditorSize = initialSketchEditorSize
+        if let existing = node.sketch {
+            // Committed payloads are origin-normalized; re-center into the
+            // big board so there is room to draw around the content.
+            sketchDraft = SketchSupport.centered(existing, in: sketchEditorSize)
+            lastCommittedSketch = existing
+        } else {
+            // First open: convert (undoable); placeholder board until content.
+            let empty = SketchSupport.emptyDrawingData()
+            session.applyQuiet(SetSketchCommand(nodeID: nodeID, sketch: empty, width: nil, height: nil))
+            sketchDraft = empty
+            lastCommittedSketch = empty
+        }
+        sketchIsDirty = false
+        drawingNodeID = nodeID
+        SketchEventGuard.editorIsActive = true
+        canvasFocused = true
+        // Drawing at deep zoom is unusable — pull in before opening.
+        if scale < 0.75 {
+            session.setCanvasScale(
+                1.0,
+                around: Point2D(x: Double(canvasSize.width / 2), y: Double(canvasSize.height / 2)),
+                width: Double(canvasSize.width),
+                height: Double(canvasSize.height)
+            )
+        }
+    }
+
+    private func closeSketchEditor(committing: Bool = true) {
+        sketchCommitTask?.cancel()
+        sketchCommitTask = nil
+        if committing {
+            commitSketchDraft()
+        }
+        drawingNodeID = nil
+        sketchIsDirty = false
+        SketchEventGuard.editorIsActive = false
+        canvasFocused = true
+    }
+
+    /// 1s debounce — each drawing burst is one undo step (note-editor parity).
+    private func scheduleSketchCommit() {
+        sketchIsDirty = true
+        sketchCommitTask?.cancel()
+        sketchCommitTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            commitSketchDraft()
+            sketchCommitTask = nil
+        }
+    }
+
+    /// Trim the draft to its stroke bounding box (+ padding), normalize to the
+    /// padding origin, and persist. Empty drawing → placeholder board.
+    private func commitSketchDraft() {
+        guard sketchIsDirty,
+              let id = drawingNodeID,
+              session.store.map.node(id: id) != nil else { return }
+        let padding = LayoutConfig().sketchTrimPadding
+        if let trimmed = SketchSupport.trim(sketchDraft, padding: padding) {
+            guard trimmed.data != lastCommittedSketch else { return }
+            session.applyQuiet(
+                SetSketchCommand(
+                    nodeID: id,
+                    sketch: trimmed.data,
+                    width: Double(trimmed.size.width),
+                    height: Double(trimmed.size.height)
+                )
+            )
+            lastCommittedSketch = trimmed.data
+        } else {
+            // All strokes erased — back to the empty placeholder.
+            let empty = SketchSupport.emptyDrawingData()
+            guard empty != lastCommittedSketch else { return }
+            session.applyQuiet(SetSketchCommand(nodeID: id, sketch: empty, width: nil, height: nil))
+            lastCommittedSketch = empty
+        }
+        sketchIsDirty = false
+    }
+
+    private var initialSketchEditorSize: CGSize {
+        CGSize(
+            width: min(max(canvasSize.width * 0.7, 480), max(320, canvasSize.width - 32)),
+            height: min(max(canvasSize.height * 0.7, 360), max(240, canvasSize.height - 32))
+        )
+    }
+
+    /// Auto-grow the board when strokes approach its edges (PKCanvasView
+    /// clips input to its frame). Grows right/down only; capped at 3 viewports.
+    private func growSketchEditorIfNeeded(_ bounds: CGRect, canvasSize: CGSize) {
+        let margin: CGFloat = 60
+        var width = sketchEditorSize.width
+        var height = sketchEditorSize.height
+        if bounds.maxX > width - margin { width = bounds.maxX + margin }
+        if bounds.maxY > height - margin { height = bounds.maxY + margin }
+        width = min(width, max(320, canvasSize.width * 3))
+        height = min(height, max(240, canvasSize.height * 3))
+        if width != sketchEditorSize.width || height != sketchEditorSize.height {
+            sketchEditorSize = CGSize(width: width, height: height)
+        }
+    }
+
+    /// Large borderless drawing surface centered on the node (clamped into the
+    /// viewport) with a compact tool strip. Esc / Done / scrim tap commits and
+    /// closes; the node then shows the trimmed, centered content.
+    @ViewBuilder
+    private func sketchEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
+        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        let editorW = min(sketchEditorSize.width, max(320, viewSize.width - 32))
+        let editorH = min(sketchEditorSize.height, max(240, viewSize.height - 64))
+        let centerX = min(max(frame.midX, editorW / 2 + 16), viewSize.width - editorW / 2 - 16)
+        let centerY = min(max(frame.midY, editorH / 2 + 16), viewSize.height - editorH / 2 - 16)
+
+        SketchEditorView(
+            drawingData: $sketchDraft,
+            tool: $sketchTool,
+            inkColor: $sketchInkColor,
+            onStrokeChange: { scheduleSketchCommit() },
+            onBoundsChange: { bounds in
+                growSketchEditorIfNeeded(bounds, canvasSize: sketchEditorSize)
+            },
+            onDone: { closeSketchEditor() }
+        )
+        .frame(width: editorW, height: editorH + 36)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1.5)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 10, y: 2)
+        .position(x: centerX, y: centerY)
+        .onExitCommand { closeSketchEditor() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("sketchEditor")
+    }
+
     private func viewFrame(for mapFrame: Rect2D, viewSize: CGSize) -> CGRect {
         let x = mapFrame.x * Double(scale) + Double(viewSize.width) / 2 + Double(offset.width)
         let y = mapFrame.y * Double(scale) + Double(viewSize.height) / 2 + Double(offset.height)
@@ -1227,6 +1451,12 @@ struct MapCanvasView: View {
         guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
         if noteEditorNodeID == nodeID, noteEditorPlacement == .inPlace {
             closeNoteEditor()
+            return
+        }
+        // Sketch node: "editing" means drawing, not renaming (rename stays in
+        // the context menu / inspector).
+        if let node = session.store.map.node(id: nodeID), node.sketch != nil {
+            openSketchEditor(nodeID: nodeID)
             return
         }
         if let node = session.store.map.node(id: nodeID), hasMarkdownBody(node) {
@@ -1511,6 +1741,7 @@ extension Notification.Name {
     static let swiftMindToggleNoteEditor = Notification.Name("swiftMindToggleNoteEditor")
     static let swiftMindEditNoteInPlace = Notification.Name("swiftMindEditNoteInPlace")
     static let swiftMindToggleNoteExpansion = Notification.Name("swiftMindToggleNoteExpansion")
+    static let swiftMindToggleSketch = Notification.Name("swiftMindToggleSketch")
 }
 
 private extension Notification.Name {

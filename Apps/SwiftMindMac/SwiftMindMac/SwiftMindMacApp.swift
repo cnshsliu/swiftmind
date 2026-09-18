@@ -286,6 +286,12 @@ private struct SessionNodeCommands: View {
         .keyboardShortcut("e", modifiers: [.command, .option])
         .disabled(session == nil || (session?.isBrainMode ?? false))
 
+        Button("Sketch") {
+            NotificationCenter.default.post(name: .swiftMindToggleSketch, object: nil)
+        }
+        .keyboardShortcut("d", modifiers: [.command, .shift])
+        .disabled(session == nil || (session?.isBrainMode ?? false))
+
         Divider()
 
         Button(pinMenuTitle) {

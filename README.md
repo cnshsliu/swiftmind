@@ -123,7 +123,8 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 | Pinch | Zoom |
 | **⌘ + scroll** | Zoom around the pointer |
 | Two-finger scroll | Pan |
-| Double-click node | Rename title, or edit markdown on the node if it has a note |
+| Double-click node | Rename title, edit markdown on the node if it has a note, or draw if it's a sketch node |
+| **D** (or ⇧⌘D) | Convert the selected node into a **sketch** and draw in a large borderless board; `Esc` commits and the node shows the drawing trimmed to its content |
 | Click node | Select |
 | **Drag text/URL/file/image in** from any app | Add node(s) — drop on a node = child of it; empty canvas = child of selection pinned at the drop point |
 

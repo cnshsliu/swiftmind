@@ -19,6 +19,8 @@
   {"op": "add-child", "parent": "n_help_editing", "id": "n_help_edit_clip", "text": "⌘C/⌘X/⌘V copy whole subtrees"},
   {"op": "set-note", "id": "n_help_edit_clip", "markdown": "Paste is smart:\n\n- Markdown bullets → nested nodes\n- A URL → a link node\n- An image → embedded in the note\n- HTML from other apps → plain text\n\nEvery paste is one undo step."},
   {"op": "add-child", "parent": "n_help_editing", "id": "n_help_edit_drop", "text": "Drop text, URLs, images or files right onto the canvas"},
+  {"op": "add-child", "parent": "n_help_editing", "id": "n_help_edit_sketch", "text": "D turns a node into a sketch you draw by hand"},
+  {"op": "set-note", "id": "n_help_edit_sketch", "markdown": "Select a node and press `D` (or ⇧⌘D): it becomes a **sketch node** with a large borderless drawing board. Draw with the mouse (Apple Pencil on iPad, coming later), erase, undo — `Esc` or **Done** commits and the node shrinks to exactly your drawing, trimmed and centered. Double-click a sketch node to draw more; right-click to remove the sketch."},
 
   {"op": "add-child", "parent": "__ROOT__", "id": "n_help_navigate", "text": "Navigate", "side": "right"},
   {"op": "add-child", "parent": "n_help_navigate", "id": "n_help_nav_keys", "text": "Arrows or hjkl move spatially · f = follow mode"},

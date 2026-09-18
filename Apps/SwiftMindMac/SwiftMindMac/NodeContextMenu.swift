@@ -30,6 +30,18 @@ struct NodeContextMenu: View {
             session.select(nodeID)
             NotificationCenter.default.post(name: .swiftMindToggleNoteEditor, object: nil)
         }
+        if let node, node.sketch != nil {
+            Button("Edit Sketch") {
+                NotificationCenter.default.post(name: .swiftMindToggleSketch, object: nodeID)
+            }
+            Button("Remove Sketch", role: .destructive) {
+                session.apply(SetSketchCommand(nodeID: nodeID, sketch: nil, width: nil, height: nil))
+            }
+        } else {
+            Button("Convert to Sketch") {
+                NotificationCenter.default.post(name: .swiftMindToggleSketch, object: nodeID)
+            }
+        }
         if let node, !node.children.isEmpty {
             Button(node.isFolded ? "Unfold" : "Fold") {
                 session.select(nodeID)

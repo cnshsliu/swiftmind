@@ -514,6 +514,67 @@ extension SwiftMindMacUITests {
         expectation(for: hasSelection, evaluatedWith: selected)
         waitForExpectations(timeout: 5)
     }
+
+    // MARK: - Sketch (drawing) node
+
+    /// D opens the large borderless sketch editor on the selected node;
+    /// Esc commits and closes. Drawing a stroke via a coordinate drag
+    /// persists (the editor reopens with content after close).
+    func testSketchHotkeyDrawEscapeRoundTrip() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "D should open the sketch editor")
+
+        // Draw a stroke (coordinate drag = mouse draw) with window-relative
+        // normalized coordinates — absolute frames can resolve to infinity.
+        // The board covers ~70% of the window centered on the selected node.
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.6))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.4))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(editor.exists, "Esc should commit and close the sketch editor")
+
+        // Reopen: the committed drawing loads back into the board.
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "D should reopen the sketch editor")
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    func testSketchEditorGuardsCanvasKeys() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        // Note-editor hotkey must not fire while the sketch editor is open.
+        app.typeKey(.init("e"), modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(element("noteEditor").exists, "E must not open the note editor while sketching")
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(editor.exists)
+    }
+
+    func testSketchShiftCommandDMenuShortcut() throws {
+        focusCanvasWithSelection()
+
+        // ⇧⌘D is the Node > Sketch menu key equivalent.
+        app.typeKey("d", modifierFlags: [.command, .shift])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "⇧⌘D should open the sketch editor")
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(editor.exists)
+    }
 }
 
 

@@ -8,6 +8,24 @@ import SwiftMindCore
 enum SketchSupport {
     private static let cache = NSCache<NSString, NSImage>()
 
+    /// Translates strokes so the content center lands at `size`'s center —
+    /// used when loading a committed (origin-normalized) sketch into the
+    /// large editor. Trim on commit re-normalizes, so the offset is view-only.
+    static func centered(_ data: Data, in size: CGSize) -> Data {
+        guard let drawing = try? PKDrawing(data: data) else { return data }
+        let bounds = drawing.bounds
+        guard !bounds.isNull, !bounds.isEmpty, !bounds.isInfinite else { return data }
+        let transform = CGAffineTransform(
+            translationX: size.width / 2 - bounds.midX,
+            y: size.height / 2 - bounds.midY
+        )
+        let strokes = drawing.strokes.map { stroke in
+            PKStroke(ink: stroke.ink, path: stroke.path, transform: transform)
+        }
+        return PKDrawing(strokes: strokes).dataRepresentation()
+    }
+
+
     static func emptyDrawingData() -> Data {
         PKDrawing().dataRepresentation()
     }

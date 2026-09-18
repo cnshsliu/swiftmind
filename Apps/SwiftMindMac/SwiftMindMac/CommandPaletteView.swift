@@ -88,6 +88,10 @@ enum PaletteBuilder {
                 NotificationCenter.default.post(name: .swiftMindToggleNoteEditor, object: nil)
                 dismiss()
             })
+            items.append(PaletteItem(id: "toggle-sketch", title: "Sketch", subtitle: "D", systemImage: "scribble") {
+                NotificationCenter.default.post(name: .swiftMindToggleSketch, object: nil)
+                dismiss()
+            })
         }
 
         items.append(PaletteItem(id: "undo", title: "Undo", subtitle: "⌘Z", systemImage: "arrow.uturn.backward") {
