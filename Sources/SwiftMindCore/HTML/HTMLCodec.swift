@@ -186,6 +186,15 @@ public enum HTMLCodec {
             out += "<div class=\"node-note\" hidden=\"hidden\">\(escapeText(node.noteMarkdown))</div>\n"
         }
 
+        if let sketch = node.sketch {
+            // Opaque PKDrawing payload (base64 never needs XML escaping)
+            // followed by the trimmed board size: "<base64>|<w>|<h>".
+            let w = node.sketchWidth.map { formatNumber($0) } ?? ""
+            let h = node.sketchHeight.map { formatNumber($0) } ?? ""
+            out += pad + "  "
+            out += "<div class=\"node-sketch\" hidden=\"hidden\">\(sketch.base64EncodedString())|\(w)|\(h)</div>\n"
+        }
+
         if !node.attributes.isEmpty {
             out += pad + "  <ul class=\"node-attrs\" hidden=\"hidden\">\n"
             for attr in node.attributes {
@@ -322,6 +331,8 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var capturingTitle = false
     private var capturingNodeTitle = false
     private var capturingNote = false
+    /// True while inside `<div class="node-sketch">`.
+    private var capturingSketch = false
     /// True while inside `<ul class="node-links">` so link `<li>`s are not tree nodes.
     private var inLinksList = false
     /// True while inside `<ul class="node-attrs">`.
@@ -332,11 +343,26 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var titleBuffer = ""
     private var nodeTitleBuffer = ""
     private var noteBuffer = ""
+    private var sketchBuffer = ""
 
     private static func classTokens(_ attributeDict: [String: String]) -> [String] {
         (attributeDict["class"] ?? "")
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
+    }
+
+    /// Parses "<base64>|<w>|<h>". Returns nil for empty or corrupted payloads.
+    private static func parseSketch(_ buffer: String) -> (data: Data, width: Double?, height: Double?)? {
+        let parts = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "|", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard parts.count == 3, let data = Data(base64Encoded: parts[0]), !data.isEmpty else {
+            return nil
+        }
+        let width = Double(parts[1])
+        let height = Double(parts[2])
+        guard width != nil, height != nil else { return nil }
+        return (data, width, height)
     }
 
     private static func parseFilter(from attributeDict: [String: String]) -> MapFilter? {
@@ -576,6 +602,10 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 capturingNote = true
                 noteBuffer = ""
             }
+            if classes.contains("node-sketch") {
+                capturingSketch = true
+                sketchBuffer = ""
+            }
 
         default:
             break
@@ -591,6 +621,9 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
         }
         if capturingNote {
             noteBuffer += string
+        }
+        if capturingSketch {
+            sketchBuffer += string
         }
     }
 
@@ -620,6 +653,15 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 capturingNote = false
                 if !nodeStack.isEmpty {
                     nodeStack[nodeStack.count - 1].noteMarkdown = noteBuffer
+                }
+            }
+            if capturingSketch {
+                capturingSketch = false
+                // "<base64>|<w>|<h>" — corrupted payloads degrade to nil (file still loads).
+                if !nodeStack.isEmpty, let sketch = Self.parseSketch(sketchBuffer) {
+                    nodeStack[nodeStack.count - 1].sketch = sketch.data
+                    nodeStack[nodeStack.count - 1].sketchWidth = sketch.width
+                    nodeStack[nodeStack.count - 1].sketchHeight = sketch.height
                 }
             }
 

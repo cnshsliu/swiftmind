@@ -1,7 +1,15 @@
+import Foundation
+
 public struct Node: Identifiable, Equatable, Sendable, Codable {
     public var id: NodeID
     public var text: String
     public var noteMarkdown: String
+    /// Opaque PencilKit PKDrawing payload (node content IS a sketch). nil = normal text node.
+    /// Normalized so trimmed content starts at the trim-padding origin. Core never decodes it.
+    public var sketch: Data?
+    /// Trimmed content width/height (incl. trim padding) in board points; nil until content exists.
+    public var sketchWidth: Double?
+    public var sketchHeight: Double?
     public var links: [NodeLink]
     public var icons: [NodeIcon]
     public var attributes: [NodeAttribute]
@@ -21,6 +29,9 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         id: NodeID = .generate(),
         text: String,
         noteMarkdown: String = "",
+        sketch: Data? = nil,
+        sketchWidth: Double? = nil,
+        sketchHeight: Double? = nil,
         links: [NodeLink] = [],
         icons: [NodeIcon] = [],
         attributes: [NodeAttribute] = [],
@@ -36,6 +47,9 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.id = id
         self.text = text
         self.noteMarkdown = noteMarkdown
+        self.sketch = sketch
+        self.sketchWidth = sketchWidth
+        self.sketchHeight = sketchHeight
         self.links = links
         self.icons = icons
         self.attributes = attributes

@@ -14,6 +14,14 @@ public struct LayoutConfig: Equatable, Sendable {
     public var expandedNoteLineHeight: Double = 20
     /// Expanded cards never grow taller than this; the view clips overflow.
     public var expandedNoteMaxHeight: Double = 400
+    /// Whitespace kept around trimmed sketch strokes (board points).
+    public var sketchTrimPadding: Double = 8
+    /// Lower clamp for a trimmed sketch board (tiny content still reads as a node).
+    public var sketchMinSize: Double = 40
+    /// Upper clamp for a sketch board (runaway drawings never explode the layout).
+    public var sketchMaxSize: Double = 1000
+    /// Optional title strip above a sketch board.
+    public var sketchTitleLineHeight: Double = 20
 
     public init() {}
 
@@ -28,7 +36,11 @@ public struct LayoutConfig: Equatable, Sendable {
         badgeReserve: Double = 12,
         expandedNoteWidth: Double = 360,
         expandedNoteLineHeight: Double = 20,
-        expandedNoteMaxHeight: Double = 400
+        expandedNoteMaxHeight: Double = 400,
+        sketchTrimPadding: Double = 8,
+        sketchMinSize: Double = 40,
+        sketchMaxSize: Double = 1000,
+        sketchTitleLineHeight: Double = 20
     ) {
         self.horizontalGap = horizontalGap
         self.verticalGap = verticalGap
@@ -41,5 +53,9 @@ public struct LayoutConfig: Equatable, Sendable {
         self.expandedNoteWidth = expandedNoteWidth
         self.expandedNoteLineHeight = expandedNoteLineHeight
         self.expandedNoteMaxHeight = expandedNoteMaxHeight
+        self.sketchTrimPadding = sketchTrimPadding
+        self.sketchMinSize = sketchMinSize
+        self.sketchMaxSize = sketchMaxSize
+        self.sketchTitleLineHeight = sketchTitleLineHeight
     }
 }

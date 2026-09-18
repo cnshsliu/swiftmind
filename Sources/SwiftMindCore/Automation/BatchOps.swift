@@ -6,6 +6,8 @@ public enum MapOp: Equatable, Sendable {
     case addSibling(siblingID: NodeID, newNodeID: NodeID, text: String)
     case setText(nodeID: NodeID, text: String)
     case setNote(nodeID: NodeID, markdown: String)
+    /// Opaque PKDrawing payload; nil removes the sketch.
+    case setSketch(nodeID: NodeID, data: Data?, width: Double?, height: Double?)
     /// Empty value removes the attribute.
     case setAttribute(nodeID: NodeID, name: String, value: String)
     /// nil or empty formula clears it.
@@ -24,6 +26,7 @@ public enum MapOp: Equatable, Sendable {
         case .addSibling: return "add-sibling"
         case .setText: return "set-text"
         case .setNote: return "set-note"
+        case .setSketch: return "set-sketch"
         case .setAttribute: return "set-attr"
         case .setFormula: return "set-formula"
         case .setFolded(_, let folded): return folded ? "fold" : "unfold"
@@ -84,7 +87,7 @@ extension MapOp {
         switch self {
         case .addChild(_, let newNodeID, _, _): return [newNodeID]
         case .addSibling(_, let newNodeID, _): return [newNodeID]
-        case .setText(let id, _), .setNote(let id, _), .setAttribute(let id, _, _),
+        case .setText(let id, _), .setNote(let id, _), .setSketch(let id, _, _, _), .setAttribute(let id, _, _),
              .setFormula(let id, _), .setFolded(let id, _), .setNoteExpanded(let id, _),
              .setPin(let id, _), .setLinks(let id, _):
             return [id]
@@ -105,6 +108,8 @@ extension MapOp {
             return SetTextCommand(nodeID: nodeID, newText: text)
         case let .setNote(nodeID, markdown):
             return SetNoteCommand(nodeID: nodeID, noteMarkdown: markdown)
+        case let .setSketch(nodeID, data, width, height):
+            return SetSketchCommand(nodeID: nodeID, sketch: data, width: width, height: height)
         case let .setAttribute(nodeID, name, value):
             if value.isEmpty {
                 guard let node = map.node(id: nodeID) else {
@@ -135,7 +140,7 @@ extension MapOp {
 
 extension MapOp: Codable {
     private enum CodingKeys: String, CodingKey {
-        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index, links
+        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index, links, data, w, h
     }
 
     private enum WireError: Error, CustomStringConvertible, LocalizedError {
@@ -204,6 +209,19 @@ extension MapOp: Codable {
             self = .setText(nodeID: try nodeID(.id), text: try string(.text))
         case "set-note":
             self = .setNote(nodeID: try nodeID(.id), markdown: try string(.markdown))
+        case "set-sketch":
+            let sketchData: Data?
+            if let base64 = try c.decodeIfPresent(String.self, forKey: .data) {
+                sketchData = Data(base64Encoded: base64)
+            } else {
+                sketchData = nil
+            }
+            self = .setSketch(
+                nodeID: try nodeID(.id),
+                data: sketchData,
+                width: try c.decodeIfPresent(Double.self, forKey: .w),
+                height: try c.decodeIfPresent(Double.self, forKey: .h)
+            )
         case "set-attr":
             self = .setAttribute(
                 nodeID: try nodeID(.id),
@@ -274,6 +292,13 @@ extension MapOp: Codable {
         case let .setNote(nodeID, markdown):
             try c.encode(nodeID.rawValue, forKey: .id)
             try c.encode(markdown, forKey: .markdown)
+        case let .setSketch(nodeID, data, width, height):
+            try c.encode(nodeID.rawValue, forKey: .id)
+            if let data {
+                try c.encode(data.base64EncodedString(), forKey: .data)
+            }
+            try c.encodeIfPresent(width, forKey: .w)
+            try c.encodeIfPresent(height, forKey: .h)
         case let .setAttribute(nodeID, name, value):
             try c.encode(nodeID.rawValue, forKey: .id)
             try c.encode(name, forKey: .name)

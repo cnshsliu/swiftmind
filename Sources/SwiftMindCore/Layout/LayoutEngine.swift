@@ -88,6 +88,22 @@ public struct LayoutEngine: Sendable {
 
     private func measure(_ node: Node, sheet: StyleSheet) -> (width: Double, height: Double) {
         let style = StyleResolver.resolve(node: node, sheet: sheet)
+        if node.sketch != nil {
+            // Sketch node: sized from the trimmed content board (clamped),
+            // plus an optional title strip. Sketch wins over the note card.
+            let titleH = node.text.isEmpty ? 0 : config.sketchTitleLineHeight
+            let boardW: Double
+            let boardH: Double
+            if let w = node.sketchWidth, let h = node.sketchHeight, w > 0, h > 0 {
+                boardW = min(config.sketchMaxSize, max(config.sketchMinSize, w))
+                boardH = min(config.sketchMaxSize, max(config.sketchMinSize, h))
+            } else {
+                // No content yet (or cleared): minimal placeholder board.
+                boardW = config.sketchMinSize
+                boardH = config.sketchMinSize
+            }
+            return (boardW + config.paddingX * 2, 16 + titleH + boardH)
+        }
         if node.isNoteExpanded {
             // Deterministic estimate (core stays UI-free): one line per
             // markdown line (images count as 8 lines, block math as its
@@ -367,6 +383,13 @@ public struct LayoutEngine: Sendable {
         edges.append(EdgeVisual(from: parent.id, to: child.id, fromPoint: fromPt, toPoint: toPt))
     }
 
+    /// Trimmed sketch board size for the canvas render rect; nil while empty.
+    private func sketchSize(of node: Node) -> Point2D? {
+        guard node.sketch != nil,
+              let w = node.sketchWidth, let h = node.sketchHeight, w > 0, h > 0 else { return nil }
+        return Point2D(x: w, y: h)
+    }
+
     private func appendNode(
         _ node: Node,
         frame: Rect2D,
@@ -392,7 +415,9 @@ public struct LayoutEngine: Sendable {
                 iconIDs: node.icons.map(\.id),
                 isPinned: node.positionPin != nil,
                 isHighlighted: isHighlighted(node, filter: filter, graph: graph),
-                isNoteExpanded: node.isNoteExpanded
+                isNoteExpanded: node.isNoteExpanded && node.sketch == nil,
+                hasSketch: node.sketch != nil,
+                sketchSize: sketchSize(of: node)
             )
         )
     }

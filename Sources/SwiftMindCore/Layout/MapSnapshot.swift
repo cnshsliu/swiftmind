@@ -52,6 +52,10 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
     public var isHighlighted: Bool
     /// True when the source node renders its note as a markdown card.
     public var isNoteExpanded: Bool
+    /// True when the source node's content is a sketch (drawing board).
+    public var hasSketch: Bool
+    /// Trimmed sketch board size (board points); nil while the sketch is empty.
+    public var sketchSize: Point2D?
 
     public init(
         id: NodeID,
@@ -66,7 +70,9 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         iconIDs: [String] = [],
         isPinned: Bool = false,
         isHighlighted: Bool = false,
-        isNoteExpanded: Bool = false
+        isNoteExpanded: Bool = false,
+        hasSketch: Bool = false,
+        sketchSize: Point2D? = nil
     ) {
         self.id = id
         self.text = text
@@ -81,6 +87,8 @@ public struct NodeVisual: Equatable, Sendable, Identifiable {
         self.isPinned = isPinned
         self.isHighlighted = isHighlighted
         self.isNoteExpanded = isNoteExpanded
+        self.hasSketch = hasSketch
+        self.sketchSize = sketchSize
     }
 }
 
