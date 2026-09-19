@@ -501,6 +501,20 @@ extension SwiftMindMacUITests {
         return Int(digits) ?? 0
     }
 
+    /// Node count after the label has caught up with recent store changes
+    /// (the count label can lag the selection label by a runloop tick).
+    func settledNodeCount() -> Int {
+        var last = nodeCount()
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            let current = nodeCount()
+            if current == last { return current }
+            last = current
+        }
+        return last
+    }
+
     func focusCanvasWithSelection() {
         let canvas = element("mapCanvas")
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "map canvas should exist")
@@ -574,6 +588,75 @@ extension SwiftMindMacUITests {
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         XCTAssertFalse(editor.exists)
+    }
+
+    /// D on an empty node scribbles on that node directly — no extra child.
+    func testSketchOnEmptyNodeStaysInPlace() throws {
+        focusCanvasWithSelection()
+        let before = settledNodeCount()
+
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "D on an empty node should open the editor in place")
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(nodeCount(), before, "Scribbling an empty node must not create a child")
+    }
+
+    /// D on a titled node first adds a child, then scribbles on that child.
+    func testSketchOnTitledNodeCreatesChild() throws {
+        focusCanvasWithSelection()
+        let before = settledNodeCount()
+
+        // Give the selected node a title: Return renames, type, Return commits.
+        app.typeKey(.return, modifierFlags: [])
+        app.typeText("titled")
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(nodeCount(), before, "Renaming must not change the node count")
+
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "D on a titled node should open the editor")
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(nodeCount(), before + 1, "Scribbling a titled node must add a child to draw on")
+
+        // Undo removes the sketch board, then the child.
+        app.typeKey("z", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        app.typeKey("z", modifierFlags: .command)
+        let restored = NSPredicate { _, _ in self.nodeCount() == before }
+        expectation(for: restored, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(nodeCount(), before, "⌘Z twice should remove the child again")
+    }
+
+    /// D on a node that already holds a sketch reopens that sketch in place.
+    func testSketchOnSketchedNodeEditsInPlace() throws {
+        focusCanvasWithSelection()
+        let before = settledNodeCount()
+
+        // Open + draw + close: the node now owns a committed sketch.
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.6))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.4))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        // Re-invoke: same node, no new child.
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "D on a sketched node should reopen its board")
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(nodeCount(), before, "Re-editing a sketch must not create a child")
     }
 }
 

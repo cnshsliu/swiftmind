@@ -430,7 +430,7 @@ struct MapCanvasView: View {
             guard editingNodeID == nil, !session.isBrainMode else { return }
             if let id = note.object as? NodeID {
                 session.select(id)
-                openSketchEditor(nodeID: id)
+                beginSketch(on: id)
             } else {
                 toggleSketchMode()
             }
@@ -1266,7 +1266,36 @@ struct MapCanvasView: View {
         }
         guard let primary = session.store.selection.primary,
               session.store.map.node(id: primary) != nil else { return }
-        openSketchEditor(nodeID: primary)
+        beginSketch(on: primary)
+    }
+
+    /// Scribble target: empty node takes the board itself; a node with
+    /// content gets a fresh child to draw on so nothing is displaced.
+    private func beginSketch(on nodeID: NodeID) {
+        guard let node = session.store.map.node(id: nodeID) else { return }
+        if nodeHasSketchContent(node) || nodeIsEmpty(node) {
+            openSketchEditor(nodeID: nodeID)
+        } else {
+            let newID = NodeID.generate()
+            session.apply(InsertChildCommand(parentID: nodeID, newNodeID: newID, text: ""))
+            openSketchEditor(nodeID: newID)
+        }
+    }
+
+    private func nodeHasSketchContent(_ node: Node) -> Bool {
+        guard let sketch = node.sketch else { return false }
+        return sketch != SketchSupport.emptyDrawingData()
+    }
+
+    /// Default title every insert path gives a new node (⌘T, toolbar, palette,
+    /// context menu) — a node the user hasn't typed in yet counts as empty.
+    private static let untitledNodeText = "New Idea"
+
+    private func nodeIsEmpty(_ node: Node) -> Bool {
+        let text = node.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text.isEmpty || text == Self.untitledNodeText)
+            && node.noteMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !nodeHasSketchContent(node)
     }
 
     private func openSketchEditor(nodeID: NodeID) {
