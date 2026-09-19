@@ -205,22 +205,12 @@ struct MapCanvasView: View {
             .onAppear {
                 canvasSize = geo.size
                 session.rememberCanvasLayout(width: Double(geo.size.width), height: Double(geo.size.height))
-                // A viewport restored from saved preferences can strand the
-                // map entirely offscreen (one bad write poisons every launch
-                // after). If clamping has to move it more than a screenful,
-                // the saved state is garbage — reset rather than nudge.
-                let clamped = session.viewport.clampedOffset(
-                    contentBounds: session.store.snapshot().bounds,
-                    viewWidth: Double(geo.size.width),
-                    viewHeight: Double(geo.size.height)
-                )
-                let dx = abs(clamped.x - session.viewport.offset.x)
-                let dy = abs(clamped.y - session.viewport.offset.y)
-                if dx > Double(geo.size.width) || dy > Double(geo.size.height) {
-                    session.viewport = CanvasViewport()
-                } else {
-                    session.setCanvasOffset(clamped)
-                }
+                healRestoredViewport(viewSize: geo.size)
+            }
+            // Bootstrap swaps in a new session (with the saved viewport
+            // restored) AFTER this view first appeared — heal then too.
+            .onChange(of: ObjectIdentifier(session)) { _, _ in
+                healRestoredViewport(viewSize: canvasSize)
             }
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
@@ -726,6 +716,29 @@ struct MapCanvasView: View {
     private func hoveredNodeID(in snapshot: MapSnapshot) -> NodeID? {
         guard let hover = hoverLocation, canvasSize.width > 0 else { return nil }
         return hitTest(hover, snapshot: snapshot, viewSize: canvasSize)
+    }
+
+    /// A viewport restored from saved preferences can strand the map entirely
+    /// offscreen (one bad write poisons every launch after). An offset may
+    /// never exceed the content extent plus a few screens of panning —
+    /// anything beyond that is garbage: reset rather than nudge. Runs on
+    /// appear and whenever bootstrap swaps the session (the saved viewport is
+    /// restored only then). The session setters are used (not direct
+    /// assignment) so the healed state persists over the poison.
+    private func healRestoredViewport(viewSize: CGSize) {
+        guard viewSize.width > 40, viewSize.height > 40 else { return }
+        let vp = session.viewport
+        let bounds = session.store.snapshot().bounds
+        let limitX = bounds.width * vp.scale + Double(viewSize.width) * 3 + 80
+        let limitY = bounds.height * vp.scale + Double(viewSize.height) * 3 + 80
+        guard abs(vp.offset.x) > limitX || abs(vp.offset.y) > limitY else { return }
+        session.setCanvasScale(
+            1,
+            around: Point2D(x: Double(viewSize.width) / 2, y: Double(viewSize.height) / 2),
+            width: Double(viewSize.width),
+            height: Double(viewSize.height)
+        )
+        session.setCanvasOffset(Point2D(x: 0, y: 0))
     }
 
     /// Pan so the primary selection stays inside a comfortable viewport margin.
