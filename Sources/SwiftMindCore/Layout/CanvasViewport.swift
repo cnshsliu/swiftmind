@@ -90,4 +90,30 @@ public struct CanvasViewport: Equatable, Sendable {
     public mutating func pan(by delta: Point2D) {
         offset = Point2D(x: offset.x + delta.x, y: offset.y + delta.y)
     }
+
+    /// Offset clamped so the content cannot be stranded entirely offscreen.
+    ///
+    /// Defense against pathological pan/zoom input (a single glitched drag
+    /// event, or a poisoned viewport restored from saved preferences): the
+    /// center of the content bounding box — or, for content larger than the
+    /// view, the center region sized to the view — must stay on screen.
+    /// Normal panning/zooming never hits the limit.
+    public func clampedOffset(
+        contentBounds: Rect2D,
+        viewWidth: Double,
+        viewHeight: Double,
+        margin: Double = 80
+    ) -> Point2D {
+        guard viewWidth > margin * 2, viewHeight > margin * 2, scale > 0 else {
+            return offset
+        }
+        // View position of the content center = center*scale + viewSize/2 + offset;
+        // it must land inside [margin, viewSize - margin].
+        let cx = contentBounds.midX * scale + viewWidth / 2
+        let cy = contentBounds.midY * scale + viewHeight / 2
+        return Point2D(
+            x: min(viewWidth - margin - cx, max(margin - cx, offset.x)),
+            y: min(viewHeight - margin - cy, max(margin - cy, offset.y))
+        )
+    }
 }

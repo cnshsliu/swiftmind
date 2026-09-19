@@ -25,6 +25,10 @@ final class AppModel: ObservableObject {
     private var lastKnownFileHash: Int?
     private var suppressAutosave = false
     private var didBootstrap = false
+    /// Screenshot tests launch with `-uitesting`: deterministic state (fresh
+    /// bundled help map, no saved viewport) instead of whatever previous
+    /// sessions left in the shared container.
+    private let isUITesting = ProcessInfo.processInfo.arguments.contains("-uitesting")
     private let viewStateStore = ViewStateStore()
     private var viewportTask: Task<Void, Never>?
 
@@ -60,7 +64,7 @@ final class AppModel: ObservableObject {
 
         switch LaunchBehavior.current {
         case .help:
-            openHelpMap()
+            openHelpMap(fresh: isUITesting)
         case .brain:
             showBrain()
         case .last:
@@ -176,7 +180,7 @@ final class AppModel: ObservableObject {
             }
             session = DocumentSession(map: map)
             session.isBrainMode = false
-            if let saved = viewStateStore.viewport(for: map.id) {
+            if !isUITesting, let saved = viewStateStore.viewport(for: map.id) {
                 session.viewport = saved
             }
             wireSession()

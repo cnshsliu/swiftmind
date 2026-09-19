@@ -22,7 +22,17 @@ struct MapCanvasView: View {
             CGSize(width: session.viewport.offset.x, height: session.viewport.offset.y)
         }
         nonmutating set {
-            session.setCanvasOffset(Point2D(x: Double(newValue.width), y: Double(newValue.height)))
+            // Glitched drag/scroll events can deliver one huge delta; keep the
+            // content center reachable so the canvas never strands blank.
+            var candidate = session.viewport
+            candidate.offset = Point2D(x: Double(newValue.width), y: Double(newValue.height))
+            session.setCanvasOffset(
+                candidate.clampedOffset(
+                    contentBounds: session.store.snapshot().bounds,
+                    viewWidth: Double(canvasSize.width),
+                    viewHeight: Double(canvasSize.height)
+                )
+            )
         }
     }
 
@@ -195,6 +205,22 @@ struct MapCanvasView: View {
             .onAppear {
                 canvasSize = geo.size
                 session.rememberCanvasLayout(width: Double(geo.size.width), height: Double(geo.size.height))
+                // A viewport restored from saved preferences can strand the
+                // map entirely offscreen (one bad write poisons every launch
+                // after). If clamping has to move it more than a screenful,
+                // the saved state is garbage — reset rather than nudge.
+                let clamped = session.viewport.clampedOffset(
+                    contentBounds: session.store.snapshot().bounds,
+                    viewWidth: Double(geo.size.width),
+                    viewHeight: Double(geo.size.height)
+                )
+                let dx = abs(clamped.x - session.viewport.offset.x)
+                let dy = abs(clamped.y - session.viewport.offset.y)
+                if dx > Double(geo.size.width) || dy > Double(geo.size.height) {
+                    session.viewport = CanvasViewport()
+                } else {
+                    session.setCanvasOffset(clamped)
+                }
             }
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
