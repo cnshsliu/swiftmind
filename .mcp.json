@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "swiftmind": {
+      "type": "stdio",
+      "command": "/Users/lucas/.local/bin/swiftmind",
+      "args": [
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}
