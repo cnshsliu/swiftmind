@@ -25,15 +25,19 @@ struct MarkdownInsertion: Equatable {
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
     /// One-shot toolbar insertion request (3b); the editor applies it at the
-    /// caret and clears the binding.
+    /// caret and clears the binding. Used for the image picker, which lives
+    /// in the canvas so it can reuse `ClipboardService.normalizeImage`.
     @Binding var insertion: MarkdownInsertion?
     var onCancel: () -> Void
+    var onInsertImage: () -> Void = {}
+    /// XCUITest host id: `noteEditorPanel` or `noteEditorOnCard`.
+    var chromeIdentifier: String = "noteEditorPanel"
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> MarkdownEditorHost {
         let textView = MarkdownSourceTextView(frame: .zero)
         textView.onCancel = onCancel
         textView.delegate = context.coordinator
@@ -53,39 +57,88 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        // XCUITest id lives on the text area: a scroll view fully covered by
+        // its document view has no hit-testable region of its own.
+        textView.setAccessibilityIdentifier("noteEditor")
 
         let scroll = NSScrollView()
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
-        // XCUITest id lives on the text area: a scroll view fully covered by
-        // its document view has no hit-testable region of its own.
-        textView.setAccessibilityIdentifier("noteEditor")
+        scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        context.coordinator.textView = textView
-        context.coordinator.setText(text, of: textView)
+        let coord = context.coordinator
+        let toolbar = NSStackView(views: [
+            Self.toolbarButton("photo", id: "noteEditorInsertImage", help: "Insert image",
+                               target: coord, action: #selector(Coordinator.insertImageClicked)),
+            Self.toolbarButton("function", id: "noteEditorInsertMath", help: "Insert math",
+                               target: coord, action: #selector(Coordinator.insertMathClicked)),
+            Self.toolbarButton("link", id: "noteEditorInsertLink", help: "Insert link",
+                               target: coord, action: #selector(Coordinator.insertLinkClicked)),
+        ])
+        toolbar.orientation = .horizontal
+        toolbar.alignment = .centerY
+        toolbar.spacing = 4
+        toolbar.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
+        toolbar.setAccessibilityIdentifier("noteEditorToolbar")
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+
+        let host = MarkdownEditorHost()
+        host.scrollView = scroll
+        host.setAccessibilityElement(true)
+        host.setAccessibilityRole(.group)
+        host.setAccessibilityIdentifier(chromeIdentifier)
+        host.addSubview(toolbar)
+        host.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: host.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: MarkdownEditorHost.toolbarHeight),
+            scroll.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+
+        coord.textView = textView
+        coord.setText(text, of: textView)
         DispatchQueue.main.async {
-            scroll.window?.makeFirstResponder(textView)
+            host.window?.makeFirstResponder(textView)
         }
-        return scroll
+        return host
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? MarkdownSourceTextView else { return }
+    func updateNSView(_ host: MarkdownEditorHost, context: Context) {
+        guard let textView = host.scrollView.documentView as? MarkdownSourceTextView else { return }
         textView.onCancel = onCancel
+        host.setAccessibilityIdentifier(chromeIdentifier)
         context.coordinator.parent = self
         // External reset (editor open, undo/CLI/agent reload): only push when
         // the model-side text actually diverged — never on our own keystrokes.
         context.coordinator.setText(text, of: textView)
-        // Toolbar insertion (3b): after setText so a stale binding cannot
-        // overwrite the insert. Apply once, then clear — async so the
-        // binding write never happens mid view-update.
+        // Image picker (3b) lands here after NSOpenPanel; apply once.
         if let request = insertion, context.coordinator.lastAppliedInsertionID != request.id {
             context.coordinator.lastAppliedInsertionID = request.id
             textView.applyInsertion(request.payload)
             DispatchQueue.main.async { insertion = nil }
         }
+    }
+
+    private static func toolbarButton(
+        _ symbol: String, id: String, help: String, target: AnyObject, action: Selector
+    ) -> NSButton {
+        let button = NSButton()
+        button.bezelStyle = .toolbar
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)
+        button.toolTip = help
+        button.setAccessibilityIdentifier(id)
+        button.setAccessibilityLabel(help)
+        button.target = target
+        button.action = action
+        return button
     }
 
     @MainActor
@@ -100,6 +153,18 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         init(parent: MarkdownEditorView) {
             self.parent = parent
+        }
+
+        @objc func insertImageClicked() {
+            parent.onInsertImage()
+        }
+
+        @objc func insertMathClicked() {
+            textView?.applyInsertion(.math)
+        }
+
+        @objc func insertLinkClicked() {
+            textView?.applyInsertion(.link)
         }
 
         /// Push a new text into the view (no-op when unchanged) and restyle
@@ -135,6 +200,12 @@ struct MarkdownEditorView: NSViewRepresentable {
             textView.undoManager?.enableUndoRegistration()
         }
     }
+}
+
+/// Scrollable Markdown source plus the insertion toolbar (image / math / link).
+final class MarkdownEditorHost: NSView {
+    static let toolbarHeight: CGFloat = 28
+    var scrollView = NSScrollView()
 }
 
 /// The NSTextView behind `MarkdownEditorView`: Return/Tab/⌘B/⌘I typing aids

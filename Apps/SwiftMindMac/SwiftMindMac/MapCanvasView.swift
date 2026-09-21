@@ -1342,11 +1342,13 @@ struct MapCanvasView: View {
     }
 
     /// The shared editor (panel and on-card both host it).
-    private var noteEditorView: some View {
+    private func noteEditorView(chromeIdentifier: String) -> some View {
         MarkdownEditorView(
             text: $noteEditorDraft,
             insertion: $pendingNoteInsertion,
-            onCancel: { closeNoteEditor(committing: false) } // Esc
+            onCancel: { closeNoteEditor(committing: false) }, // Esc
+            onInsertImage: insertImageIntoNoteEditor,
+            chromeIdentifier: chromeIdentifier
         )
     }
 
@@ -1377,12 +1379,7 @@ struct MapCanvasView: View {
         let minCenterY = height / 2 + 16
         let maxCenterY = max(minCenterY, viewSize.height - height / 2 - 16)
         let centerY = min(max(rawCenterY, minCenterY), maxCenterY)
-        VStack(spacing: 0) {
-            noteEditorToolbar
-                .padding(.horizontal, 6)
-                .padding(.top, 4)
-            noteEditorView
-        }
+        noteEditorView(chromeIdentifier: "noteEditorPanel")
             .frame(width: width, height: height)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
             .overlay(
@@ -1400,12 +1397,7 @@ struct MapCanvasView: View {
     /// pan-for-editor — the canvas stays put.
     @ViewBuilder
     private func onCardNoteEditor(frame: CGRect) -> some View {
-        VStack(spacing: 0) {
-            noteEditorToolbar
-                .padding(.horizontal, 6)
-                .padding(.top, 4)
-            noteEditorView
-        }
+        noteEditorView(chromeIdentifier: "noteEditorOnCard")
         .frame(width: frame.width, height: frame.height)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -1415,41 +1407,6 @@ struct MapCanvasView: View {
         .shadow(color: .black.opacity(0.15), radius: 6, y: 1)
         .position(x: frame.midX, y: frame.midY)
         .accessibilityIdentifier("noteEditorOnCard")
-    }
-
-    /// Insertion helpers (3b): image / math / link at the caret. Buttons stay
-    /// keyboard-inert so the editor keeps first responder.
-    private var noteEditorToolbar: some View {
-        HStack(spacing: 2) {
-            noteEditorToolbarButton("photo", id: "noteEditorInsertImage", help: "Insert image") {
-                insertImageIntoNoteEditor()
-            }
-            noteEditorToolbarButton("function", id: "noteEditorInsertMath", help: "Insert math") {
-                pendingNoteInsertion = MarkdownInsertion(payload: .math)
-            }
-            noteEditorToolbarButton("link", id: "noteEditorInsertLink", help: "Insert link") {
-                pendingNoteInsertion = MarkdownInsertion(payload: .link)
-            }
-            Spacer()
-        }
-        .accessibilityIdentifier("noteEditorToolbar")
-    }
-
-    private func noteEditorToolbarButton(
-        _ systemImage: String, id: String, help: String, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12))
-                .frame(width: 22, height: 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .focusable(false)
-        .help(help)
-        .accessibilityLabel(help)
-        .accessibilityIdentifier(id)
     }
 
     /// Image button: file picker → data-URI markdown line at the caret
