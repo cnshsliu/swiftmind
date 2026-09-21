@@ -144,6 +144,10 @@ body {
             <span class="node-title">fix(canvas): coverage pan rule — full content at any zoom extreme</span>
             <div class="node-note" hidden="hidden">The 25%-intersection rule only guaranteed the content bbox *touched* a safe rect: at the pan extreme just a 25% band of content remained (rest blank), and the band&apos;s size varied with zoom — 放大后滚到最远处几乎全空白. Now the scroll-view rule per axis: content larger than the view must **cover** it (stops flush at the content edge); content smaller stays **inside** the window. Window resizes re-clamp too. (`8d15109`)</div>
           </li>
+          <li data-node-id="n_c11" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat: first-open auto fit + Zoom to Fit (⌘9)</span>
+            <div class="node-note" hidden="hidden">A map with no saved viewport opens zoomed to fit the whole map (≤ 1:1 — small maps stay actual size, centered; floor 25%). Already-viewed maps restore your own pan/zoom. View menu gains **Zoom to Fit (⌘9)**. `CanvasViewport.fittedToContent` + 4 core tests; help map and README updated. (`a60f860`)</div>
+          </li>
         </ul>
       </li>
     </ul>
