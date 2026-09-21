@@ -24,7 +24,7 @@ struct NodeContextMenu: View {
         Divider()
         Button("Rename") {
             session.select(nodeID)
-            NotificationCenter.default.post(name: .swiftMindEditNoteInPlace, object: nodeID)
+            NotificationCenter.default.post(name: .swiftMindRenameNode, object: nodeID)
         }
         Button("Edit Note") {
             session.select(nodeID)

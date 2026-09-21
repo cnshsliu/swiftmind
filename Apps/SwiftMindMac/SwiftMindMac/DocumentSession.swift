@@ -15,6 +15,13 @@ final class DocumentSession: ObservableObject {
     /// is open; rendered views prefer it over the stored model values.
     @Published var liveNoteDocument: (nodeID: NodeID, document: String)?
 
+    /// Per-node wheel-scroll offset for overflowing expanded note cards. The
+    /// cards stay hit-test-transparent (taps fall through to selection), so
+    /// the canvas wheel monitor drives this. View state — not persisted, not
+    /// undoable; the document snapshot detects re-commits so a stale offset
+    /// resets when the note changes.
+    @Published var noteCardScroll: [NodeID: NoteCardScrollState] = [:]
+
     /// Canvas pan/zoom. View-state only — not persisted, not undoable.
     @Published var viewport = CanvasViewport()
     /// Set when the map had no saved viewport: the canvas zooms to fit the
@@ -304,6 +311,14 @@ final class DocumentSession: ObservableObject {
     func activatePrimary() {
         onPrimaryActivate?()
     }
+}
+
+/// Scroll state of one expanded note card (see `DocumentSession.noteCardScroll`).
+struct NoteCardScrollState: Equatable {
+    var offset: CGFloat
+    /// Rendered card document at the time the offset was last set; a mismatch
+    /// means the note was re-committed and the offset resets to the top.
+    var document: String
 }
 
 extension MapCommandError {

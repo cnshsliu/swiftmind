@@ -14,7 +14,7 @@ public struct LayoutConfig: Equatable, Sendable {
     public var expandedNoteWidth: Double = 360
     /// Estimated height per markdown line in an expanded card (incl. the virtual H1 line).
     public var expandedNoteLineHeight: Double = 20
-    /// Expanded cards never grow taller than this; the view clips overflow.
+    /// Expanded cards never grow taller than this; the view scrolls overflow.
     public var expandedNoteMaxHeight: Double = 400
     /// Whitespace kept around trimmed sketch strokes (board points).
     public var sketchTrimPadding: Double = 8
@@ -25,9 +25,9 @@ public struct LayoutConfig: Equatable, Sendable {
     /// Optional title strip above a sketch board.
     public var sketchTitleLineHeight: Double = 20
     /// Display box (points) for inline media: sketch boards scale to fit inside
-    /// it, and expanded-note height estimates count one image as
-    /// `mediaMaxSize / expandedNoteLineHeight` lines. Driven by the app's
-    /// media-size setting; still clamped by `sketchMaxSize` as a hard ceiling.
+    /// it, and expanded-note height estimates count one image as one
+    /// `mediaMaxSize` row. Driven by the app's media-size setting; still
+    /// clamped by `sketchMaxSize` as a hard ceiling.
     public var mediaMaxSize: Double = 160
 
     public init() {}

@@ -412,6 +412,98 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertFalse(editor.exists, "Esc should close the note editor")
     }
 
+    /// Esc CANCELS the note editor: a debounced commit that already landed is
+    /// reverted to the editor-open baseline (the revert itself is undoable).
+    func testNoteEditorEscCancels() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        editor.click()
+        editor.typeText("cancel me")
+
+        // The debounced commit must be observable on disk first — otherwise a
+        // broken revert would pass vacuously.
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("cancel me") },
+            "the debounced note commit should autosave before Esc"
+        )
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(editor.exists, "Esc should close the note editor")
+        XCTAssertTrue(
+            waitForScratchMap { !$0.contains("cancel me") },
+            "Esc must revert the note to the pre-edit content"
+        )
+    }
+
+    /// ⌘Enter commits & closes the note editor.
+    func testNoteEditorCommandReturnCommits() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        editor.click()
+        editor.typeText("keepme")
+
+        app.typeKey(.return, modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(editor.exists, "⌘Enter should close the note editor")
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("keepme") },
+            "⌘Enter must commit the typed note"
+        )
+    }
+
+    /// Clicking blank canvas commits & closes the note editor.
+    func testNoteEditorClickAwayCommits() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        editor.click()
+        editor.typeText("clickaway")
+
+        // Tap blank canvas. The mapCanvas AX frame spans sidebar + canvas +
+        // toolbar (measured: window 1920 wide, frame 0,30 1539x972), so
+        // normalized corners land on chrome — aim past the sidebar, clear of
+        // the toolbar and the vertically centered nodes/editor.
+        let canvas = element("mapCanvas")
+        let frame = canvas.frame
+        let target = CGPoint(x: frame.midX, y: frame.minY + 140)
+        canvas.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: target.x - frame.minX, dy: target.y - frame.minY))
+            .click()
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(editor.exists, "click-away should close the note editor")
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("clickaway") },
+            "click-away must commit the typed note"
+        )
+    }
+
+    /// ⌘E ("Edit Note at Node") opens the note editor even on a title-only
+    /// node — the virtual document is just `# title`; plain title editing
+    /// stays on Return.
+    func testCommandEOpensNoteEditorOnNotelessNode() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey("e", modifierFlags: .command)
+        let editor = element("noteEditor")
+        XCTAssertTrue(
+            editor.waitForExistence(timeout: 3),
+            "⌘E should open the note editor on a noteless node"
+        )
+        // Nothing typed — Esc cancel is a no-op revert.
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
     func testZZCaptureNoteMathRendering() throws {
         focusCanvasWithSelection()
         app.typeKey(.init("e"), modifierFlags: [])
@@ -528,6 +620,24 @@ extension SwiftMindMacUITests {
         }
         expectation(for: hasSelection, evaluatedWith: selected)
         waitForExpectations(timeout: 5)
+    }
+
+    /// Reads the scratch map the app autosaves under -uitesting-scratch-map
+    /// (this runner is unsandboxed by entitlement, so the path is readable).
+    func scratchMapHTML() -> String? {
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        return try? String(contentsOfFile: scratch, encoding: .utf8)
+    }
+
+    /// Autosave is debounced — poll the scratch map until `probe` holds.
+    func waitForScratchMap(_ probe: (String) -> Bool, timeout: TimeInterval = 8) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let html = scratchMapHTML(), probe(html) { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+        return false
     }
 
     // MARK: - Sketch (drawing) node

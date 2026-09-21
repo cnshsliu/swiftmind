@@ -107,18 +107,18 @@ public struct LayoutEngine: Sendable {
             return (boardW + config.paddingX * 2, h)
         }
         if node.isNoteExpanded {
-            // Deterministic estimate (core stays UI-free): one line per
-            // markdown line (images count as mediaMaxSize/lineHeight lines,
-            // block math as its rows) plus the virtual H1 line, padded and
-            // capped. The canvas clips any overflow inside this frame.
-            let linesPerImage = max(
-                1,
-                Int((config.mediaMaxSize / config.expandedNoteLineHeight).rounded())
-            )
-            let bodyLines = node.noteMarkdown.isEmpty
+            // Deterministic estimate (core stays UI-free): each markdown
+            // line costs one row, fenced code counts its actual lines, each
+            // image reserves one mediaMaxSize row, plus the virtual H1 line —
+            // padded and capped. The card view scrolls overflow in-place.
+            let bodyHeight = node.noteMarkdown.isEmpty
                 ? 0
-                : MarkdownSegmenter.estimatedLineCount(of: node.noteMarkdown, linesPerImage: linesPerImage)
-            let estimated = Double(bodyLines + 1) * config.expandedNoteLineHeight
+                : MarkdownSegmenter.estimatedHeight(
+                    of: node.noteMarkdown,
+                    lineHeight: config.expandedNoteLineHeight,
+                    imageHeight: config.mediaMaxSize
+                )
+            let estimated = bodyHeight + config.expandedNoteLineHeight
                 + config.paddingX * 2
             var h = min(config.expandedNoteMaxHeight, max(config.nodeHeight, estimated))
             if Self.hasFormula(node) { h += config.formulaBadgeHeight }

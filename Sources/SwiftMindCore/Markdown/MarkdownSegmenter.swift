@@ -133,33 +133,66 @@ public enum MarkdownSegmenter {
         return output
     }
 
-    /// Approximate rendered line count for layout sizing: text lines count
-    /// as-is, each standalone image adds `linesPerImage`, block math counts
-    /// its rows (at least 1).
-    public static func estimatedLineCount(of markdown: String, linesPerImage: Int = 8) -> Int {
-        var count = 0
-        var afterImage = false
-        for segment in segments(in: markdown) {
-            switch segment {
-            case .text(let s):
-                var t = s
-                // A leading newline right after an image is the image line's
-                // own terminator — already accounted for by linesPerImage.
-                if afterImage, t.hasPrefix("\n") { t.removeFirst() }
-                var lines = t.split(separator: "\n", omittingEmptySubsequences: false).count
-                if t.hasSuffix("\n") { lines = max(0, lines - 1) }
-                count += lines
-                afterImage = false
-            case .math(inline: true, _):
+    /// Approximate rendered height in points for layout sizing: every
+    /// physical line costs one `lineHeight` row — fenced code blocks count
+    /// their actual line count (opener, content, closer), so image/math
+    /// syntax inside a fence is never mispriced — each standalone image
+    /// reserves one `imageHeight` media row, and a `$$…$$` block counts its
+    /// content rows (at least 1) instead of the delimiter lines.
+    public static func estimatedHeight(of markdown: String, lineHeight: Double, imageHeight: Double) -> Double {
+        guard !markdown.isEmpty else { return 0 }
+        var height = 0.0
+        var fence: Character? = nil
+        var inBlockMath = false
+        var mathRows = 0
+        var lines = markdown.components(separatedBy: "\n")
+        // A trailing newline terminates the last line; it is not a new one.
+        if lines.last?.isEmpty == true { lines.removeLast() }
+        for line in lines {
+            let leadingWhitespace = line.prefix(while: { $0 == " " || $0 == "\t" }).count
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let fenceChar = fence {
+                height += lineHeight
+                // Closing fence: ≥3 of the opener char + optional whitespace.
+                if leadingWhitespace <= 3, trimmed.count >= 3,
+                   trimmed.allSatisfy({ $0 == fenceChar }) {
+                    fence = nil
+                }
                 continue
-            case .math(inline: false, let latex):
-                count += max(1, latex.split(whereSeparator: \.isNewline).count)
-            case .image:
-                count += linesPerImage
-                afterImage = true
             }
+            if inBlockMath {
+                if trimmed == "$$" {
+                    inBlockMath = false
+                    height += Double(max(1, mathRows)) * lineHeight
+                    mathRows = 0
+                } else {
+                    mathRows += 1
+                }
+                continue
+            }
+            if leadingWhitespace <= 3, trimmed.count >= 3,
+               let first = trimmed.first, first == "`" || first == "~",
+               trimmed.allSatisfy({ $0 == first }) {
+                fence = first
+                height += lineHeight
+                continue
+            }
+            if trimmed == "$$" {
+                inBlockMath = true
+                mathRows = 0
+                continue
+            }
+            if standaloneImage(line) != nil {
+                height += imageHeight
+                continue
+            }
+            height += lineHeight
         }
-        return count
+        if inBlockMath {
+            // Unmatched opener stayed literal, but the rows still render.
+            height += Double(max(1, mathRows)) * lineHeight
+        }
+        return height
     }
 
     // MARK: - Internals

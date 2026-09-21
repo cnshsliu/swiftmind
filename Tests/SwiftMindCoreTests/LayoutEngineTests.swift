@@ -283,7 +283,7 @@ final class LayoutEngineTests: XCTestCase {
 
         let snapshot = LayoutEngine().layout(map: map)
         let card = snapshot.nodes.first { $0.id.rawValue == "n_img" }!
-        // 1 text + 8 image + 1 text + 1 H1 = 11 lines: 11*20 + 2*12 = 244
+        // 2 text rows (2*20) + 1 image media row (160) + H1 (20) + 2*12 padding
         XCTAssertEqual(card.frame.height, 244, accuracy: 0.001)
     }
 }

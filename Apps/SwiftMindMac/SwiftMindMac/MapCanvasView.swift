@@ -75,12 +75,15 @@ struct MapCanvasView: View {
     // MARK: Floating note editor
     @State private var noteEditorNodeID: NodeID?
     @State private var noteEditorDraft: String = ""
-    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is double-click / ⌘E on a markdown node.
+    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is double-click / ⌘E on any non-sketch node.
     @State private var noteEditorPlacement: NoteEditorPlacement = .floatingRight
     @State private var noteCommitTask: Task<Void, Never>?
     /// Normal-form document of the last committed model state; contentRevision
     /// changes that move the model off this baseline came from outside.
     @State private var lastCommittedNoteDocument: String?
+    /// Composed document captured when the editor opened; Esc reverts to this
+    /// (unlike `lastCommittedNoteDocument`, which advances with each commit).
+    @State private var noteEditorBaseline: String?
     /// Canvas offset stashed when the editor opened (restored on close).
     @State private var preEditorPan: CGSize?
     /// The offset we panned to; restore only if the user hasn't panned since.
@@ -132,7 +135,7 @@ struct MapCanvasView: View {
         let formulaResults = session.store.formulaResults()
         let hoverID = hoveredNodeID(in: snapshot)
 
-        GeometryReader { geo in
+        let base = GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 // Drawing only — Canvas path fills are not always hit-testable; text is.
                 // Keep pointer events on a full-size clear layer so hover/tap use the node rect.
@@ -253,8 +256,8 @@ struct MapCanvasView: View {
                     session.activatePrimary()
                     return .handled
                 }
-                // Hover target wins: select that node, then edit.
-                beginEditPreferringHover(snapshot: snapshot)
+                // Hover target wins: select that node, then edit its title.
+                beginTitleEditPreferringHover(snapshot: snapshot)
                 return .handled
             }
             .onKeyPress(.delete) {
@@ -365,6 +368,13 @@ struct MapCanvasView: View {
         .accessibilityIdentifier("mapCanvas")
         .accessibilityValue(selectedAccessibilityValue)
         .accessibilityAddTraits(.updatesFrequently)
+        return withCanvasEvents(base)
+    }
+
+    /// Selection/content revision handling, lifecycle hooks, and notification
+    /// wiring — extracted from `body` so the type-checker stays under budget.
+    private func withCanvasEvents<Content: View>(_ content: Content) -> some View {
+        content
         .onChange(of: session.selectionRevision) { _, _ in
             // After click-select, ensure canvas can receive Return/Delete.
             // Never steal focus from the note editor or the in-place editor.
@@ -420,6 +430,8 @@ struct MapCanvasView: View {
                     closeNoteEditor(committing: false)
                 }
             }
+            // Expanded-card scroll offsets die with the card or a re-commit.
+            resetStaleNoteCardScrolls()
             // New/moved nodes change layout — pan so primary stays in view.
             keepPrimaryInFrame(animated: !reduceMotion)
         }
@@ -440,7 +452,16 @@ struct MapCanvasView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasReturn)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return }
-            beginEditPreferringHover(snapshot: session.store.snapshot())
+            beginTitleEditPreferringHover(snapshot: session.store.snapshot())
+        }
+        // ⌘Enter while the note editor is open (from the key monitor).
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasCommitNoteEditor)) { _ in
+            guard noteEditorNodeID != nil else { return }
+            closeNoteEditor(committing: true)
+        }
+        // Context-menu Rename: plain title editing even on noted nodes.
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindRenameNode)) { note in
+            handleRenameNotification(note)
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasDelete)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return }
@@ -475,7 +496,20 @@ struct MapCanvasView: View {
 
     private func installKeyMonitor() {
         removeKeyMonitor()
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [session] event in
+            // ⌘Return commits & closes the open note editor — posted as a
+            // notification because this monitor holds a stale View copy, and
+            // placed before the text-editing guard because the editor's
+            // NSTextView would otherwise swallow it. (`liveNoteDocument` is
+            // non-nil exactly while the note editor is open.)
+            if (event.keyCode == 36 || event.keyCode == 76),
+               event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+               session.liveNoteDocument != nil {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .swiftMindCanvasCommitNoteEditor, object: nil)
+                }
+                return nil
+            }
             // Don't steal keys from real text editing (inspector, outline, map field).
             if let fr = event.window?.firstResponder, fr is NSTextView || fr is NSTextField {
                 return event
@@ -511,6 +545,19 @@ struct MapCanvasView: View {
                    hit === fr || hit.isDescendant(of: fr) || fr.isDescendant(of: hit) {
                     return event
                 }
+            }
+            // An expanded, overflowing note card under the pointer scrolls its
+            // content instead of panning the map (cards are hit-test-transparent,
+            // so the map's wheel monitor drives them). Non-overflowing cards
+            // fall through to the normal pan below.
+            if !event.modifierFlags.contains(.command),
+               let pointer = session.lastAnchorView,
+               let cardID = overflowingNoteCardID(at: CGPoint(x: pointer.x, y: pointer.y)) {
+                let dy = event.hasPreciseScrollingDeltas
+                    ? CGFloat(event.scrollingDeltaY)
+                    : CGFloat(event.scrollingDeltaY) * Self.wheelNotchDistance
+                scrollNoteCard(cardID, by: dy)
+                return nil
             }
             if event.modifierFlags.contains(.command) {
                 session.handleCommandScroll(
@@ -1157,24 +1204,20 @@ struct MapCanvasView: View {
     }
 
     /// Read-only rendered markdown card for an expanded node. Hit-testing is
-    /// off so canvas selection/gestures keep working through the card.
+    /// off so canvas selection/gestures keep working through the card; wheel
+    /// scrolling over an overflowing card is handled by the canvas scroll
+    /// monitor (`scrollNoteCard`), which shifts the content inside the clip.
     @ViewBuilder
     private func noteCard(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
-        let markdown = session.store.map.node(id: visual.id)?.noteMarkdown ?? ""
-        let document: String = {
-            if let live = session.liveNoteDocument, live.nodeID == visual.id {
-                return live.document
-            }
-            return NoteDocument.compose(title: visual.text, body: markdown)
-        }()
-        ScrollView(.vertical) {
-            MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-        }
-        .scrollDisabled(true) // overflow is clipped; layout height is an estimate
-        .frame(width: frame.width, height: frame.height)
+        let document = noteCardDocument(for: visual.id, fallbackTitle: visual.text)
+        let scroll = session.noteCardScroll[visual.id]?.offset ?? 0
+        MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .offset(y: -scroll)
+            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+            .clipped() // layout height is an estimate; overflow scrolls
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -1185,7 +1228,92 @@ struct MapCanvasView: View {
         .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
     }
 
-    /// Markdown editor: floating to the right (`e`) or covering the node (double-click / ⌘E).
+    /// The document a card renders: the live editor draft while editing,
+    /// otherwise the composed model document.
+    private func noteCardDocument(for id: NodeID, fallbackTitle: String) -> String {
+        if let live = session.liveNoteDocument, live.nodeID == id {
+            return live.document
+        }
+        let node = session.store.map.node(id: id)
+        return NoteDocument.compose(title: node?.text ?? fallbackTitle, body: node?.noteMarkdown ?? "")
+    }
+
+    /// Estimated rendered content height of a card's document, in view points.
+    private func noteCardContentHeight(for id: NodeID) -> CGFloat {
+        let config = session.store.layoutConfig
+        let mapPoints = MarkdownSegmenter.estimatedHeight(
+            of: noteCardDocument(for: id, fallbackTitle: ""),
+            lineHeight: config.expandedNoteLineHeight,
+            imageHeight: config.mediaMaxSize
+        )
+        return CGFloat(mapPoints) * scale
+    }
+
+    /// The expanded card under a view-space point, but only when its content
+    /// overflows the frame (otherwise the wheel keeps panning the map).
+    private func overflowingNoteCardID(at viewPoint: CGPoint) -> NodeID? {
+        let viewSize = CGSize(width: session.lastCanvasWidth, height: session.lastCanvasHeight)
+        guard viewSize.width > 40, viewSize.height > 40 else { return nil }
+        let snapshot = session.store.snapshot()
+        guard let id = hitTest(viewPoint, snapshot: snapshot, viewSize: viewSize),
+              let visual = snapshot.nodes.first(where: { $0.id == id }),
+              visual.isNoteExpanded else { return nil }
+        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        let overflow = noteCardContentHeight(for: id) - frame.height
+        return overflow > 1 ? id : nil
+    }
+
+    /// Wheel-scroll one card, clamped to [0, overflow]. Positive wheel deltas
+    /// move map content down (see the pan branch), so card scroll subtracts
+    /// them. A re-committed note (document changed) restarts from the top.
+    private func scrollNoteCard(_ id: NodeID, by deltaY: CGFloat) {
+        let viewSize = CGSize(width: session.lastCanvasWidth, height: session.lastCanvasHeight)
+        let snapshot = session.store.snapshot()
+        guard let visual = snapshot.nodes.first(where: { $0.id == id }) else { return }
+        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        let overflow = max(0, noteCardContentHeight(for: id) - frame.height)
+        guard overflow > 0 else { return }
+        let document = noteCardDocument(for: id, fallbackTitle: visual.text)
+        let current = session.noteCardScroll[id]
+        let base = current?.document == document ? current?.offset ?? 0 : 0
+        let next = min(max(0, base - deltaY), overflow)
+        session.noteCardScroll[id] = NoteCardScrollState(offset: next, document: document)
+    }
+
+    /// Card scroll offsets die with the card (collapsed or deleted) and reset
+    /// to the top when the note is re-committed (document mismatch).
+    private func resetStaleNoteCardScrolls() {
+        guard !session.noteCardScroll.isEmpty else { return }
+        var next = session.noteCardScroll
+        var changed = false
+        for (id, state) in next {
+            guard let node = session.store.map.node(id: id), node.isNoteExpanded else {
+                next.removeValue(forKey: id)
+                changed = true
+                continue
+            }
+            let document = noteCardDocument(for: id, fallbackTitle: node.text)
+            if document != state.document {
+                next[id] = NoteCardScrollState(offset: 0, document: document)
+                changed = true
+            }
+        }
+        if changed { session.noteCardScroll = next }
+    }
+
+    private func handleRenameNotification(_ note: Notification) {
+        guard !session.isBrainMode, noteEditorNodeID == nil, drawingNodeID == nil else { return }
+        let snapshot = session.store.snapshot()
+        if let id = note.object as? NodeID {
+            beginTitleEdit(nodeID: id, snapshot: snapshot)
+        } else {
+            beginTitleEditPreferringHover(snapshot: snapshot)
+        }
+    }
+
+    /// Markdown editor: floating to the right (`e`) or covering the node
+    /// (double-click / ⌘E). Esc cancels back to the editor-open baseline,
+    /// ⌘Enter and click-away commit & close.
     @ViewBuilder
     private func noteEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
@@ -1200,9 +1328,13 @@ struct MapCanvasView: View {
         let centerX: CGFloat = inPlace
             ? frame.minX + width / 2
             : frame.maxX + 16 + width / 2
-        let centerY: CGFloat = inPlace
-            ? frame.minY + height / 2
-            : frame.minY + height / 2
+        // Top-aligned with the node, but clamped into the viewport: a node
+        // near the window edge must never push the editor off-screen
+        // (unreachable = unclosable, and XCTest can't hit-test it).
+        let rawCenterY = frame.minY + height / 2
+        let minCenterY = height / 2 + 16
+        let maxCenterY = max(minCenterY, viewSize.height - height / 2 - 16)
+        let centerY = min(max(rawCenterY, minCenterY), maxCenterY)
         TextEditor(text: $noteEditorDraft)
             .font(.system(size: 13, design: .monospaced))
             .padding(8)
@@ -1216,16 +1348,12 @@ struct MapCanvasView: View {
             .position(x: centerX, y: centerY)
             .focused($noteEditorFocused)
             .focusEffectDisabled()
-            .onExitCommand { closeNoteEditor() }
+            .onExitCommand { closeNoteEditor(committing: false) }
             .onChange(of: noteEditorDraft) { _, newValue in
                 session.liveNoteDocument = (visual.id, newValue)
                 scheduleNoteCommit()
             }
             .accessibilityIdentifier("noteEditor")
-    }
-
-    private func hasMarkdownBody(_ node: Node) -> Bool {
-        !node.noteMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// `e` / ⇧⌘E: floating editor to the right of the selected node.
@@ -1255,6 +1383,7 @@ struct MapCanvasView: View {
         noteEditorNodeID = nodeID
         noteEditorDraft = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
         lastCommittedNoteDocument = noteEditorDraft
+        noteEditorBaseline = noteEditorDraft
         session.liveNoteDocument = (nodeID, noteEditorDraft)
         if placement == .floatingRight {
             stashAndPanForEditor()
@@ -1262,15 +1391,24 @@ struct MapCanvasView: View {
         DispatchQueue.main.async { noteEditorFocused = true }
     }
 
+    /// `committing == false` is the Esc/cancel path: instead of committing the
+    /// draft, the node is reverted to the editor-open baseline (an undoable
+    /// command when the debounced commits already moved the model). A vanished
+    /// node simply closes, as before.
     private func closeNoteEditor(committing: Bool = true) {
         noteCommitTask?.cancel()
         noteCommitTask = nil
+        let closingNodeID = noteEditorNodeID
         if committing {
             commitNoteEditorDraft()
         }
         noteEditorNodeID = nil
         session.liveNoteDocument = nil
         lastCommittedNoteDocument = nil
+        if !committing {
+            revertNoteToBaseline(nodeID: closingNodeID)
+        }
+        noteEditorBaseline = nil
         // Restore the pre-editor pan only if the user hasn't panned since.
         if let saved = preEditorPan, let target = editorPanTarget, offset == target {
             let apply = { offset = saved; panBase = saved }
@@ -1281,6 +1419,24 @@ struct MapCanvasView: View {
         preEditorPan = nil
         editorPanTarget = nil
         canvasFocused = true
+    }
+
+    /// Esc cancel: restore the composed document captured at editor-open as
+    /// one undoable CompositeAgentCommand. No-op when the model still matches
+    /// the baseline (no debounced commit landed) or the node is gone.
+    private func revertNoteToBaseline(nodeID: NodeID?) {
+        guard let id = nodeID,
+              let baseline = noteEditorBaseline,
+              let node = session.store.map.node(id: id) else { return }
+        let modelDoc = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+        guard modelDoc != baseline else { return }
+        let (title, body) = NoteDocument.split(baseline)
+        var ops: [MapOp] = []
+        if let title, title != node.text { ops.append(.setText(nodeID: id, text: title)) }
+        if body != node.noteMarkdown { ops.append(.setNote(nodeID: id, markdown: body)) }
+        if !ops.isEmpty {
+            session.applyQuiet(CompositeAgentCommand(ops: ops))
+        }
     }
 
     /// Pan the canvas left so the editor fits right of the node.
@@ -1529,7 +1685,7 @@ struct MapCanvasView: View {
         beginEdit(nodeID: id, snapshot: snapshot)
     }
 
-    /// Return: prefer node under pointer; else primary selection.
+    /// ⌘E / double-click: prefer node under pointer; else primary selection.
     private func beginEditPreferringHover(snapshot: MapSnapshot) {
         if let hover = hoverLocation,
            let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
@@ -1544,24 +1700,40 @@ struct MapCanvasView: View {
         beginEdit(nodeID: id, snapshot: snapshot)
     }
 
-    private func beginEdit(nodeID: NodeID, snapshot: MapSnapshot) {
-        guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
-        if noteEditorNodeID == nodeID, noteEditorPlacement == .inPlace {
-            closeNoteEditor()
+    /// Return / Rename: prefer node under pointer; else primary selection.
+    private func beginTitleEditPreferringHover(snapshot: MapSnapshot) {
+        if let hover = hoverLocation,
+           let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
+            beginTitleEdit(nodeID: id, snapshot: snapshot)
             return
         }
-        // Sketch node: "editing" means drawing, not renaming (rename stays in
-        // the context menu / inspector).
+        guard let id = session.store.selection.primary else { return }
+        beginTitleEdit(nodeID: id, snapshot: snapshot)
+    }
+
+    /// ⌘E / "Edit Note at Node" / double-click: honest note editing. Sketch
+    /// nodes route to the drawing board; every other node opens the note
+    /// editor in place — even with an empty note (the virtual document is
+    /// just `# title`). Plain title editing stays on Return / Rename.
+    private func beginEdit(nodeID: NodeID, snapshot: MapSnapshot) {
+        guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
         if let node = session.store.map.node(id: nodeID), node.sketch != nil {
             openSketchEditor(nodeID: nodeID)
             return
         }
-        if let node = session.store.map.node(id: nodeID), hasMarkdownBody(node) {
-            openNoteEditor(nodeID: nodeID, placement: .inPlace)
+        openNoteEditor(nodeID: nodeID, placement: .inPlace)
+    }
+
+    /// Return / context-menu Rename: the plain title field. Sketch nodes have
+    /// no inline title editor — "editing" them means drawing.
+    private func beginTitleEdit(nodeID: NodeID, snapshot: MapSnapshot) {
+        guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
+        if let node = session.store.map.node(id: nodeID), node.sketch != nil {
+            openSketchEditor(nodeID: nodeID)
             return
         }
         if noteEditorNodeID != nil {
-            closeNoteEditor()
+            closeNoteEditor(committing: true)
         }
         guard editingNodeID == nil,
               let visual = snapshot.nodes.first(where: { $0.id == nodeID }) else {
@@ -1742,7 +1914,13 @@ struct MapCanvasView: View {
     private func tapSelectGesture(snapshot: MapSnapshot) -> some Gesture {
         SpatialTapGesture()
             .onEnded { event in
-                // Tap outside the editor commits; then apply selection.
+                // Click-away commits & closes the note editor; the tap then
+                // proceeds as a normal selection tap. Taps on the editor
+                // itself never reach here (the overlay owns its hit area).
+                if noteEditorNodeID != nil {
+                    closeNoteEditor(committing: true)
+                }
+                // Tap outside the title field commits; then apply selection.
                 if editingNodeID != nil {
                     let editFrame: CGRect? = {
                         guard let id = editingNodeID,
@@ -1759,16 +1937,11 @@ struct MapCanvasView: View {
                 }
                 if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
                     session.select(id)
-                    // Never steal keyboard focus from the open note editor.
-                    if noteEditorNodeID == nil {
-                        canvasFocused = true
-                    }
+                    canvasFocused = true
                 } else {
                     // Click empty canvas: clear focus, still take keyboard focus.
                     session.clearSelection()
-                    if noteEditorNodeID == nil {
-                        canvasFocused = true
-                    }
+                    canvasFocused = true
                 }
             }
     }
@@ -1827,8 +2000,9 @@ struct MapCanvasView: View {
     }
 }
 
-// swiftMindToggleNoteEditor / swiftMindToggleNoteExpansion are posted from
-// SessionNodeCommands in SwiftMindMacApp, so they must not be file-private.
+// swiftMindToggleNoteEditor / swiftMindToggleNoteExpansion / swiftMindRenameNode
+// are posted from SessionNodeCommands / NodeContextMenu, so they must not be
+// file-private.
 private enum NoteEditorPlacement {
     case floatingRight
     case inPlace
@@ -1837,6 +2011,7 @@ private enum NoteEditorPlacement {
 extension Notification.Name {
     static let swiftMindToggleNoteEditor = Notification.Name("swiftMindToggleNoteEditor")
     static let swiftMindEditNoteInPlace = Notification.Name("swiftMindEditNoteInPlace")
+    static let swiftMindRenameNode = Notification.Name("swiftMindRenameNode")
     static let swiftMindToggleNoteExpansion = Notification.Name("swiftMindToggleNoteExpansion")
     static let swiftMindToggleSketch = Notification.Name("swiftMindToggleSketch")
 }
@@ -1844,6 +2019,7 @@ extension Notification.Name {
 private extension Notification.Name {
     static let swiftMindCanvasReturn = Notification.Name("swiftMind.canvas.return")
     static let swiftMindCanvasDelete = Notification.Name("swiftMind.canvas.delete")
+    static let swiftMindCanvasCommitNoteEditor = Notification.Name("swiftMind.canvas.commitNoteEditor")
 }
 
 #Preview {

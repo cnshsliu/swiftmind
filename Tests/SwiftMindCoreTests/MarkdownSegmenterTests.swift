@@ -164,26 +164,49 @@ final class MarkdownSegmenterTests: XCTestCase {
         XCTAssertEqual(segments("$ a"), [.text("$ a")])
     }
 
-    // MARK: - estimatedLineCount
+    // MARK: - estimatedHeight
 
-    func testEstimatedLineCountPlain() {
-        XCTAssertEqual(MarkdownSegmenter.estimatedLineCount(of: "a\nb\nc"), 3)
-    }
-
-    func testEstimatedLineCountWithImage() {
-        // "p" (1 line) + image line (replaced by 8) + "q" (1 line) = 10.
+    func testEstimatedHeightPlain() {
         XCTAssertEqual(
-            MarkdownSegmenter.estimatedLineCount(
-                of: "p\n![i](data:image/png;base64,AA)\nq"
-            ),
-            10
+            MarkdownSegmenter.estimatedHeight(of: "a\nb\nc", lineHeight: 20, imageHeight: 160),
+            60
         )
     }
 
-    func testEstimatedLineCountBlockMathRows() {
+    func testEstimatedHeightImageReservesOneMediaRow() {
+        // "p" (20) + image (one mediaMaxSize row = 160) + "q" (20).
         XCTAssertEqual(
-            MarkdownSegmenter.estimatedLineCount(of: "$$\na = b\n= c\n$$"),
-            2
+            MarkdownSegmenter.estimatedHeight(
+                of: "p\n![i](data:image/png;base64,AA)\nq",
+                lineHeight: 20,
+                imageHeight: 160
+            ),
+            200
+        )
+    }
+
+    func testEstimatedHeightBlockMathCountsContentRows() {
+        XCTAssertEqual(
+            MarkdownSegmenter.estimatedHeight(of: "$$\na = b\n= c\n$$", lineHeight: 20, imageHeight: 160),
+            40
+        )
+    }
+
+    func testEstimatedHeightFencedCodeCountsActualLines() {
+        // Opener + 2 content lines + closer, all plain rows; the image-looking
+        // line inside the fence is code, not a media row.
+        let doc = "```\nlet a = 1\n![i](https://e.com/a.png)\n```"
+        XCTAssertEqual(
+            MarkdownSegmenter.estimatedHeight(of: doc, lineHeight: 20, imageHeight: 160),
+            80
+        )
+    }
+
+    func testEstimatedHeightUnclosedFenceStillCountsLines() {
+        let doc = "~~~\ncode"
+        XCTAssertEqual(
+            MarkdownSegmenter.estimatedHeight(of: doc, lineHeight: 20, imageHeight: 160),
+            40
         )
     }
 }
