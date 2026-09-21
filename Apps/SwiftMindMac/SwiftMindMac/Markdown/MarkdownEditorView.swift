@@ -1,6 +1,21 @@
 import SwiftUI
 import AppKit
 
+/// One-shot insertion request from the note-editor toolbar (spec 3b). The
+/// editor applies it to the text storage at the caret (flowing into the
+/// binding and the text undo stack) and clears the binding.
+struct MarkdownInsertion: Equatable {
+    enum Payload: Equatable {
+        /// Ready-made `![name](data:…)` markdown line.
+        case image(markdown: String)
+        case math
+        case link
+    }
+
+    let id = UUID()
+    let payload: Payload
+}
+
 /// Markdown source editor for node notes (spec 2026-09-21, Phase 2a/2b).
 /// The text storage always holds the plain Markdown source — what you type is
 /// what persists; styling is an attributes-only pass on top. Typing aids:
@@ -9,6 +24,9 @@ import AppKit
 /// to `onCancel` (the canvas maps it to the note editor's cancel path).
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
+    /// One-shot toolbar insertion request (3b); the editor applies it at the
+    /// caret and clears the binding.
+    @Binding var insertion: MarkdownInsertion?
     var onCancel: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -60,6 +78,14 @@ struct MarkdownEditorView: NSViewRepresentable {
         // External reset (editor open, undo/CLI/agent reload): only push when
         // the model-side text actually diverged — never on our own keystrokes.
         context.coordinator.setText(text, of: textView)
+        // Toolbar insertion (3b): after setText so a stale binding cannot
+        // overwrite the insert. Apply once, then clear — async so the
+        // binding write never happens mid view-update.
+        if let request = insertion, context.coordinator.lastAppliedInsertionID != request.id {
+            context.coordinator.lastAppliedInsertionID = request.id
+            textView.applyInsertion(request.payload)
+            DispatchQueue.main.async { insertion = nil }
+        }
     }
 
     @MainActor
@@ -68,6 +94,9 @@ struct MarkdownEditorView: NSViewRepresentable {
         weak var textView: MarkdownSourceTextView?
         private var isProgrammaticUpdate = false
         private var styleTask: Task<Void, Never>?
+        /// Last toolbar insertion already applied — `updateNSView` can fire
+        /// again before the async binding clear, and must not re-insert.
+        var lastAppliedInsertionID: UUID?
 
         init(parent: MarkdownEditorView) {
             self.parent = parent
@@ -136,6 +165,63 @@ final class MarkdownSourceTextView: NSTextView {
         default:
             super.keyDown(with: event)
         }
+    }
+
+    // MARK: - Toolbar insertions (3b)
+
+    /// Apply a toolbar insertion at the caret/selection. All paths go through
+    /// insertText/replace so they are undoable and reach the binding.
+    func applyInsertion(_ payload: MarkdownInsertion.Payload) {
+        switch payload {
+        case .image(let markdown):
+            insertImageBlock(markdown)
+        case .math:
+            insertMathTemplate()
+        case .link:
+            insertLinkTemplate()
+        }
+    }
+
+    /// Image markdown goes on its own line (newline prefix unless the caret
+    /// is already at a line start); caret lands after it.
+    private func insertImageBlock(_ markdown: String) {
+        let ns = string as NSString
+        let sel = selectedRange()
+        let atLineStart = Self.lineRange(containing: sel.location, in: ns)
+            .map { sel.location == $0.content.location } ?? true
+        insertText((atLineStart ? "" : "\n") + markdown + "\n", replacementRange: sel)
+    }
+
+    /// Block `$$…$$` template on an empty line (caret on the middle line),
+    /// otherwise inline `$…$` with the caret between the markers.
+    private func insertMathTemplate() {
+        let ns = string as NSString
+        let sel = selectedRange()
+        let line = Self.lineRange(containing: sel.location, in: ns)
+        let lineIsEmpty = line
+            .map { ns.substring(with: $0.content).trimmingCharacters(in: .whitespaces).isEmpty }
+            ?? true
+        if lineIsEmpty, let line {
+            insertText("$$\n\n$$", replacementRange: line.content)
+            setSelectedRange(NSRange(location: line.content.location + 3, length: 0))
+        } else {
+            let inner = sel.length > 0 ? ns.substring(with: sel) : ""
+            insertText("$\(inner)$", replacementRange: sel)
+            if inner.isEmpty {
+                setSelectedRange(NSRange(location: sel.location + 1, length: 0))
+            }
+        }
+    }
+
+    /// `[title](url)` — selected text becomes the title; the `url`
+    /// placeholder stays selected so typing replaces it.
+    private func insertLinkTemplate() {
+        let ns = string as NSString
+        let sel = selectedRange()
+        let title = sel.length > 0 ? ns.substring(with: sel) : "title"
+        insertText("[\(title)](url)", replacementRange: sel)
+        // "[title](" prefix before the url placeholder.
+        setSelectedRange(NSRange(location: sel.location + 3 + (title as NSString).length, length: 3))
     }
 
     // MARK: - List continuation (Return)

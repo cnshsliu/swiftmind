@@ -19,6 +19,7 @@ struct SwiftMindMacApp: App {
             "swiftmind.agentBridge": true,
             LaunchBehavior.defaultsKey: LaunchBehavior.help.rawValue,
             MediaSizeLevel.defaultsKey: MediaSizeLevel.medium.rawValue,
+            NoteEditMode.defaultsKey: NoteEditMode.panel.rawValue,
         ])
     }
 

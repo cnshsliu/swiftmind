@@ -591,6 +591,87 @@ final class SwiftMindMacUITests: XCTestCase {
         )
     }
 
+    /// Insertion helpers (3b): the link toolbar button writes `[title](url)`
+    /// at the caret as plain Markdown.
+    func testNoteEditorInsertLinkWritesMarkdown() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        let insertLink = element("noteEditorInsertLink")
+        XCTAssertTrue(insertLink.waitForExistence(timeout: 3), "insert-link toolbar should appear")
+        insertLink.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        app.typeKey(.return, modifierFlags: .command)
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("[title](url)") },
+            "Insert Link must write a Markdown link template at the caret"
+        )
+    }
+
+    /// Insertion helpers (3b): math on an empty line writes a `$$…$$` block.
+    func testNoteEditorInsertMathWritesTemplate() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        let insertMath = element("noteEditorInsertMath")
+        XCTAssertTrue(insertMath.waitForExistence(timeout: 3), "insert-math toolbar should appear")
+        insertMath.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        app.typeKey(.return, modifierFlags: .command)
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("$$") },
+            "Insert Math must write a $$ template"
+        )
+    }
+
+    /// On-card mode (3a): with Settings `swiftmind.noteEditMode=onCard` and
+    /// an expanded note, `E` hosts the editor at the card (`noteEditorOnCard`).
+    func testOnCardNoteEditorOpensAndCommits() throws {
+        app.terminate()
+        app.launchArguments = [
+            "-uitesting", "-uitesting-scratch-map",
+            "-swiftmind.noteEditMode", "onCard",
+        ]
+        app.launch()
+        try ensureDocumentWindow()
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("x"), modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        app.typeKey(.init("e"), modifierFlags: [])
+
+        let onCard = element("noteEditorOnCard")
+        XCTAssertTrue(
+            onCard.waitForExistence(timeout: 3),
+            "expanded note + E in on-card mode should host the editor on the card"
+        )
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 2), "the shared note editor should exist")
+        editor.click()
+        editor.typeText("oncardbody")
+
+        app.typeKey(.return, modifierFlags: .command)
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("oncardbody") },
+            "⌘Enter must commit on-card edits"
+        )
+    }
+
     func testZZCaptureNoteMathRendering() throws {
         focusCanvasWithSelection()
         app.typeKey(.init("e"), modifierFlags: [])

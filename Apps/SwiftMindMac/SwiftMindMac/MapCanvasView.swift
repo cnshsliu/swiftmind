@@ -9,6 +9,9 @@ struct MapCanvasView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MediaSizeLevel.defaultsKey) private var mediaSizeLevel = MediaSizeLevel.medium.rawValue
+    /// Settings' note-editing mode (panel vs directly-on-card); @AppStorage
+    /// re-renders on defaults changes, so the toggle applies immediately.
+    @AppStorage(NoteEditMode.defaultsKey) private var noteEditMode = NoteEditMode.panel.rawValue
 
     /// Note-card images scale into the Settings media box.
     private var mediaImageHeight: CGFloat {
@@ -75,7 +78,9 @@ struct MapCanvasView: View {
     // MARK: Floating note editor
     @State private var noteEditorNodeID: NodeID?
     @State private var noteEditorDraft: String = ""
-    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is double-click / ⌘E on any non-sketch node.
+    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is double-click / ⌘E on any
+    /// non-sketch node; `.onCard` (Settings → Notes) hosts the editor at an
+    /// expanded card's frame.
     @State private var noteEditorPlacement: NoteEditorPlacement = .floatingRight
     @State private var noteCommitTask: Task<Void, Never>?
     /// Normal-form document of the last committed model state; contentRevision
@@ -84,6 +89,8 @@ struct MapCanvasView: View {
     /// Composed document captured when the editor opened; Esc reverts to this
     /// (unlike `lastCommittedNoteDocument`, which advances with each commit).
     @State private var noteEditorBaseline: String?
+    /// One-shot toolbar insertion (image/math/link), consumed by the editor.
+    @State private var pendingNoteInsertion: MarkdownInsertion?
     /// Canvas offset stashed when the editor opened (restored on close).
     @State private var preEditorPan: CGSize?
     /// The offset we panned to; restore only if the user hasn't panned since.
@@ -172,7 +179,8 @@ struct MapCanvasView: View {
                     }
 
                 // Below the edit overlay: editing a title must not sit behind a card.
-                ForEach(snapshot.nodes.filter(\.isNoteExpanded)) { visual in
+                // The card under the on-card editor hides (no double text).
+                ForEach(snapshot.nodes.filter { $0.isNoteExpanded && $0.id != onCardEditingNodeID }) { visual in
                     noteCard(for: visual, viewSize: geo.size)
                 }
 
@@ -1249,12 +1257,14 @@ struct MapCanvasView: View {
     }
 
     /// The expanded card under a view-space point, but only when its content
-    /// overflows the frame (otherwise the wheel keeps panning the map).
+    /// overflows the frame (otherwise the wheel keeps panning the map). The
+    /// card being edited on-card is skipped — the editor scrolls natively.
     private func overflowingNoteCardID(at viewPoint: CGPoint) -> NodeID? {
         let viewSize = CGSize(width: session.lastCanvasWidth, height: session.lastCanvasHeight)
         guard viewSize.width > 40, viewSize.height > 40 else { return nil }
         let snapshot = session.store.snapshot()
         guard let id = hitTest(viewPoint, snapshot: snapshot, viewSize: viewSize),
+              id != session.liveNoteDocument?.nodeID,
               let visual = snapshot.nodes.first(where: { $0.id == id }),
               visual.isNoteExpanded else { return nil }
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
@@ -1310,12 +1320,45 @@ struct MapCanvasView: View {
         }
     }
 
-    /// Markdown editor: floating to the right (`e`) or covering the node
-    /// (double-click / ⌘E). Esc cancels back to the editor-open baseline,
-    /// ⌘Enter and click-away commit & close.
+    /// Markdown editor: floating to the right (`e`), covering the node
+    /// (double-click / ⌘E), or hosted at the expanded card's frame when the
+    /// on-card mode is on (Settings → Notes). All placements share the draft,
+    /// baseline, debounce and undo coalescing; Esc cancels back to the
+    /// editor-open baseline, ⌘Enter and click-away commit & close.
     @ViewBuilder
     private func noteEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        Group {
+            if noteEditorPlacement == .onCard {
+                onCardNoteEditor(frame: frame)
+            } else {
+                panelNoteEditor(frame: frame, viewSize: viewSize)
+            }
+        }
+        .onChange(of: noteEditorDraft) { _, newValue in
+            session.liveNoteDocument = (visual.id, newValue)
+            scheduleNoteCommit()
+        }
+    }
+
+    /// The shared editor (panel and on-card both host it).
+    private var noteEditorView: some View {
+        MarkdownEditorView(
+            text: $noteEditorDraft,
+            insertion: $pendingNoteInsertion,
+            onCancel: { closeNoteEditor(committing: false) } // Esc
+        )
+    }
+
+    /// Node whose rendered card hides because the on-card editor covers it.
+    private var onCardEditingNodeID: NodeID? {
+        noteEditorPlacement == .onCard ? noteEditorNodeID : nil
+    }
+
+    /// Panel host: floating right of the node or covering it in place, with
+    /// the insertion toolbar row on top.
+    @ViewBuilder
+    private func panelNoteEditor(frame: CGRect, viewSize: CGSize) -> some View {
         let inPlace = noteEditorPlacement == .inPlace
         let width: CGFloat = inPlace ? max(frame.width, 320) : Self.noteEditorWidth
         let height: CGFloat = {
@@ -1334,10 +1377,12 @@ struct MapCanvasView: View {
         let minCenterY = height / 2 + 16
         let maxCenterY = max(minCenterY, viewSize.height - height / 2 - 16)
         let centerY = min(max(rawCenterY, minCenterY), maxCenterY)
-        MarkdownEditorView(
-            text: $noteEditorDraft,
-            onCancel: { closeNoteEditor(committing: false) } // Esc
-        )
+        VStack(spacing: 0) {
+            noteEditorToolbar
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
+            noteEditorView
+        }
             .frame(width: width, height: height)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
             .overlay(
@@ -1346,20 +1391,105 @@ struct MapCanvasView: View {
             )
             .shadow(color: .black.opacity(0.2), radius: 8, y: 2)
             .position(x: centerX, y: centerY)
-            .onChange(of: noteEditorDraft) { _, newValue in
-                session.liveNoteDocument = (visual.id, newValue)
-                scheduleNoteCommit()
-            }
+            .accessibilityIdentifier("noteEditorPanel")
     }
 
-    /// `e` / ⇧⌘E: floating editor to the right of the selected node.
+    /// On-card host (3a): the editor sits at the expanded card's frame with
+    /// the card's chrome plus an accent focus ring. Toolbar lives inside the
+    /// host (same as the panel) so hit-testing stays on the card. No
+    /// pan-for-editor — the canvas stays put.
+    @ViewBuilder
+    private func onCardNoteEditor(frame: CGRect) -> some View {
+        VStack(spacing: 0) {
+            noteEditorToolbar
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
+            noteEditorView
+        }
+        .frame(width: frame.width, height: frame.height)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1.5)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 6, y: 1)
+        .position(x: frame.midX, y: frame.midY)
+        .accessibilityIdentifier("noteEditorOnCard")
+    }
+
+    /// Insertion helpers (3b): image / math / link at the caret. Buttons stay
+    /// keyboard-inert so the editor keeps first responder.
+    private var noteEditorToolbar: some View {
+        HStack(spacing: 2) {
+            noteEditorToolbarButton("photo", id: "noteEditorInsertImage", help: "Insert image") {
+                insertImageIntoNoteEditor()
+            }
+            noteEditorToolbarButton("function", id: "noteEditorInsertMath", help: "Insert math") {
+                pendingNoteInsertion = MarkdownInsertion(payload: .math)
+            }
+            noteEditorToolbarButton("link", id: "noteEditorInsertLink", help: "Insert link") {
+                pendingNoteInsertion = MarkdownInsertion(payload: .link)
+            }
+            Spacer()
+        }
+        .accessibilityIdentifier("noteEditorToolbar")
+    }
+
+    private func noteEditorToolbarButton(
+        _ systemImage: String, id: String, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .focusable(false)
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityIdentifier(id)
+    }
+
+    /// Image button: file picker → data-URI markdown line at the caret
+    /// (reuses the paste path's normalizer: ≤720pt longest side, PNG, <10 MB).
+    private func insertImageIntoNoteEditor() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an image to embed in the note"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url,
+                  let data = try? Data(contentsOf: url),
+                  let png = ClipboardService.normalizeImage(data) else { return }
+            let name = url.deletingPathExtension().lastPathComponent
+            let markdown = "![\(name)](data:image/png;base64,\(png.base64EncodedString()))"
+            DispatchQueue.main.async {
+                pendingNoteInsertion = MarkdownInsertion(payload: .image(markdown: markdown))
+            }
+        }
+    }
+
+    /// `e` / ⇧⌘E: floating editor to the right of the selected node (or the
+    /// on-card editor when the mode is on and the note card is expanded).
     private func toggleNoteEditor() {
         if noteEditorNodeID != nil, noteEditorPlacement == .floatingRight {
             closeNoteEditor()
             return
         }
         guard let primary = session.store.selection.primary else { return }
-        openNoteEditor(nodeID: primary, placement: .floatingRight)
+        openNoteEditor(nodeID: primary, placement: preferredNotePlacement(for: primary, fallback: .floatingRight))
+    }
+
+    /// On-card mode (Settings → Notes) applies only to nodes with an expanded
+    /// note card; collapsed/empty notes keep the panel editor. No auto-expand:
+    /// opening the editor must not mutate the map as a side effect.
+    private func preferredNotePlacement(for id: NodeID, fallback: NoteEditorPlacement) -> NoteEditorPlacement {
+        guard noteEditMode == NoteEditMode.onCard.rawValue,
+              let node = session.store.map.node(id: id),
+              node.isNoteExpanded else { return fallback }
+        return .onCard
     }
 
     private func openNoteEditor(nodeID: NodeID, placement: NoteEditorPlacement) {
@@ -1725,14 +1855,15 @@ struct MapCanvasView: View {
     /// ⌘E / "Edit Note at Node" / double-click: honest note editing. Sketch
     /// nodes route to the drawing board; every other node opens the note
     /// editor in place — even with an empty note (the virtual document is
-    /// just `# title`). Plain title editing stays on Return / Rename.
+    /// just `# title`) — or on the card itself when the on-card mode is on
+    /// and the note is expanded. Plain title editing stays on Return / Rename.
     private func beginEdit(nodeID: NodeID, snapshot: MapSnapshot) {
         guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
         if let node = session.store.map.node(id: nodeID), node.sketch != nil {
             openSketchEditor(nodeID: nodeID)
             return
         }
-        openNoteEditor(nodeID: nodeID, placement: .inPlace)
+        openNoteEditor(nodeID: nodeID, placement: preferredNotePlacement(for: nodeID, fallback: .inPlace))
     }
 
     /// Return / context-menu Rename: the plain title field. Sketch nodes have
@@ -2017,6 +2148,9 @@ struct MapCanvasView: View {
 private enum NoteEditorPlacement {
     case floatingRight
     case inPlace
+    /// Settings' "Directly on card" mode: the editor hosts at the expanded
+    /// note card's frame (spec 2026-09-21, 3a).
+    case onCard
 }
 
 extension Notification.Name {

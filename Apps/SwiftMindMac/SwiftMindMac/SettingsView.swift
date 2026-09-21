@@ -58,11 +58,35 @@ enum MediaSizeLevel: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where note editing happens (⌘E / double-click / `e`). Persisted as
+/// `swiftmind.noteEditMode`; `panel` is the floating/in-place overlay editor,
+/// `onCard` hosts the same editor at an expanded note card's frame.
+enum NoteEditMode: String, CaseIterable, Identifiable {
+    case panel
+    case onCard
+
+    static let defaultsKey = "swiftmind.noteEditMode"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .panel: return "Floating panel"
+        case .onCard: return "Directly on card"
+        }
+    }
+
+    static var current: NoteEditMode {
+        NoteEditMode(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .panel
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject private var library = VaultLibrary.shared
     @AppStorage(LaunchBehavior.defaultsKey) private var launchBehavior = LaunchBehavior.help.rawValue
     @AppStorage(MediaSizeLevel.defaultsKey) private var mediaSize = MediaSizeLevel.medium.rawValue
+    @AppStorage(NoteEditMode.defaultsKey) private var noteEditMode = NoteEditMode.panel.rawValue
     @AppStorage("swiftmind.agentBridge") private var agentBridgeEnabled = true
 
     var body: some View {
@@ -71,7 +95,7 @@ struct SettingsView: View {
             vaultsTab
             agentTab
         }
-        .frame(width: 460, height: 300)
+        .frame(width: 460, height: 380)
     }
 
     private var generalTab: some View {
@@ -89,6 +113,17 @@ struct SettingsView: View {
             Text("Images in notes and hand-drawn sketch boards scale to fit this size.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Section("Notes") {
+                Picker("Note editing:", selection: $noteEditMode) {
+                    ForEach(NoteEditMode.allCases) { mode in
+                        Text(mode.label).tag(mode.rawValue)
+                    }
+                }
+                .accessibilityIdentifier("noteEditModePicker")
+                Text("“Directly on card” edits expanded note cards in place on the canvas (press X on a node to expand its note). Applies immediately.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Open Welcome Map") {
                     appModel.openHelpMap()
