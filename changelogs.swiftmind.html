@@ -133,6 +133,15 @@ body {
           </li>
         </ul>
       </li>
+      <li data-node-id="n_d0921" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">2026-09-21</span>
+        <ul>
+          <li data-node-id="n_c9" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat(canvas): free dragging, never-blank scrolling</span>
+            <div class="node-note" hidden="hidden">Drag and scroll now share one pan limit: the scaled content bounding box must always intersect the viewport inset by 25% per axis. Dragging lost the old content-center wall (a poisoned-viewport heal misused as a pan limit — this is why you could only reach the top/bottom-most nodes); scrolling, previously unclamped, can no longer strand the map offscreen at any zoom. Zoom changes re-apply the clamp. 5 new core tests. (`8be4f3e`)</div>
+          </li>
+        </ul>
+      </li>
     </ul>
   </li>
 </ul>
