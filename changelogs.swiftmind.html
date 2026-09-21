@@ -148,6 +148,18 @@ body {
             <span class="node-title">feat: first-open auto fit + Zoom to Fit (⌘9)</span>
             <div class="node-note" hidden="hidden">A map with no saved viewport opens zoomed to fit the whole map (≤ 1:1 — small maps stay actual size, centered; floor 25%). Already-viewed maps restore your own pan/zoom. View menu gains **Zoom to Fit (⌘9)**. `CanvasViewport.fittedToContent` + 4 core tests; help map and README updated. (`a60f860`)</div>
           </li>
+          <li data-node-id="n_c12" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat(notes): Phase 1 editing UX — Esc cancels, ⌘Enter / click-away commit</span>
+            <div class="node-note" hidden="hidden">Esc reverts the note to the editor-open baseline (undoable). ⌘Enter and click-away commit &amp; close. ⌘E always opens the note editor, even on a title-only node. Expanded cards scroll instead of clipping. (`adce1e8`)</div>
+          </li>
+          <li data-node-id="n_c13" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat(notes): Phase 2 — live-styled editor, typing aids, session undo</span>
+            <div class="node-note" hidden="hidden">NSTextView wrapper styles Markdown as you type (headings, bold/italic, code, lists, math) while storage stays plain source. Return continues list markers; ⌘B/⌘I wrap; Tab/⇧Tab indent. All debounced commits of one editor session are one map-level ⌘Z. (`5f6707d`)</div>
+          </li>
+          <li data-node-id="n_c14" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat(notes): Phase 3 — on-card edit mode + insertion helpers</span>
+            <div class="node-note" hidden="hidden">Settings (⌘,) → **Note editing**: Floating panel (default) or Directly on card (expanded cards only). Toolbar inserts an image, `$…$` / `$$…$$` math, or a `[title](url)` link at the caret. Both hosts share Esc cancel, ⌘Enter / click-away commit, and session undo. (`17c9bbc`)</div>
+          </li>
         </ul>
       </li>
     </ul>
