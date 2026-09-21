@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en" data-swiftmind-version="1">
+<head>
+<meta charset="utf-8"/>
+<title>SwiftMind Changelogs</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --sm-bg: #f5f5f7;
+  --sm-fg: #1d1d1f;
+  --sm-muted: #6e6e73;
+  --sm-card: #ffffff;
+  --sm-border: #e5e5ea;
+  --sm-line: #d2d2d7;
+  --sm-accent: #0071e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sm-bg: #1c1c1e;
+    --sm-fg: #f5f5f7;
+    --sm-muted: #98989d;
+    --sm-card: #2c2c2e;
+    --sm-border: #3a3a3c;
+    --sm-line: #48484a;
+    --sm-accent: #0a84ff;
+  }
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  margin: 0;
+  padding: 28px 24px 48px;
+  line-height: 1.45;
+  color: var(--sm-fg);
+  background: var(--sm-bg);
+  -webkit-font-smoothing: antialiased;
+}
+.swiftmind-map {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+.swiftmind-map ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.15rem;
+  border-left: 2px solid var(--sm-line);
+}
+.swiftmind-map > ul {
+  padding-left: 0;
+  border-left: none;
+}
+.swiftmind-map li {
+  margin: 0.45rem 0;
+}
+.node-title {
+  display: inline-block;
+  padding: 0.28rem 0.65rem;
+  border-radius: 8px;
+  background: var(--sm-card);
+  border: 1px solid var(--sm-border);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.swiftmind-map > ul > li > .node-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--sm-accent) 35%, var(--sm-border));
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.node-note[hidden] {
+  display: block !important;
+  opacity: 0.82;
+  font-size: 0.9em;
+  margin: 0.3rem 0 0.35rem 0.55rem;
+  white-space: pre-wrap;
+  color: var(--sm-muted);
+  max-width: 36rem;
+}
+.node-links[hidden] {
+  display: none !important;
+}
+</style>
+</head>
+<body>
+<article class="swiftmind-map" data-schema="1" data-map-id="m_76826445213348fd">
+<ul>
+  <li data-node-id="n_c410ffe21d4f41bb" data-side="auto" data-folded="false" data-font-size="22" data-bold="true" data-text-color="#FFFFFF" data-fill-color="#0000FF">
+    <span class="node-title">SwiftMind Changelogs</span>
+    <ul>
+      <li data-node-id="n_d0919" data-side="right" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">2026-09-19</span>
+        <ul>
+          <li data-node-id="n_c1" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat: sketch empty node in place, titled node gets a draw child</span>
+            <div class="node-note" hidden="hidden">Scribbling (`d` / ⇧⌘D / context menu) on an **empty** node opens the board on it; on a node with content it inserts a child and draws there. A node that already holds a sketch re-edits in place. The default &quot;New Idea&quot; title counts as empty. 3 new UI tests. (`1491124`)</div>
+          </li>
+          <li data-node-id="n_c2" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">fix: heal stranded viewport that blanked the window after zoom-out</span>
+            <div class="node-note" hidden="hidden">A pathological pan event wrote `offset-y=206745` into the persisted Welcome-map viewport; every launch restored it unvalidated and the canvas rendered empty. Added `CanvasViewport.clampedOffset` (3 core tests), clamped pan writes, hermetic `-uitesting` launches (fresh help map, no saved viewport). (`7adefec`)</div>
+            <ul>
+              <li data-node-id="n_44247dd2be884bbf" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title"></span>
+                <div class="node-sketch" hidden="hidden">d3Jk8AEACAASEAAAAAAAAAAAAAAAAAAAAAASENMhp6nTpkNQgmfl4Q0TuH8aBggAEAAYABoGCAEQARgBIjQKFA0AAAAAFYmICD8dAACAPyUAAIA/EhFjb20uYXBwbGUuaW5rLnBlbhgDQQAAAAAAAAAAKqUGChA0tv67B+RCtZa3x0gQwD6oEgYIABABGAEaBggAEAEYACAAKsEFChAXQAdMYnJDEpni5xwqz19oEXTRcvnIL8hBGFAgASj+DzIaSH5BTgAAQEDoAwAA6AP/fwAA/38AAEBAAAA6gAUAoDREAIAgQwBgNUQAgCBDAEA1RACAIEMAgDNEAIAgQwCgMEQAACFDAOApRACAIkMAoB9EAAAmQwCgFkQAgC9DAEAQRACAP0MAwEFEAAC4QwAAQ0QAQLhDAOBCRABAuEMAIEFEAAC3QwBAOkQAgLNDACAvRACAr0MAoCZEAMCuQwAAJkQAQLBDAKAoRAAAtkMAYDhEAEDCQwCAUUQAQM5DAABoRADA10MAoHZEAEDeQwDgeUQAwN9DAKB5RADA30MA4HZEAEDfQwDAbUQAQNtDAKBeRAAA00MAQEREAADEQwAgL0QAwLZDAOAhRAAAsUMA4B9EAMCwQwDgH0QAwLBDAGAkRADAsEMAwDVEAACQQwBgOEQAgIpDAGA6RADAhUMAQDxEAICBQwDgPUQAgHtDAEA/RACAdUMAoEBEAABwQwDAQUQAgGpDAIBCRAAAZ0MAoEJEAABmQwCAQkQAAGZDAOA/RACAZUMAoDdEAIBmQwDALEQAAGxDAEAmRAAAdUMA4CNEAACAQwAgJEQAwIxDAGArRABAnkMA4DtEAACwQwCAT0QAQL1DAABdRADAxUMA4GJEAEDKQwCgYkQAwMpDAKBZRADgB0QAAFlEAAAKRADAVkQA4AtEAIBQRACADkQAgEdEACARRABAQEQAgBNEACA7RABAFUQAADhEAEAWRAAAN0QAoBZEAOA2RACgFkQAADdEAKAWRAAAN0QAoBZEAKA4RADgFUQAAD1EAEATRABgRkQAQA1EAMBVRACgBEQAoGlEAED1QwBgfkQAAOJDAJCDRABA2kMA0JBEAMDBQwCwlUQAQLZDAACXRADAsUMAcJZEAECXQwBwlkQAQJdDMhQNAAAAQRUAAABBHQCAGUQlAIDeQzoeDQAAgD8VAAAAAB0AAAAAJQAAgD8tAEASxDUAABfDQIDJkteDBDoGCAAQABgAQhDplasw39lDuaeddehURe6b|630|461</div>
+              </li>
+            </ul>
+          </li>
+          <li data-node-id="n_c3" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">fix: heal poisoned viewport after session swap, not just onAppear</span>
+            <div class="node-note" hidden="hidden">The first heal only ran at onAppear, which fires on the initial default session — bootstrap swaps in the restored (possibly poisoned) session afterwards. Now detects poison by absolute limits (content extent + 3 screens) and persists the healed viewport. Verified live: seeded 206745 heals to zero on launch. (`7595f42`)</div>
+          </li>
+          <li data-node-id="n_c4" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">chore: register swiftmind MCP server for agent sessions</span>
+            <div class="node-note" hidden="hidden">`.mcp.json` starts `swiftmind mcp` (stdio) whenever a Claude session opens in this repo; project skill installed at `.claude/skills/swiftmind`. CLI refreshed to 1.3.1. (`3659aec`)</div>
+          </li>
+          <li data-node-id="n_c5" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Verification: 297 core + 22 UI tests green</span>
+          </li>
+        </ul>
+      </li>
+      <li data-node-id="n_d0920" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+        <span class="node-title">2026-09-20</span>
+        <ul>
+          <li data-node-id="n_c6" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">feat: Settings inline-media size — small / medium / large</span>
+            <div class="node-note" hidden="hidden">Settings (⌘,) gains **Inline media size**: small 64pt (macOS app-icon size) / medium 160pt (default) / large 320pt — a square display box for note images and sketch boards. Core: `LayoutConfig.mediaMaxSize`, aspect-preserving sketch fit, settable `MapStore.layoutConfig`. The Welcome map now demos an inline image and a hand-drawn sketch. (`b38bc3c`)</div>
+          </li>
+          <li data-node-id="n_c7" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">fix(sketch): stable content-space editor canvas; natural scroll speed</span>
+            <div class="node-note" hidden="hidden">Reopening a sketch scattered or dropped strokes: macOS corrupts composed `PKStroke` transforms on `dataRepresentation()` round-trips. Strokes now stay in content coordinates with a view-only fit transform; trim bakes translation into path points; commit never wipes an undecodable non-empty draft. Also: trackpads pan 1:1 (the 8× multiplier felt runaway), wheel mice move 40pt per notch. New regression UI test. (`fc053a8`)</div>
+          </li>
+          <li data-node-id="n_c8" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Verification: 300 core + 23 UI tests green</span>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+</article>
+</body>
+</html>
