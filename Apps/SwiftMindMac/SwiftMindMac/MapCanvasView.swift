@@ -29,13 +29,13 @@ struct MapCanvasView: View {
             CGSize(width: session.viewport.offset.x, height: session.viewport.offset.y)
         }
         nonmutating set {
-            // Interactive pan limit (drag + scroll): the scaled content must
-            // keep a visible strip on screen — never a blank viewport.
-            // Glitched huge deltas are clamped to the same boundary.
+            // Interactive pan limit (drag + scroll): the viewport never shows
+            // blank space beyond the content — panning stops flush at the
+            // content edges. Glitched huge deltas clamp to the same boundary.
             var candidate = session.viewport
             candidate.offset = Point2D(x: Double(newValue.width), y: Double(newValue.height))
             session.setCanvasOffset(
-                candidate.visibleClampedOffset(
+                candidate.panClampedOffset(
                     contentBounds: session.store.snapshot().bounds,
                     viewWidth: Double(canvasSize.width),
                     viewHeight: Double(canvasSize.height)
@@ -225,6 +225,8 @@ struct MapCanvasView: View {
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
                 session.rememberCanvasLayout(width: Double(newSize.width), height: Double(newSize.height))
+                // Resizing the window changes the pan limits — re-clamp.
+                offset = offset
             }
             // Any zoom change (pinch, ⌘-scroll, menu) can strand the view at
             // the edges — re-apply the never-blank pan clamp. Only touches

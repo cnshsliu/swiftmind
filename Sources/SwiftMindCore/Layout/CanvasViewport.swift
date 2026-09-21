@@ -91,30 +91,35 @@ public struct CanvasViewport: Equatable, Sendable {
         offset = Point2D(x: offset.x + delta.x, y: offset.y + delta.y)
     }
 
-    /// Offset clamped so the content always keeps a visible strip on screen:
-    /// the scaled content bounding box must intersect the viewport inset by
-    /// 25% per axis. This is the interactive pan limit shared by dragging and
-    /// scrolling — free inside the envelope, hard stop at the boundary.
-    /// Zoom-aware because the bounds are scaled before comparison.
-    public func visibleClampedOffset(
+    /// Offset clamped so the viewport never shows blank space beyond the
+    /// content — the natural scroll-view rule, per axis:
+    ///
+    /// - Content (scaled) **larger than the view**: the content bounding box
+    ///   must *cover* the whole viewport — panning stops flush at the content
+    ///   edge, so even at the extreme the screen is full of content.
+    /// - Content **smaller than the view**: the bounding box stays *inside*
+    ///   the viewport — the map can be positioned anywhere in the window but
+    ///   can never be pushed out.
+    ///
+    /// Shared by dragging and scrolling; zoom-aware because the bounds are
+    /// scaled before comparison.
+    public func panClampedOffset(
         contentBounds: Rect2D,
         viewWidth: Double,
         viewHeight: Double
     ) -> Point2D {
-        let mx = viewWidth * 0.25
-        let my = viewHeight * 0.25
-        guard viewWidth > mx * 2, viewHeight > my * 2, scale > 0 else {
-            return offset
-        }
-        // Content bbox in view coordinates: p_view = p_map*scale + viewSize/2 + offset;
-        // it must overlap [margin, viewSize - margin] on each axis.
-        let minXv = contentBounds.x * scale + viewWidth / 2
-        let maxXv = (contentBounds.x + contentBounds.width) * scale + viewWidth / 2
-        let minYv = contentBounds.y * scale + viewHeight / 2
-        let maxYv = (contentBounds.y + contentBounds.height) * scale + viewHeight / 2
+        guard viewWidth > 0, viewHeight > 0, scale > 0 else { return offset }
+        // Content bbox in view coordinates: p_view = p_map*scale + viewSize/2 + offset.
+        // Per axis the two candidate limits are "max edge flush at view end"
+        // and "min edge flush at view start"; the feasible interval is always
+        // [min(a,b), max(a,b)] — covering when content ≥ view, inside when smaller.
+        let ax = viewWidth - (contentBounds.x + contentBounds.width) * scale - viewWidth / 2
+        let bx = -(contentBounds.x * scale + viewWidth / 2)
+        let ay = viewHeight - (contentBounds.y + contentBounds.height) * scale - viewHeight / 2
+        let by = -(contentBounds.y * scale + viewHeight / 2)
         return Point2D(
-            x: min(viewWidth - mx - minXv, max(mx - maxXv, offset.x)),
-            y: min(viewHeight - my - minYv, max(my - maxYv, offset.y))
+            x: min(max(ax, bx), max(min(ax, bx), offset.x)),
+            y: min(max(ay, by), max(min(ay, by), offset.y))
         )
     }
 
