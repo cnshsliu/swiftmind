@@ -42,14 +42,18 @@ enum SketchTool: String, CaseIterable {
 /// iOS/Catalyst-only), so strokes are captured with SwiftUI gestures and
 /// written into a PKDrawing — the exact payload the iOS port will hand to a
 /// real PKCanvasView. Trim/normalize/commit live in SketchSupport.
+///
+/// Coordinate contract: strokes ALWAYS live in content coordinates (the
+/// committed payload's space) — the editor never rewrites stroke geometry.
+/// Fitting the content into the board is a view-only transform computed once
+/// per session, so the board is steady and reopening always shows every
+/// stroke; commit (trim) therefore always contains all strokes.
 struct SketchEditorView: View {
     @Binding var drawingData: Data
     @Binding var tool: SketchTool
     @Binding var inkColor: NSColor
     /// Called after every committed stroke/erase (drives the debounced commit).
     let onStrokeChange: () -> Void
-    /// Auto-grow: stroke bounds (board coordinates) after each change.
-    let onBoundsChange: (CGRect) -> Void
     let onDone: () -> Void
 
     @State private var drawing = PKDrawing()
@@ -58,28 +62,43 @@ struct SketchEditorView: View {
     @State private var redoStack: [PKDrawing] = []
     /// Drag-start snapshot for the erase gesture (one undo step per erase drag).
     @State private var eraseSnapshot: PKDrawing?
-    @State private var loadedInitialDraft = false
+    /// Last payload we wrote to the binding — distinguishes our own echoes
+    /// from external model changes (byte-stable, unlike dataRepresentation()).
+    @State private var lastSyncedData: Data?
+    /// View-only fit: board-sized rect in content space, fixed per session.
+    @State private var contentRect = CGRect.zero
+    @State private var fitScale: CGFloat = 1
+    @State private var fitComputed = false
+    /// Laid-out board size, captured from the GeometryReader so fit can be
+    /// (re)computed from `load` regardless of onAppear ordering.
+    @State private var boardSize: CGSize = .zero
 
     private static let strokeWidth: CGFloat = 3
     private static let eraserRadius: CGFloat = 8
     private static let toolbarHeight: CGFloat = 36
+    /// Content-space margin kept around existing strokes when fitting.
+    private static let fitPadding: CGFloat = 24
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             board
         }
-        .onAppear {
-            drawing = (try? PKDrawing(data: drawingData)) ?? PKDrawing()
-            loadedInitialDraft = true
-        }
+        .onAppear { load(drawingData) }
         .onChange(of: drawingData) { _, newData in
             // External model change (undo, agent) — reload unless it echoes us.
-            guard drawing.dataRepresentation() != newData else { return }
-            drawing = (try? PKDrawing(data: newData)) ?? PKDrawing()
-            undoStack.removeAll()
-            redoStack.removeAll()
+            guard newData != lastSyncedData else { return }
+            load(newData)
         }
+    }
+
+    private func load(_ data: Data) {
+        drawing = (try? PKDrawing(data: data)) ?? PKDrawing()
+        lastSyncedData = data
+        undoStack.removeAll()
+        redoStack.removeAll()
+        fitComputed = false
+        computeFitIfNeeded()
     }
 
     // MARK: Board
@@ -87,11 +106,18 @@ struct SketchEditorView: View {
     private var board: some View {
         GeometryReader { geo in
             ZStack {
-                CommittedStrokesImage(drawing: drawing, size: geo.size)
+                if fitComputed {
+                    CommittedStrokesImage(drawing: drawing, rect: contentRect)
+                }
                 if tool == .pen, !livePoints.isEmpty {
-                    StrokePreview(points: livePoints, color: Color(nsColor: inkColor))
+                    StrokePreview(
+                        points: livePoints,
+                        color: Color(nsColor: inkColor),
+                        width: Self.strokeWidth * fitScale
+                    )
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -102,7 +128,47 @@ struct SketchEditorView: View {
                         handleDrag(value.location, phase: .ended)
                     }
             )
+            .onAppear {
+                boardSize = geo.size
+                computeFitIfNeeded()
+            }
+            .onChange(of: geo.size) { _, newSize in
+                boardSize = newSize
+                computeFitIfNeeded()
+            }
         }
+    }
+
+    /// Fit the existing content into the board — once per session (or after an
+    /// external reload), so the board never shifts under the pen. Never
+    /// upscales: tiny content shows 1:1 centered in a board-sized content rect.
+    private func computeFitIfNeeded() {
+        guard !fitComputed, boardSize.width > 40, boardSize.height > 40 else { return }
+        let bounds = drawing.bounds
+        if drawing.strokes.isEmpty || bounds.isNull || bounds.isEmpty || bounds.isInfinite {
+            fitScale = 1
+            contentRect = CGRect(origin: .zero, size: boardSize)
+        } else {
+            let w = bounds.width + Self.fitPadding * 2
+            let h = bounds.height + Self.fitPadding * 2
+            let scale = min(1, boardSize.width / w, boardSize.height / h)
+            fitScale = scale
+            contentRect = CGRect(
+                x: bounds.midX - boardSize.width / (2 * scale),
+                y: bounds.midY - boardSize.height / (2 * scale),
+                width: boardSize.width / scale,
+                height: boardSize.height / scale
+            )
+        }
+        fitComputed = true
+    }
+
+    /// Board (gesture) point → content (stroke) point.
+    private func contentPoint(_ boardPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: boardPoint.x / fitScale + contentRect.minX,
+            y: boardPoint.y / fitScale + contentRect.minY
+        )
     }
 
     private enum DragPhase { case changed, ended }
@@ -110,12 +176,17 @@ struct SketchEditorView: View {
     private func handleDrag(_ location: CGPoint, phase: DragPhase) {
         switch tool {
         case .pen:
+            // Record raw board points even before the fit lands (first frames
+            // of a session) — conversion happens at stroke commit, when the
+            // fit is necessarily computed. Gating input on the fit race
+            // dropped whole drags on slow layouts.
             livePoints.append(location)
             if phase == .ended { commitPenStroke() }
         case .eraser:
+            guard fitComputed else { return }
             if phase == .changed {
                 if eraseSnapshot == nil { eraseSnapshot = drawing }
-                eraseStrokes(near: location)
+                eraseStrokes(near: contentPoint(location))
             } else {
                 finishErase()
             }
@@ -125,12 +196,13 @@ struct SketchEditorView: View {
     private func commitPenStroke() {
         defer { livePoints.removeAll() }
         let points = livePoints
-        guard points.count > 1 else { return }
+        computeFitIfNeeded() // last chance: the drag hit the board, so it exists
+        guard points.count > 1, fitComputed else { return }
         pushUndo()
         let now = Date().timeIntervalSinceReferenceDate
-        let strokePoints = points.map { point in
+        let strokePoints = points.map { boardPoint in
             PKStrokePoint(
-                location: point,
+                location: contentPoint(boardPoint),
                 timeOffset: now,
                 size: CGSize(width: Self.strokeWidth, height: Self.strokeWidth),
                 opacity: 1,
@@ -146,7 +218,7 @@ struct SketchEditorView: View {
 
     /// Stroke eraser: removes any stroke passing near the pointer.
     private func eraseStrokes(near location: CGPoint) {
-        let radius = Self.eraserRadius
+        let radius = Self.eraserRadius / fitScale
         let kept = drawing.strokes.filter { stroke in
             !stroke.path.interpolatedPoints(in: nil, by: .distance(radius)).contains { point in
                 abs(point.location.x - location.x) < radius
@@ -172,9 +244,10 @@ struct SketchEditorView: View {
     }
 
     private func syncToModel() {
-        drawingData = drawing.dataRepresentation()
+        let data = drawing.dataRepresentation()
+        lastSyncedData = data
+        drawingData = data
         onStrokeChange()
-        onBoundsChange(drawing.bounds)
     }
 
     private func undo() {
@@ -271,19 +344,21 @@ struct SketchEditorView: View {
 // MARK: - Rendering pieces
 
 /// Committed strokes rasterized through PencilKit (identical ink rendering on
-/// macOS and iOS). Isolated in its own view so live-preview updates do not
-/// re-rasterize.
+/// macOS and iOS) from the session's fixed content rect — the board never
+/// reframes, so strokes stay put while drawing. Isolated in its own view so
+/// live-preview updates do not re-rasterize.
 private struct CommittedStrokesImage: View {
     let drawing: PKDrawing
-    let size: CGSize
+    let rect: CGRect
 
     var body: some View {
         Image(
             nsImage: drawing.image(
-                from: CGRect(origin: .zero, size: size.width > 0 && size.height > 0 ? size : CGSize(width: 1, height: 1)),
+                from: rect.width > 0 && rect.height > 0 ? rect : CGRect(x: 0, y: 0, width: 1, height: 1),
                 scale: 2
             )
         )
+        .resizable()
     }
 }
 
@@ -291,6 +366,7 @@ private struct CommittedStrokesImage: View {
 private struct StrokePreview: View {
     let points: [CGPoint]
     let color: Color
+    var width: CGFloat = 3
 
     var body: some View {
         Path { path in
@@ -298,6 +374,6 @@ private struct StrokePreview: View {
             path.move(to: first)
             for point in points.dropFirst() { path.addLine(to: point) }
         }
-        .stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+        .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
     }
 }

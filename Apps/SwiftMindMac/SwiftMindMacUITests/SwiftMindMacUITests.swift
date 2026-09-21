@@ -1,5 +1,6 @@
 import XCTest
 import Carbon.HIToolbox
+import PencilKit
 
 /// macOS UI smoke tests (XCUITest — built into Xcode).
 ///
@@ -657,6 +658,61 @@ extension SwiftMindMacUITests {
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(nodeCount(), before, "Re-editing a sketch must not create a child")
+    }
+
+    /// Regression: strokes from EVERY editing session must survive commit.
+    /// macOS PencilKit corrupts composed PKStroke transforms on encode —
+    /// the old re-center-on-open path scattered earlier strokes, so the
+    /// second commit persisted only the newest ones (and thumbnails lost
+    /// content). Draw in two separate sessions, then decode the persisted
+    /// payload: both strokes present, bounds origin-normalized.
+    func testSketchTwoSessionsKeepAllStrokes() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+
+        func drawStroke(_ from: CGVector, _ to: CGVector) {
+            app.typeKey(.init("d"), modifierFlags: [])
+            XCTAssertTrue(editor.waitForExistence(timeout: 3), "sketch editor should open")
+            // Editor-relative coordinates: the board is clamped into the
+            // viewport (not always window-centered), so window-relative
+            // drags can miss it entirely.
+            let start = editor.coordinate(withNormalizedOffset: from)
+            let end = editor.coordinate(withNormalizedOffset: to)
+            start.press(forDuration: 0.05, thenDragTo: end)
+            RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
+            let undo = element("sketchUndo")
+            XCTAssertTrue(undo.exists && undo.isEnabled, "drag should record a stroke")
+            app.typeKey(.escape, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            XCTAssertFalse(editor.exists)
+        }
+
+        drawStroke(CGVector(dx: 0.25, dy: 0.4), CGVector(dx: 0.4, dy: 0.6))
+        drawStroke(CGVector(dx: 0.55, dy: 0.4), CGVector(dx: 0.7, dy: 0.6))
+
+        // Autosave is debounced; then read the scratch map from the app
+        // container's tmp (this runner is unsandboxed by entitlement).
+        RunLoop.current.run(until: Date().addingTimeInterval(2.5))
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        guard let html = try? String(contentsOfFile: scratch, encoding: .utf8),
+              let match = html.firstMatch(
+                  of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#
+              ) else {
+            XCTFail("scratch map should contain a committed sketch payload")
+            return
+        }
+        let (_, base64, width, height) = match.output
+        guard let data = Data(base64Encoded: String(base64)),
+              let drawing = try? PKDrawing(data: data) else {
+            XCTFail("sketch payload should decode as PKDrawing")
+            return
+        }
+        XCTAssertEqual(drawing.strokes.count, 2, "both sessions' strokes must persist")
+        XCTAssertGreaterThanOrEqual(drawing.bounds.minX, 0, "trim must keep content origin-normalized")
+        XCTAssertGreaterThanOrEqual(drawing.bounds.minY, 0, "trim must keep content origin-normalized")
+        XCTAssertLessThan(drawing.bounds.maxX, (Double(width) ?? 0) + 1)
+        XCTAssertLessThan(drawing.bounds.maxY, (Double(height) ?? 0) + 1)
     }
 }
 

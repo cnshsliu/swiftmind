@@ -129,11 +129,40 @@ final class SketchNodeTests: XCTestCase {
         let snap = LayoutEngine().layout(map: map)
         let v = snap.nodes.first { $0.id == id }!
         let cfg = LayoutConfig()
-        XCTAssertEqual(v.frame.width, cfg.sketchMaxSize + cfg.paddingX * 2, accuracy: 0.5)
-        XCTAssertEqual(v.frame.height, cfg.sketchMaxSize + 16, accuracy: 0.5)
-        // The visual carries the clamped board so the view never re-clamps.
-        XCTAssertEqual(v.sketchSize?.x, cfg.sketchMaxSize)
-        XCTAssertEqual(v.sketchSize?.y, cfg.sketchMaxSize)
+        // A runaway sketch scales into the media box (aspect preserved).
+        let box = min(cfg.mediaMaxSize, cfg.sketchMaxSize)
+        XCTAssertEqual(v.frame.width, box + cfg.paddingX * 2, accuracy: 0.5)
+        XCTAssertEqual(v.frame.height, box + 16, accuracy: 0.5)
+        // The visual carries the scaled board so the view never re-clamps.
+        XCTAssertEqual(v.sketchSize?.x, box)
+        XCTAssertEqual(v.sketchSize?.y, box)
+    }
+
+    func testLayoutSketchFitPreservesAspect() throws {
+        // 4:1 content inside the default media box: long edge = box, short
+        // edge scales by the same factor.
+        var (map, id) = try makeMapWithSketchNode(width: 640, height: 160)
+        let snap = LayoutEngine().layout(map: map)
+        let v = snap.nodes.first { $0.id == id }!
+        let cfg = LayoutConfig()
+        XCTAssertEqual(v.sketchSize?.x ?? 0, cfg.mediaMaxSize, accuracy: 0.5)
+        XCTAssertEqual(v.sketchSize?.y ?? 0, cfg.mediaMaxSize / 4, accuracy: 0.5)
+    }
+
+    func testLayoutMediaMaxSizeScalesSketchBoard() throws {
+        // The app media-size setting (small=64) shrinks the board box.
+        var (map, id) = try makeMapWithSketchNode(width: 200, height: 100)
+        var config = LayoutConfig()
+        config.mediaMaxSize = 64
+        let snap = LayoutEngine(config: config).layout(map: map)
+        let v = snap.nodes.first { $0.id == id }!
+        XCTAssertEqual(v.sketchSize?.x ?? 0, 64, accuracy: 0.5)
+        XCTAssertEqual(v.sketchSize?.y ?? 0, 32, accuracy: 0.5)
+        // Tiny content still lifts to the min board size.
+        var (map2, id2) = try makeMapWithSketchNode(width: 12, height: 8)
+        let snap2 = LayoutEngine().layout(map: map2)
+        let v2 = snap2.nodes.first { $0.id == id2 }!
+        XCTAssertEqual(v2.sketchSize?.x ?? 0, LayoutConfig().sketchMinSize, accuracy: 0.5)
     }
 
     func testLayoutTitleStripAddedWhenTextPresent() throws {

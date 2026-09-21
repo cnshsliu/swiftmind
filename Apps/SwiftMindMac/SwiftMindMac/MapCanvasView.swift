@@ -1,12 +1,19 @@
 import SwiftUI
 import SwiftMindCore
 import AppKit
+import PencilKit
 import UniformTypeIdentifiers
 
 struct MapCanvasView: View {
     @ObservedObject var session: DocumentSession
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(MediaSizeLevel.defaultsKey) private var mediaSizeLevel = MediaSizeLevel.medium.rawValue
+
+    /// Note-card images scale into the Settings media box.
+    private var mediaImageHeight: CGFloat {
+        CGFloat((MediaSizeLevel(rawValue: mediaSizeLevel) ?? .medium).points)
+    }
 
     /// Base scale captured on the first pinch tick (so magnification multiplies, not replaces).
     @State private var magnifyBase: CGFloat = 1
@@ -95,8 +102,10 @@ struct MapCanvasView: View {
     /// Board the editing overlay currently shows (grows as strokes near edges).
     @State private var sketchEditorSize: CGSize = CGSize(width: 800, height: 600)
 
-    /// Unmodified wheel / two-finger pan vs AppKit `scrollingDelta`.
-    private static let scrollPanSpeed = 8.0
+    /// Classic wheel mice report deltas in line units (~1 per notch) and need
+    /// a points-per-notch distance; precise devices (trackpads, smooth-scroll
+    /// mice) already deliver point deltas and pan 1:1 like a native scroll view.
+    private static let wheelNotchDistance = 40.0
 
     private static let badgeFontSize: CGFloat = 11
     private static let iconSlot: CGFloat = 14
@@ -370,9 +379,7 @@ struct MapCanvasView: View {
                     if node.sketch != lastCommittedSketch {
                         sketchCommitTask?.cancel()
                         sketchCommitTask = nil
-                        sketchDraft = node.sketch.map {
-                            SketchSupport.centered($0, in: sketchEditorSize)
-                        } ?? SketchSupport.emptyDrawingData()
+                        sketchDraft = node.sketch ?? SketchSupport.emptyDrawingData()
                         lastCommittedSketch = node.sketch
                         sketchIsDirty = false
                     }
@@ -499,12 +506,18 @@ struct MapCanvasView: View {
                 )
             } else {
                 session.commandScrollRemainder = 0
-                session.panCanvas(
-                    by: Point2D(
-                        x: Double(event.scrollingDeltaX) * Self.scrollPanSpeed,
-                        y: Double(event.scrollingDeltaY) * Self.scrollPanSpeed
-                    )
-                )
+                let dx = Double(event.scrollingDeltaX)
+                let dy = Double(event.scrollingDeltaY)
+                if event.hasPreciseScrollingDeltas {
+                    // Trackpad / smooth-scroll mouse: content follows the
+                    // finger 1:1 — multiplying here is what felt runaway.
+                    session.panCanvas(by: Point2D(x: dx, y: dy))
+                } else {
+                    session.panCanvas(by: Point2D(
+                        x: dx * Self.wheelNotchDistance,
+                        y: dy * Self.wheelNotchDistance
+                    ))
+                }
             }
             return nil
         }
@@ -973,12 +986,16 @@ struct MapCanvasView: View {
                     Path(roundedRect: boardRect, cornerRadius: 4),
                     with: .color(Color(nsColor: .textBackgroundColor))
                 )
-                if let size = node.sketchSize,
-                   let data = session.store.map.node(id: node.id)?.sketch,
+                if let model = session.store.map.node(id: node.id),
+                   let data = model.sketch,
+                   let contentW = model.sketchWidth, let contentH = model.sketchHeight,
+                   contentW > 0, contentH > 0,
+                   // Rasterize at the natural content size; SwiftUI scales the
+                   // bitmap into the (possibly much smaller) display boardRect.
                    let image = SketchSupport.image(
                        nodeID: node.id,
                        data: data,
-                       boardSize: CGSize(width: size.x, height: size.y),
+                       boardSize: CGSize(width: contentW, height: contentH),
                        scale: scale
                    ) {
                     context.draw(Image(nsImage: image), in: boardRect)
@@ -1128,7 +1145,7 @@ struct MapCanvasView: View {
             return NoteDocument.compose(title: visual.text, body: markdown)
         }()
         ScrollView(.vertical) {
-            MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: 160)
+            MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
         }
@@ -1348,9 +1365,9 @@ struct MapCanvasView: View {
         session.select(nodeID)
         sketchEditorSize = initialSketchEditorSize
         if let existing = node.sketch {
-            // Committed payloads are origin-normalized; re-center into the
-            // big board so there is room to draw around the content.
-            sketchDraft = SketchSupport.centered(existing, in: sketchEditorSize)
+            // Committed payloads stay in content coordinates — the editor
+            // fits them into the board view-only, never rewriting strokes.
+            sketchDraft = existing
             lastCommittedSketch = existing
         } else {
             // First open: convert (undoable); placeholder board until content.
@@ -1399,7 +1416,9 @@ struct MapCanvasView: View {
     }
 
     /// Trim the draft to its stroke bounding box (+ padding), normalize to the
-    /// padding origin, and persist. Empty drawing → placeholder board.
+    /// padding origin, and persist. Empty drawing → placeholder board. A draft
+    /// that fails to decode is NOT treated as empty — wiping real content on a
+    /// transient decode failure is unrecoverable, so we keep the last commit.
     private func commitSketchDraft() {
         guard sketchIsDirty,
               let id = drawingNodeID,
@@ -1417,6 +1436,8 @@ struct MapCanvasView: View {
             )
             lastCommittedSketch = trimmed.data
         } else {
+            let decodesToNoStrokes = ((try? PKDrawing(data: sketchDraft))?.strokes.isEmpty) == true
+            guard decodesToNoStrokes else { return }
             // All strokes erased — back to the empty placeholder.
             let empty = SketchSupport.emptyDrawingData()
             guard empty != lastCommittedSketch else { return }
@@ -1433,24 +1454,11 @@ struct MapCanvasView: View {
         )
     }
 
-    /// Auto-grow the board when strokes approach its edges (PKCanvasView
-    /// clips input to its frame). Grows right/down only; capped at 3 viewports.
-    private func growSketchEditorIfNeeded(_ bounds: CGRect, canvasSize: CGSize) {
-        let margin: CGFloat = 60
-        var width = sketchEditorSize.width
-        var height = sketchEditorSize.height
-        if bounds.maxX > width - margin { width = bounds.maxX + margin }
-        if bounds.maxY > height - margin { height = bounds.maxY + margin }
-        width = min(width, max(320, canvasSize.width * 3))
-        height = min(height, max(240, canvasSize.height * 3))
-        if width != sketchEditorSize.width || height != sketchEditorSize.height {
-            sketchEditorSize = CGSize(width: width, height: height)
-        }
-    }
-
     /// Large borderless drawing surface centered on the node (clamped into the
-    /// viewport) with a compact tool strip. Esc / Done / scrim tap commits and
-    /// closes; the node then shows the trimmed, centered content.
+    /// viewport) with a compact tool strip. The board size is fixed for the
+    /// session — strokes live in content coordinates and the editor fits them
+    /// view-only, so nothing shifts under the pen. Esc / Done / scrim tap
+    /// commits and closes; the node then shows the trimmed, centered content.
     @ViewBuilder
     private func sketchEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
@@ -1464,9 +1472,6 @@ struct MapCanvasView: View {
             tool: $sketchTool,
             inkColor: $sketchInkColor,
             onStrokeChange: { scheduleSketchCommit() },
-            onBoundsChange: { bounds in
-                growSketchEditorIfNeeded(bounds, canvasSize: sketchEditorSize)
-            },
             onDone: { closeSketchEditor() }
         )
         .frame(width: editorW, height: editorH + 36)
