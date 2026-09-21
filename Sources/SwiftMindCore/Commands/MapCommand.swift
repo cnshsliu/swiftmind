@@ -1,7 +1,16 @@
 public protocol MapCommand {
     var name: String { get }
+    /// When non-nil, consecutive executions carrying the same key coalesce
+    /// into ONE undo step on the bus (the note editor's debounced commits use
+    /// this to make a whole editing session a single ⌘Z). Default: nil —
+    /// never coalesces.
+    var coalescingKey: String? { get }
     func execute(on map: inout MindMap) throws
     func undo(on map: inout MindMap) throws
+}
+
+extension MapCommand {
+    public var coalescingKey: String? { nil }
 }
 
 public enum MapCommandError: Error, Equatable {

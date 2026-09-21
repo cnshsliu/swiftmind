@@ -4,14 +4,18 @@
 public final class CompositeAgentCommand: MapCommand {
     public let name = "AgentEdit"
     public let ops: [MapOp]
+    /// Set for note-editor commits so a whole editing session coalesces into
+    /// one undo step on the bus (nil for one-shot agent/CLI batches).
+    public let coalescingKey: String?
 
     /// Ids touched by the last successful execute, in op order.
     public private(set) var affected: [NodeID] = []
 
     private var executed: [any MapCommand] = []
 
-    public init(ops: [MapOp]) {
+    public init(ops: [MapOp], coalescingKey: String? = nil) {
         self.ops = ops
+        self.coalescingKey = coalescingKey
     }
 
     public func execute(on map: inout MindMap) throws {

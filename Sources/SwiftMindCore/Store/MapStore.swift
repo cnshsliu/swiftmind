@@ -116,6 +116,13 @@ public final class MapStore {
         selectionRevision &+= 1
     }
 
+    /// Close the coalescing group with this key (e.g. when the note editor
+    /// closes) so the next same-key command starts a fresh undo step.
+    /// No content change — no revision bump.
+    public func endCoalescing(key: String) {
+        bus.endCoalescing(key: key)
+    }
+
     public var canUndo: Bool { bus.canUndo }
     public var canRedo: Bool { bus.canRedo }
 

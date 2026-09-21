@@ -88,7 +88,6 @@ struct MapCanvasView: View {
     @State private var preEditorPan: CGSize?
     /// The offset we panned to; restore only if the user hasn't panned since.
     @State private var editorPanTarget: CGSize?
-    @FocusState private var noteEditorFocused: Bool
     private static let noteEditorWidth: CGFloat = 420
 
     // MARK: Sketch (drawing) editor
@@ -1335,9 +1334,10 @@ struct MapCanvasView: View {
         let minCenterY = height / 2 + 16
         let maxCenterY = max(minCenterY, viewSize.height - height / 2 - 16)
         let centerY = min(max(rawCenterY, minCenterY), maxCenterY)
-        TextEditor(text: $noteEditorDraft)
-            .font(.system(size: 13, design: .monospaced))
-            .padding(8)
+        MarkdownEditorView(
+            text: $noteEditorDraft,
+            onCancel: { closeNoteEditor(committing: false) } // Esc
+        )
             .frame(width: width, height: height)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
             .overlay(
@@ -1346,14 +1346,10 @@ struct MapCanvasView: View {
             )
             .shadow(color: .black.opacity(0.2), radius: 8, y: 2)
             .position(x: centerX, y: centerY)
-            .focused($noteEditorFocused)
-            .focusEffectDisabled()
-            .onExitCommand { closeNoteEditor(committing: false) }
             .onChange(of: noteEditorDraft) { _, newValue in
                 session.liveNoteDocument = (visual.id, newValue)
                 scheduleNoteCommit()
             }
-            .accessibilityIdentifier("noteEditor")
     }
 
     /// `e` / ⇧⌘E: floating editor to the right of the selected node.
@@ -1388,7 +1384,6 @@ struct MapCanvasView: View {
         if placement == .floatingRight {
             stashAndPanForEditor()
         }
-        DispatchQueue.main.async { noteEditorFocused = true }
     }
 
     /// `committing == false` is the Esc/cancel path: instead of committing the
@@ -1400,7 +1395,15 @@ struct MapCanvasView: View {
         noteCommitTask = nil
         let closingNodeID = noteEditorNodeID
         if committing {
+            // The closing commit still joins the session's coalescing group —
+            // one ⌘Z reverts open-to-close.
             commitNoteEditorDraft()
+        }
+        if let closingNodeID {
+            // End the undo-coalescing group with the session. BEFORE the Esc
+            // revert so the revert never merges into the group: after a
+            // cancel, ⌘Z undoes the revert and a second ⌘Z undoes the session.
+            session.store.endCoalescing(key: Self.noteCoalescingKey(for: closingNodeID))
         }
         noteEditorNodeID = nil
         session.liveNoteDocument = nil
@@ -1461,8 +1464,9 @@ struct MapCanvasView: View {
         session.applyQuiet(SetNoteExpandedCommand(nodeID: primary, isNoteExpanded: !node.isNoteExpanded))
     }
 
-    /// 1s debounce — each typing burst is one CompositeAgentCommand, i.e. one
-    /// undo step (the scheduleAutosave idiom from AppModel). noteCommitTask is
+    /// 1s debounce — each burst is one CompositeAgentCommand carrying the
+    /// session coalescing key, so the whole editor session (open → close) is
+    /// ONE map-level undo step (spec 2026-09-21, 2c). noteCommitTask is
     /// cleared after firing so "a commit is in flight" is detectable.
     private func scheduleNoteCommit() {
         noteCommitTask?.cancel()
@@ -1486,10 +1490,17 @@ struct MapCanvasView: View {
             lastCommittedNoteDocument = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
             return
         }
-        session.applyQuiet(CompositeAgentCommand(ops: ops))
+        session.applyQuiet(
+            CompositeAgentCommand(ops: ops, coalescingKey: Self.noteCoalescingKey(for: id))
+        )
         // Baseline = the normal form the model now holds. A nil split title
         // means no setText op, so the model kept node.text.
         lastCommittedNoteDocument = NoteDocument.compose(title: title ?? node.text, body: body)
+    }
+
+    /// All debounced commits of one note-editor session share this key.
+    private static func noteCoalescingKey(for id: NodeID) -> String {
+        "note-edit:\(id.rawValue)"
     }
 
     // MARK: - Sketch editor (large borderless board, trim-to-content on commit)

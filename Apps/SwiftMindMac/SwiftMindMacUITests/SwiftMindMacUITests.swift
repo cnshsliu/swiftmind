@@ -504,6 +504,93 @@ final class SwiftMindMacUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
     }
 
+    /// Typing aid: Return on a `- ` list line continues the marker on the
+    /// next line (outliner behavior in MarkdownEditorView).
+    func testNoteEditorListContinuation() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        editor.click()
+        // Caret to the document end (past the `# title` line), then one item.
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("- alpha")
+        app.typeKey(.return, modifierFlags: []) // continues the "- " marker
+        app.typeText("beta")
+
+        app.typeKey(.return, modifierFlags: .command) // ⌘Enter: commit & close
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("- alpha") && $0.contains("- beta") },
+            "Return on a list line must insert the marker (only \"beta\" was typed)"
+        )
+    }
+
+    /// Typing aid: ⌘B wraps the selected word in `**`.
+    func testNoteEditorBoldShortcut() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("bold")
+        app.typeKey(.leftArrow, modifierFlags: [.shift, .option]) // select the word
+        app.typeKey("b", modifierFlags: .command)
+
+        app.typeKey(.return, modifierFlags: .command) // commit & close
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("**bold**") },
+            "⌘B must wrap the selection in ** markers"
+        )
+    }
+
+    /// Undo coalescing (2c): all debounced bursts of one editor session are a
+    /// single map-level undo step.
+    func testNoteUndoRevertsWholeSession() throws {
+        focusCanvasWithSelection()
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "E should open the note editor")
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("sessAAA")
+        // Burst 1 must land on disk before burst 2, otherwise a missing
+        // coalescing merge would pass vacuously.
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("sessAAA") },
+            "first debounced commit should autosave"
+        )
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        app.typeText("sessBBB")
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("sessBBB") },
+            "second debounced commit should autosave"
+        )
+
+        app.typeKey(.return, modifierFlags: .command) // ⌘Enter: commit & close
+        let closed = NSPredicate { _, _ in !editor.exists }
+        expectation(for: closed, evaluatedWith: nil)
+        waitForExpectations(timeout: 5)
+
+        // One map-level ⌘Z reverts BOTH bursts (canvas has focus, so this is
+        // the store undo, not text-level undo).
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(
+            waitForScratchMap { !$0.contains("sessAAA") && !$0.contains("sessBBB") },
+            "one ⌘Z must revert the whole editing session"
+        )
+    }
+
     func testZZCaptureNoteMathRendering() throws {
         focusCanvasWithSelection()
         app.typeKey(.init("e"), modifierFlags: [])
