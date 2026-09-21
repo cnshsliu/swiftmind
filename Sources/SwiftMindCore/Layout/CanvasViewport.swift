@@ -91,6 +91,33 @@ public struct CanvasViewport: Equatable, Sendable {
         offset = Point2D(x: offset.x + delta.x, y: offset.y + delta.y)
     }
 
+    /// Offset clamped so the content always keeps a visible strip on screen:
+    /// the scaled content bounding box must intersect the viewport inset by
+    /// 25% per axis. This is the interactive pan limit shared by dragging and
+    /// scrolling — free inside the envelope, hard stop at the boundary.
+    /// Zoom-aware because the bounds are scaled before comparison.
+    public func visibleClampedOffset(
+        contentBounds: Rect2D,
+        viewWidth: Double,
+        viewHeight: Double
+    ) -> Point2D {
+        let mx = viewWidth * 0.25
+        let my = viewHeight * 0.25
+        guard viewWidth > mx * 2, viewHeight > my * 2, scale > 0 else {
+            return offset
+        }
+        // Content bbox in view coordinates: p_view = p_map*scale + viewSize/2 + offset;
+        // it must overlap [margin, viewSize - margin] on each axis.
+        let minXv = contentBounds.x * scale + viewWidth / 2
+        let maxXv = (contentBounds.x + contentBounds.width) * scale + viewWidth / 2
+        let minYv = contentBounds.y * scale + viewHeight / 2
+        let maxYv = (contentBounds.y + contentBounds.height) * scale + viewHeight / 2
+        return Point2D(
+            x: min(viewWidth - mx - minXv, max(mx - maxXv, offset.x)),
+            y: min(viewHeight - my - minYv, max(my - maxYv, offset.y))
+        )
+    }
+
     /// Offset clamped so the content cannot be stranded entirely offscreen.
     ///
     /// Defense against pathological pan/zoom input (a single glitched drag

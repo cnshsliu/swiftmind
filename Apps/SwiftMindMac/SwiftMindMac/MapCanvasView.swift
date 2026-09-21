@@ -29,12 +29,13 @@ struct MapCanvasView: View {
             CGSize(width: session.viewport.offset.x, height: session.viewport.offset.y)
         }
         nonmutating set {
-            // Glitched drag/scroll events can deliver one huge delta; keep the
-            // content center reachable so the canvas never strands blank.
+            // Interactive pan limit (drag + scroll): the scaled content must
+            // keep a visible strip on screen — never a blank viewport.
+            // Glitched huge deltas are clamped to the same boundary.
             var candidate = session.viewport
             candidate.offset = Point2D(x: Double(newValue.width), y: Double(newValue.height))
             session.setCanvasOffset(
-                candidate.clampedOffset(
+                candidate.visibleClampedOffset(
                     contentBounds: session.store.snapshot().bounds,
                     viewWidth: Double(canvasSize.width),
                     viewHeight: Double(canvasSize.height)
@@ -224,6 +225,12 @@ struct MapCanvasView: View {
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
                 session.rememberCanvasLayout(width: Double(newSize.width), height: Double(newSize.height))
+            }
+            // Any zoom change (pinch, ⌘-scroll, menu) can strand the view at
+            // the edges — re-apply the never-blank pan clamp. Only touches
+            // the offset, never the scale, so this cannot re-trigger itself.
+            .onChange(of: session.viewport.scale) { _, _ in
+                offset = offset
             }
             // Focus target for keyboard: Return = rename, Delete = remove (non-root).
             .focusable()
@@ -508,16 +515,18 @@ struct MapCanvasView: View {
                 session.commandScrollRemainder = 0
                 let dx = Double(event.scrollingDeltaX)
                 let dy = Double(event.scrollingDeltaY)
-                if event.hasPreciseScrollingDeltas {
-                    // Trackpad / smooth-scroll mouse: content follows the
-                    // finger 1:1 — multiplying here is what felt runaway.
-                    session.panCanvas(by: Point2D(x: dx, y: dy))
-                } else {
-                    session.panCanvas(by: Point2D(
-                        x: dx * Self.wheelNotchDistance,
-                        y: dy * Self.wheelNotchDistance
-                    ))
-                }
+                // Trackpad / smooth-scroll mouse: content follows the finger
+                // 1:1 (multiplying here is what felt runaway). Classic wheel
+                // mice report ~1 line per notch and get a fixed distance.
+                // Both route through the clamped `offset` setter so the map
+                // can never be scrolled into a blank viewport.
+                let step = event.hasPreciseScrollingDeltas
+                    ? Point2D(x: dx, y: dy)
+                    : Point2D(x: dx * Self.wheelNotchDistance, y: dy * Self.wheelNotchDistance)
+                offset = CGSize(
+                    width: offset.width + CGFloat(step.x),
+                    height: offset.height + CGFloat(step.y)
+                )
             }
             return nil
         }
