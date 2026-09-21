@@ -17,6 +17,9 @@ final class DocumentSession: ObservableObject {
 
     /// Canvas pan/zoom. View-state only — not persisted, not undoable.
     @Published var viewport = CanvasViewport()
+    /// Set when the map had no saved viewport: the canvas zooms to fit the
+    /// whole map on first layout, then clears this.
+    var needsInitialFit = false
     /// Last laid-out canvas size (for keyboard zoom when the canvas is unmounted).
     private(set) var lastCanvasWidth: Double = 0
     private(set) var lastCanvasHeight: Double = 0
@@ -210,6 +213,20 @@ final class DocumentSession: ObservableObject {
             viewWidth: lastCanvasWidth,
             viewHeight: lastCanvasHeight
         )
+        viewport = next
+        onViewportChanged?()
+    }
+
+    /// Fit the whole map into the view (Zoom to Fit / first open of a map
+    /// with no saved viewport). No-op until the canvas reports its size.
+    func zoomToFit() {
+        guard !isBrainMode else { return }
+        let next = viewport.fittedToContent(
+            contentBounds: store.snapshot().bounds,
+            viewWidth: lastCanvasWidth,
+            viewHeight: lastCanvasHeight
+        )
+        guard next != viewport else { return }
         viewport = next
         onViewportChanged?()
     }

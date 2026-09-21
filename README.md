@@ -128,7 +128,7 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 | Click node | Select |
 | **Drag text/URL/file/image in** from any app | Add node(s) — drop on a node = child of it; empty canvas = child of selection pinned at the drop point |
 
-- **Zoom:** ⌘+ in, ⌘- out, ⌘0 actual size (100%). Also View menu, toolbar, ⌘K, pinch, and ⌘+scroll. Range 25%–300%.
+- **Zoom:** ⌘+ in, ⌘- out, ⌘0 actual size (100%), ⌘9 zoom to fit the whole map. Also View menu, toolbar, ⌘K, pinch, and ⌘+scroll. Range 25%–300%. A map you have never opened before opens fitted to the window; after that your own pan/zoom position is restored.
 
 ## M3 features (power layer)
 

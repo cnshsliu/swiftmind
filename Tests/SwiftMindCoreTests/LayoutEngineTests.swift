@@ -199,6 +199,28 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertTrue(snapshot.nodes.first { $0.id == map.root.id }!.isSelected)
     }
 
+    func testFormulaNodeReservesHeightUnderTitle() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_plain"), text: "Plain", side: .right),
+            on: &map
+        )
+        try bus.execute(
+            InsertChildCommand(parentID: map.root.id, newNodeID: NodeID(rawValue: "n_sum"), text: "Project budget (sums children)", side: .right),
+            on: &map
+        )
+        try bus.execute(
+            SetFormulaCommand(nodeID: NodeID(rawValue: "n_sum"), formula: "sum(children)"),
+            on: &map
+        )
+
+        let snapshot = LayoutEngine().layout(map: map)
+        let plain = snapshot.nodes.first { $0.id.rawValue == "n_plain" }!
+        let summed = snapshot.nodes.first { $0.id.rawValue == "n_sum" }!
+        XCTAssertEqual(summed.frame.height, plain.frame.height + LayoutConfig().formulaBadgeHeight, accuracy: 0.001)
+    }
+
     func testExpandedNoteNodeUsesCardSize() throws {
         var map = MindMap.makeEmpty(title: "T")
         let bus = CommandBus()

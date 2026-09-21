@@ -115,4 +115,46 @@ final class ViewportClampTests: XCTestCase {
         XCTAssertEqual(vp.offset.x, 9999)
         XCTAssertEqual(vp.offset.y, 9999)
     }
+
+    // MARK: - fittedToContent (first-open auto fit / Zoom to Fit)
+
+    /// Content bigger than the view zooms out to fit, centered.
+    func testFitZoomsOutToCoverWholeContent() {
+        let vp = CanvasViewport().fittedToContent(
+            contentBounds: content, viewWidth: 1000, viewHeight: 800
+        )
+        // fit = min((1000-96)/2000, (800-96)/1400) = min(0.452, 0.503) = 0.452
+        XCTAssertEqual(vp.scale, 0.452, accuracy: 1e-9)
+        // Content center (0,0) maps to the view center: offset = -center*s = 0.
+        XCTAssertEqual(vp.offset.x, 0, accuracy: 1e-9)
+        XCTAssertEqual(vp.offset.y, 0, accuracy: 1e-9)
+    }
+
+    /// Content smaller than the view stays at 1:1 — fit never zooms IN.
+    func testFitNeverZoomsIn() {
+        let small = Rect2D(x: 100, y: 200, width: 100, height: 80)
+        let vp = CanvasViewport().fittedToContent(
+            contentBounds: small, viewWidth: 1000, viewHeight: 800
+        )
+        XCTAssertEqual(vp.scale, 1)
+        // Centered at 1:1: offset = -center = (-150, -240).
+        XCTAssertEqual(vp.offset.x, -150, accuracy: 1e-9)
+        XCTAssertEqual(vp.offset.y, -240, accuracy: 1e-9)
+    }
+
+    /// Huge content bottoms out at minScale instead of vanishing to a speck.
+    func testFitRespectsMinScale() {
+        let huge = Rect2D(x: -50_000, y: -50_000, width: 100_000, height: 100_000)
+        let vp = CanvasViewport().fittedToContent(
+            contentBounds: huge, viewWidth: 1000, viewHeight: 800
+        )
+        XCTAssertEqual(vp.scale, CanvasViewport.minScale)
+    }
+
+    /// Degenerate inputs return the viewport unchanged.
+    func testFitDegeneratePassesThrough() {
+        let vp = CanvasViewport(scale: 2, offset: Point2D(x: 10, y: 20))
+        let out = vp.fittedToContent(contentBounds: content, viewWidth: 0, viewHeight: 800)
+        XCTAssertEqual(out, vp)
+    }
 }

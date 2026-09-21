@@ -8,6 +8,8 @@ public struct LayoutConfig: Equatable, Sendable {
     public var paddingX: Double = 12
     public var iconSlotWidth: Double = 14
     public var badgeReserve: Double = 12
+    /// Extra node height when a formula is set, so the result can sit under the title.
+    public var formulaBadgeHeight: Double = 16
     /// Fixed width of an expanded note card (spec 2026-09-04).
     public var expandedNoteWidth: Double = 360
     /// Estimated height per markdown line in an expanded card (incl. the virtual H1 line).
@@ -39,6 +41,7 @@ public struct LayoutConfig: Equatable, Sendable {
         paddingX: Double = 12,
         iconSlotWidth: Double = 14,
         badgeReserve: Double = 12,
+        formulaBadgeHeight: Double = 16,
         expandedNoteWidth: Double = 360,
         expandedNoteLineHeight: Double = 20,
         expandedNoteMaxHeight: Double = 400,
@@ -56,6 +59,7 @@ public struct LayoutConfig: Equatable, Sendable {
         self.paddingX = paddingX
         self.iconSlotWidth = iconSlotWidth
         self.badgeReserve = badgeReserve
+        self.formulaBadgeHeight = formulaBadgeHeight
         self.expandedNoteWidth = expandedNoteWidth
         self.expandedNoteLineHeight = expandedNoteLineHeight
         self.expandedNoteMaxHeight = expandedNoteMaxHeight

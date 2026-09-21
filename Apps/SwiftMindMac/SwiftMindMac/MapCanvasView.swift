@@ -109,6 +109,8 @@ struct MapCanvasView: View {
     private static let wheelNotchDistance = 40.0
 
     private static let badgeFontSize: CGFloat = 11
+    /// Space reserved at the bottom of a node for the formula result line.
+    private static let formulaBadgeStrip: CGFloat = 14
     private static let iconSlot: CGFloat = 14
     /// Extra hit padding in map space (apple-design: ~hysteresis around targets).
     private static let hitPadding: Double = 4
@@ -216,11 +218,13 @@ struct MapCanvasView: View {
                 canvasSize = geo.size
                 session.rememberCanvasLayout(width: Double(geo.size.width), height: Double(geo.size.height))
                 healRestoredViewport(viewSize: geo.size)
+                fitViewportIfNeeded()
             }
             // Bootstrap swaps in a new session (with the saved viewport
             // restored) AFTER this view first appeared — heal then too.
             .onChange(of: ObjectIdentifier(session)) { _, _ in
                 healRestoredViewport(viewSize: canvasSize)
+                fitViewportIfNeeded()
             }
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
@@ -765,6 +769,14 @@ struct MapCanvasView: View {
         session.setCanvasOffset(Point2D(x: 0, y: 0))
     }
 
+    /// First open of a map with no saved viewport: zoom to fit the whole map.
+    /// Runs once per session, after the canvas knows its size.
+    private func fitViewportIfNeeded() {
+        guard session.needsInitialFit, canvasSize.width > 40, canvasSize.height > 40 else { return }
+        session.needsInitialFit = false
+        session.zoomToFit()
+    }
+
     /// Pan so the primary selection stays inside a comfortable viewport margin.
     private func ensurePrimaryVisible(animated: Bool) {
         guard canvasSize.width > 40, canvasSize.height > 40 else { return }
@@ -954,12 +966,13 @@ struct MapCanvasView: View {
             // Hide label while editing this node (overlay TextField shows it);
             // expanded nodes render the note card, sketch nodes the drawing board.
             if editingNodeID != node.id && !node.isNoteExpanded && !node.hasSketch {
+                let formulaStrip: CGFloat = formulaResults[node.id] == nil ? 0 : Self.formulaBadgeStrip
                 let textRect = rect.insetBy(dx: 6, dy: 4)
                 let adjustedTextRect = CGRect(
                     x: textRect.minX + iconStripWidth,
                     y: textRect.minY,
                     width: max(0, textRect.width - iconStripWidth),
-                    height: textRect.height
+                    height: max(0, textRect.height - formulaStrip)
                 )
                 let text = Text(node.text)
                     .font(.system(
@@ -1054,7 +1067,7 @@ struct MapCanvasView: View {
                 )
             }
 
-            // Formula result badge — bottom-left of frame ("= 30", "75%", "#ERR").
+            // Formula result — own line under the title, not overlaid on it.
             if let value = formulaResults[node.id] {
                 let formula = session.store.map.node(id: node.id)?.formula
                 let badgeText = FormulaBadgeFormatter.text(for: value, formula: formula)
@@ -1064,8 +1077,8 @@ struct MapCanvasView: View {
                     .foregroundColor(isError ? Color.red : Theme.badgeMuted)
                 context.draw(
                     badge,
-                    at: CGPoint(x: rect.minX + 4, y: rect.maxY - 4),
-                    anchor: .bottomLeading
+                    at: CGPoint(x: rect.midX, y: rect.maxY - 5),
+                    anchor: .bottom
                 )
             }
         }

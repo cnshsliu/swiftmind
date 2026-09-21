@@ -354,5 +354,11 @@ private struct SessionZoomCommands: View {
         }
         .keyboardShortcut("0", modifiers: .command)
         .disabled(session == nil || (session?.isBrainMode ?? false))
+
+        Button("Zoom to Fit") {
+            session?.zoomToFit()
+        }
+        .keyboardShortcut("9", modifiers: .command)
+        .disabled(session == nil || (session?.isBrainMode ?? false))
     }
 }

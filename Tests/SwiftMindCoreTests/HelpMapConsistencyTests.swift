@@ -13,7 +13,7 @@ final class HelpMapConsistencyTests: XCTestCase {
             "⌘Z undo",
             "⌘F searches",
             "⌘K command palette",
-            "⌘+ / ⌘- / ⌘0 zoom",
+            "⌘+ / ⌘- / ⌘0 / ⌘9 zoom",
             "orphan",
             "n_help_why_orphan",
             "n_help_why_dangle",

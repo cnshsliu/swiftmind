@@ -102,7 +102,9 @@ public struct LayoutEngine: Sendable {
                 boardW = config.sketchMinSize
                 boardH = config.sketchMinSize
             }
-            return (boardW + config.paddingX * 2, 16 + titleH + boardH)
+            var h = 16 + titleH + boardH
+            if Self.hasFormula(node) { h += config.formulaBadgeHeight }
+            return (boardW + config.paddingX * 2, h)
         }
         if node.isNoteExpanded {
             // Deterministic estimate (core stays UI-free): one line per
@@ -118,10 +120,9 @@ public struct LayoutEngine: Sendable {
                 : MarkdownSegmenter.estimatedLineCount(of: node.noteMarkdown, linesPerImage: linesPerImage)
             let estimated = Double(bodyLines + 1) * config.expandedNoteLineHeight
                 + config.paddingX * 2
-            return (
-                config.expandedNoteWidth,
-                min(config.expandedNoteMaxHeight, max(config.nodeHeight, estimated))
-            )
+            var h = min(config.expandedNoteMaxHeight, max(config.nodeHeight, estimated))
+            if Self.hasFormula(node) { h += config.formulaBadgeHeight }
+            return (config.expandedNoteWidth, h)
         }
         let cw = max(config.charWidth, style.fontSize * 0.55)
         let textWidth = Double(max(1, node.text.count)) * cw
@@ -130,12 +131,20 @@ public struct LayoutEngine: Sendable {
         var badgeWidth = 0.0
         if !node.noteMarkdown.isEmpty { badgeWidth += config.badgeReserve }
         if node.positionPin != nil { badgeWidth += config.badgeReserve * 0.5 }
+        let hasFormula = Self.hasFormula(node)
+        if hasFormula { badgeWidth += config.badgeReserve }
         let width = max(
             config.minNodeWidth,
             textWidth + iconWidth + badgeWidth + config.paddingX * 2
         )
-        let height = max(config.nodeHeight, style.fontSize + 16)
+        var height = max(config.nodeHeight, style.fontSize + 16)
+        if hasFormula { height += config.formulaBadgeHeight }
         return (width, height)
+    }
+
+    private static func hasFormula(_ node: Node) -> Bool {
+        guard let f = node.formula else { return false }
+        return !f.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Side assignment (root children only)

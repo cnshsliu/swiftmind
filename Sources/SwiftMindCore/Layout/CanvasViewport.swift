@@ -91,6 +91,30 @@ public struct CanvasViewport: Equatable, Sendable {
         offset = Point2D(x: offset.x + delta.x, y: offset.y + delta.y)
     }
 
+    /// Viewport that shows the whole content centered in the view.
+    /// Never zooms in past 1:1 (a map smaller than the view stays at actual
+    /// size, centered) and never below `minScale`.
+    public func fittedToContent(
+        contentBounds: Rect2D,
+        viewWidth: Double,
+        viewHeight: Double,
+        padding: Double = 48
+    ) -> CanvasViewport {
+        guard viewWidth > padding * 2, viewHeight > padding * 2,
+              contentBounds.width > 0, contentBounds.height > 0 else { return self }
+        let fit = min(
+            (viewWidth - padding * 2) / contentBounds.width,
+            (viewHeight - padding * 2) / contentBounds.height
+        )
+        let s = Self.clamped(min(1, fit))
+        // p_view = p_map*scale + viewSize/2 + offset; offset that puts the
+        // content center at the view center is -contentCenter*scale.
+        return CanvasViewport(
+            scale: s,
+            offset: Point2D(x: -contentBounds.midX * s, y: -contentBounds.midY * s)
+        )
+    }
+
     /// Offset clamped so the viewport never shows blank space beyond the
     /// content — the natural scroll-view rule, per axis:
     ///

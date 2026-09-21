@@ -190,6 +190,10 @@ final class AppModel: ObservableObject {
             session.isBrainMode = false
             if !isUITesting, let saved = viewStateStore.viewport(for: map.id) {
                 session.viewport = saved
+            } else {
+                // Never seen this map: open with the whole map in view.
+                // The canvas performs the fit once it knows its size.
+                session.needsInitialFit = !isUITesting
             }
             wireSession()
             lastKnownFileHash = data.hashValue
