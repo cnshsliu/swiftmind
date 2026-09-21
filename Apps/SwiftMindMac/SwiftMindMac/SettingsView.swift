@@ -25,10 +25,44 @@ enum LaunchBehavior: String, CaseIterable, Identifiable {
     }
 }
 
+/// Display size for inline media (images in notes, sketch boards), picked in
+/// Settings. Persisted as `swiftmind.mediaSize`; small matches a Mac app icon.
+enum MediaSizeLevel: String, CaseIterable, Identifiable {
+    case small
+    case medium
+    case large
+
+    static let defaultsKey = "swiftmind.mediaSize"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .small: return "Small (app-icon size)"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        }
+    }
+
+    /// Square display box (points) media content scales to fit inside.
+    var points: Double {
+        switch self {
+        case .small: return 64
+        case .medium: return 160
+        case .large: return 320
+        }
+    }
+
+    static var current: MediaSizeLevel {
+        MediaSizeLevel(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .medium
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject private var library = VaultLibrary.shared
     @AppStorage(LaunchBehavior.defaultsKey) private var launchBehavior = LaunchBehavior.help.rawValue
+    @AppStorage(MediaSizeLevel.defaultsKey) private var mediaSize = MediaSizeLevel.medium.rawValue
     @AppStorage("swiftmind.agentBridge") private var agentBridgeEnabled = true
 
     var body: some View {
@@ -37,7 +71,7 @@ struct SettingsView: View {
             vaultsTab
             agentTab
         }
-        .frame(width: 460, height: 260)
+        .frame(width: 460, height: 300)
     }
 
     private var generalTab: some View {
@@ -47,6 +81,14 @@ struct SettingsView: View {
                     Text(behavior.label).tag(behavior.rawValue)
                 }
             }
+            Picker("Inline media size:", selection: $mediaSize) {
+                ForEach(MediaSizeLevel.allCases) { level in
+                    Text(level.label).tag(level.rawValue)
+                }
+            }
+            Text("Images in notes and hand-drawn sketch boards scale to fit this size.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HStack {
                 Button("Open Welcome Map") {
                     appModel.openHelpMap()

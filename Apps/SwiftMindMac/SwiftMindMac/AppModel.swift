@@ -35,6 +35,14 @@ final class AppModel: ObservableObject {
     init() {
         // Placeholder until bootstrap; replaced immediately.
         session = DocumentSession(map: .makeEmpty(title: "Untitled"))
+        // Settings media size applies live to the open session.
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.session.applyMediaSize() }
+        }
     }
 
     // MARK: - Launch

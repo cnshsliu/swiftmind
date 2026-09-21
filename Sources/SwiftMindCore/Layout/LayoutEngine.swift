@@ -89,14 +89,14 @@ public struct LayoutEngine: Sendable {
     private func measure(_ node: Node, sheet: StyleSheet) -> (width: Double, height: Double) {
         let style = StyleResolver.resolve(node: node, sheet: sheet)
         if node.sketch != nil {
-            // Sketch node: sized from the trimmed content board (clamped),
-            // plus an optional title strip. Sketch wins over the note card.
+            // Sketch node: sized from the trimmed content board (scaled to fit
+            // the media box), plus an optional title strip. Sketch wins over
+            // the note card.
             let titleH = node.text.isEmpty ? 0 : config.sketchTitleLineHeight
             let boardW: Double
             let boardH: Double
             if let w = node.sketchWidth, let h = node.sketchHeight, w > 0, h > 0 {
-                boardW = min(config.sketchMaxSize, max(config.sketchMinSize, w))
-                boardH = min(config.sketchMaxSize, max(config.sketchMinSize, h))
+                (boardW, boardH) = sketchBoardSize(contentWidth: w, contentHeight: h)
             } else {
                 // No content yet (or cleared): minimal placeholder board.
                 boardW = config.sketchMinSize
@@ -106,12 +106,16 @@ public struct LayoutEngine: Sendable {
         }
         if node.isNoteExpanded {
             // Deterministic estimate (core stays UI-free): one line per
-            // markdown line (images count as 8 lines, block math as its
-            // rows) plus the virtual H1 line, padded and capped.
-            // The canvas clips any overflow inside this frame.
+            // markdown line (images count as mediaMaxSize/lineHeight lines,
+            // block math as its rows) plus the virtual H1 line, padded and
+            // capped. The canvas clips any overflow inside this frame.
+            let linesPerImage = max(
+                1,
+                Int((config.mediaMaxSize / config.expandedNoteLineHeight).rounded())
+            )
             let bodyLines = node.noteMarkdown.isEmpty
                 ? 0
-                : MarkdownSegmenter.estimatedLineCount(of: node.noteMarkdown, linesPerImage: 8)
+                : MarkdownSegmenter.estimatedLineCount(of: node.noteMarkdown, linesPerImage: linesPerImage)
             let estimated = Double(bodyLines + 1) * config.expandedNoteLineHeight
                 + config.paddingX * 2
             return (
@@ -383,14 +387,25 @@ public struct LayoutEngine: Sendable {
         edges.append(EdgeVisual(from: parent.id, to: child.id, fromPoint: fromPt, toPoint: toPt))
     }
 
-    /// Clamped sketch board size for the canvas render rect; nil while empty.
+    /// Scaled sketch board size for the canvas render rect; nil while empty.
     private func sketchSize(of node: Node) -> Point2D? {
         guard node.sketch != nil,
               let w = node.sketchWidth, let h = node.sketchHeight, w > 0, h > 0 else { return nil }
-        return Point2D(
-            x: min(config.sketchMaxSize, max(config.sketchMinSize, w)),
-            y: min(config.sketchMaxSize, max(config.sketchMinSize, h))
-        )
+        let (bw, bh) = sketchBoardSize(contentWidth: w, contentHeight: h)
+        return Point2D(x: bw, y: bh)
+    }
+
+    /// Uniform scale-to-fit of sketch content inside the media box: the long
+    /// edge lands on `min(mediaMaxSize, sketchMaxSize)` (never upscaling past
+    /// the content), tiny drawings lift to `sketchMinSize` on the long edge.
+    private func sketchBoardSize(contentWidth w: Double, contentHeight h: Double) -> (Double, Double) {
+        let box = min(config.mediaMaxSize, config.sketchMaxSize)
+        let longEdge = max(w, h)
+        var factor = min(1, box / longEdge)
+        if longEdge * factor < config.sketchMinSize {
+            factor = config.sketchMinSize / longEdge
+        }
+        return (w * factor, h * factor)
     }
 
     private func appendNode(

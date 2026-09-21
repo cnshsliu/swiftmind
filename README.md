@@ -9,7 +9,7 @@ Architecture: **SwiftMindCore** (model, commands, layout, HTML codec) + **SwiftM
 ### Startup & My Brain
 
 - **No Open panel** on launch: opens the bundled **Welcome map** (the user guide as a live, editable demo map, installed into the default library and refreshed on updates unless you edited it). Settings (⌘,) can switch launch behavior to **last open map** or **My Brain**. Help → **SwiftMind Help** reinstalls a fresh copy anytime.
-- **Settings** (⌘,): launch behavior, vault management, recent-maps cleanup, and the agent-bridge on/off switch.
+- **Settings** (⌘,): launch behavior, inline media size (small / medium / large — scales note images and sketch boards; small is app-icon size), vault management, recent-maps cleanup, and the agent-bridge on/off switch.
 - **My Brain** (toolbar / **⇧⌘B**): mind-map navigator whose root is **My Brain**; **vault folders** you add are first-level children; **subfolders** and **`.swiftmind.html` / `.html` maps** nest underneath.
 - Double-click (or Return) a **map** node to open it; double-click a **folder/vault** to fold/unfold. **Add Vault…** registers more folders (security-scoped bookmarks).
 - Autosave writes the current map file while editing.

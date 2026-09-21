@@ -7,6 +7,7 @@ import AppKit
 struct MarkdownImageView: View {
     let alt: String
     let urlString: String
+    /// Square display box (points) the image scales to fit inside.
     var maxHeight: CGFloat = 200
 
     var body: some View {
@@ -14,7 +15,7 @@ struct MarkdownImageView: View {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFit()
-                .frame(maxHeight: maxHeight)
+                .frame(maxWidth: maxHeight, maxHeight: maxHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
                 .accessibilityLabel(alt.isEmpty ? "Image" : alt)
         } else {

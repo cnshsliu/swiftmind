@@ -10,8 +10,21 @@ public final class MapStore {
     public var revision: UInt64 { contentRevision &+ selectionRevision }
 
     private let bus = CommandBus()
-    private let layoutEngine = LayoutEngine()
+    private var layoutEngine = LayoutEngine()
     private var formulaEngine = FormulaEngine()
+
+    /// Layout parameters (gaps, media size, …). Changing them invalidates the
+    /// geometry cache and bumps `contentRevision` so views re-render — the map
+    /// content itself is untouched.
+    public var layoutConfig: LayoutConfig {
+        get { layoutEngine.config }
+        set {
+            guard newValue != layoutEngine.config else { return }
+            layoutEngine.config = newValue
+            invalidateGeometry()
+            contentRevision &+= 1
+        }
+    }
 
     /// Geometry-only snapshot (selection flags cleared). Invalidated on content change.
     private var cachedGeometry: MapSnapshot?

@@ -5,6 +5,11 @@ import AppKit
 /// Trailing inspector for the selected node's text, note, links, icons, and style.
 struct InspectorView: View {
     @ObservedObject var session: DocumentSession
+    @AppStorage(MediaSizeLevel.defaultsKey) private var mediaSizeLevel = MediaSizeLevel.medium.rawValue
+
+    private var mediaImageHeight: CGFloat {
+        CGFloat((MediaSizeLevel(rawValue: mediaSizeLevel) ?? .medium).points)
+    }
 
     @State private var titleDraft: String = ""
     @State private var urlDraft: String = ""
@@ -54,7 +59,7 @@ struct InspectorView: View {
                         return node.noteMarkdown
                     }()
                     if !bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        MarkdownTextView(markdown: bodyMarkdown, fontSize: 13, maxImageHeight: 320)
+                        MarkdownTextView(markdown: bodyMarkdown, fontSize: 13, maxImageHeight: mediaImageHeight)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("notePreview")
                     } else {

@@ -18,6 +18,7 @@ struct SwiftMindMacApp: App {
         UserDefaults.standard.register(defaults: [
             "swiftmind.agentBridge": true,
             LaunchBehavior.defaultsKey: LaunchBehavior.help.rawValue,
+            MediaSizeLevel.defaultsKey: MediaSizeLevel.medium.rawValue,
         ])
     }
 

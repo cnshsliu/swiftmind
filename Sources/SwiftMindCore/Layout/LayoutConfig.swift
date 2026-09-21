@@ -22,6 +22,11 @@ public struct LayoutConfig: Equatable, Sendable {
     public var sketchMaxSize: Double = 1000
     /// Optional title strip above a sketch board.
     public var sketchTitleLineHeight: Double = 20
+    /// Display box (points) for inline media: sketch boards scale to fit inside
+    /// it, and expanded-note height estimates count one image as
+    /// `mediaMaxSize / expandedNoteLineHeight` lines. Driven by the app's
+    /// media-size setting; still clamped by `sketchMaxSize` as a hard ceiling.
+    public var mediaMaxSize: Double = 160
 
     public init() {}
 
@@ -40,7 +45,8 @@ public struct LayoutConfig: Equatable, Sendable {
         sketchTrimPadding: Double = 8,
         sketchMinSize: Double = 40,
         sketchMaxSize: Double = 1000,
-        sketchTitleLineHeight: Double = 20
+        sketchTitleLineHeight: Double = 20,
+        mediaMaxSize: Double = 160
     ) {
         self.horizontalGap = horizontalGap
         self.verticalGap = verticalGap
@@ -57,5 +63,6 @@ public struct LayoutConfig: Equatable, Sendable {
         self.sketchMinSize = sketchMinSize
         self.sketchMaxSize = sketchMaxSize
         self.sketchTitleLineHeight = sketchTitleLineHeight
+        self.mediaMaxSize = mediaMaxSize
     }
 }

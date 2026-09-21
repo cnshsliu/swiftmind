@@ -54,8 +54,22 @@ final class DocumentSession: ObservableObject {
 
     init(map: MindMap) {
         self.store = MapStore(map: map)
+        applyMediaSize()
         self.contentRevision = store.contentRevision
         self.selectionRevision = store.selectionRevision
+    }
+
+    /// Push the Settings media size into the layout engine (sketch boards and
+    /// note-image estimates scale to it). Publishes the revision so views
+    /// re-render, but does not fire `onContentChanged` — view state only,
+    /// the document is not dirty.
+    func applyMediaSize() {
+        var config = store.layoutConfig
+        config.mediaMaxSize = MediaSizeLevel.current.points
+        guard config != store.layoutConfig else { return }
+        store.layoutConfig = config
+        contentRevision = store.contentRevision
+        selectionRevision = store.selectionRevision
     }
 
     func syncFromDocument(_ map: MindMap) {

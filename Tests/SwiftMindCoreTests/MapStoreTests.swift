@@ -38,6 +38,19 @@ final class MapStoreTests: XCTestCase {
         XCTAssertTrue(store.snapshot().nodes.first { $0.id == child }!.isSelected)
     }
 
+    func testLayoutConfigChangeBumpsContentRevision() {
+        let store = MapStore(map: MindMap.makeEmpty(title: "T"))
+        let contentBefore = store.contentRevision
+        var config = store.layoutConfig
+        config.mediaMaxSize = 64
+        store.layoutConfig = config
+        XCTAssertGreaterThan(store.contentRevision, contentBefore)
+        // Assigning an equal config is a no-op (no spurious re-layout).
+        let afterChange = store.contentRevision
+        store.layoutConfig = config
+        XCTAssertEqual(store.contentRevision, afterChange)
+    }
+
     private func makeThreeChildStore() throws -> (MapStore, NodeID, [NodeID]) {
         let store = MapStore(map: MindMap.makeEmpty(title: "T"))
         let root = store.map.root.id
