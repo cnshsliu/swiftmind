@@ -70,6 +70,16 @@ enum MarkdownParser {
                 index = source.index(after: index)
                 continue
             }
+            if let (fence, next) = fenceBlock(source, from: index) {
+                blocks.append(fence)
+                index = next
+                continue
+            }
+            if let (math, next) = mathBlock(source, from: index) {
+                blocks.append(math)
+                index = next
+                continue
+            }
             let start = index
             var end = index
             while end < source.endIndex, source[end] != "\n" {
@@ -77,6 +87,11 @@ enum MarkdownParser {
             }
             let lineEnd = end
             if end < source.endIndex { end = source.index(after: end) }
+            if let image = imageBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
+                blocks.append(image)
+                index = end
+                continue
+            }
             if let heading = headingBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
                 blocks.append(heading)
                 index = end
@@ -84,6 +99,11 @@ enum MarkdownParser {
             }
             if let item = listItemBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
                 blocks.append(item)
+                index = end
+                continue
+            }
+            if let quote = quoteBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
+                blocks.append(quote)
                 index = end
                 continue
             }
@@ -196,5 +216,103 @@ enum MarkdownParser {
             marker: start..<markerEnd,
             inlines: [.text(markerEnd..<lineEnd)]
         )
+    }
+
+    static func fenceBlock(_ source: String, from index: String.Index) -> (MarkdownBlock, String.Index)? {
+        let lineEnd = endOfLine(source, index)
+        let line = source[index..<lineEnd]
+        let trimmed = line.drop(while: { $0 == " " })
+        guard trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") else { return nil }
+        let marker = trimmed.hasPrefix("```") ? "```" : "~~~"
+        var cursor = lineEnd < source.endIndex ? source.index(after: lineEnd) : lineEnd
+        let bodyStart = cursor
+        while cursor < source.endIndex {
+            let rowEnd = endOfLine(source, cursor)
+            let row = source[cursor..<rowEnd].drop(while: { $0 == " " })
+            if row.hasPrefix(marker), row.dropFirst(marker.count).allSatisfy({ $0 == " " || $0 == "\t" }) {
+                let blockEnd = rowEnd < source.endIndex ? source.index(after: rowEnd) : rowEnd
+                var bodyEnd = cursor
+                if bodyEnd > bodyStart, source[source.index(before: bodyEnd)] == "\n" {
+                    bodyEnd = source.index(before: bodyEnd)
+                }
+                return (MarkdownBlock(
+                    kind: .codeFence,
+                    source: index..<blockEnd,
+                    marker: index..<bodyStart,
+                    inlines: [.text(bodyStart..<bodyEnd)]
+                ), blockEnd)
+            }
+            cursor = rowEnd < source.endIndex ? source.index(after: rowEnd) : rowEnd
+        }
+        return nil
+    }
+
+    static func mathBlock(_ source: String, from index: String.Index) -> (MarkdownBlock, String.Index)? {
+        let lineEnd = endOfLine(source, index)
+        guard source[index..<lineEnd].trimmingCharacters(in: .whitespaces) == "$$" else { return nil }
+        var cursor = lineEnd < source.endIndex ? source.index(after: lineEnd) : lineEnd
+        let bodyStart = cursor
+        while cursor < source.endIndex {
+            let rowEnd = endOfLine(source, cursor)
+            if source[cursor..<rowEnd].trimmingCharacters(in: .whitespaces) == "$$" {
+                let blockEnd = rowEnd < source.endIndex ? source.index(after: rowEnd) : rowEnd
+                var bodyEnd = cursor
+                if bodyEnd > bodyStart, source[source.index(before: bodyEnd)] == "\n" {
+                    bodyEnd = source.index(before: bodyEnd)
+                }
+                return (MarkdownBlock(
+                    kind: .mathBlock,
+                    source: index..<blockEnd,
+                    marker: index..<bodyStart,
+                    inlines: [.text(bodyStart..<bodyEnd)]
+                ), blockEnd)
+            }
+            cursor = rowEnd < source.endIndex ? source.index(after: rowEnd) : rowEnd
+        }
+        return nil
+    }
+
+    static func imageBlock(
+        _ source: String,
+        start: String.Index,
+        lineEnd: String.Index,
+        blockEnd: String.Index
+    ) -> MarkdownBlock? {
+        let line = source[start..<lineEnd]
+        guard line.hasPrefix("![") else { return nil }
+        guard let altEnd = line.range(of: "]("), let close = line.lastIndex(of: ")"), close > altEnd.upperBound else {
+            return nil
+        }
+        let alt = source.index(start, offsetBy: 2)..<source.index(start, offsetBy: line.distance(from: line.startIndex, to: altEnd.lowerBound))
+        let urlStart = source.index(start, offsetBy: line.distance(from: line.startIndex, to: altEnd.upperBound))
+        let urlEnd = source.index(start, offsetBy: line.distance(from: line.startIndex, to: close))
+        return MarkdownBlock(
+            kind: .image(alt: alt, url: urlStart..<urlEnd),
+            source: start..<blockEnd,
+            marker: start..<lineEnd,
+            inlines: []
+        )
+    }
+
+    static func quoteBlock(
+        _ source: String,
+        start: String.Index,
+        lineEnd: String.Index,
+        blockEnd: String.Index
+    ) -> MarkdownBlock? {
+        guard source[start..<lineEnd].hasPrefix("> ") else { return nil }
+        let markerEnd = source.index(start, offsetBy: 2)
+        return MarkdownBlock(
+            kind: .quote,
+            source: start..<blockEnd,
+            marker: start..<markerEnd,
+            inlines: [.text(markerEnd..<lineEnd)]
+        )
+    }
+
+    static func endOfLine(_ source: String, _ index: String.Index) -> String.Index {
+        var end = index
+        while end < source.endIndex, source[end] != "\n" { end = source.index(after: end) }
+        return end
     }
 }
