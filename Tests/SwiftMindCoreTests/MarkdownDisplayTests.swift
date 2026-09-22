@@ -133,4 +133,17 @@ final class MarkdownDisplayTests: XCTestCase {
         let display = MarkdownDisplay.project(source, reveal: .block(doc.blocks[0].marker))
         XCTAssertEqual(display.text, "## x\n")
     }
+
+    func testWrapStrong() {
+        XCTAssertEqual(MarkdownDisplay.wrap("Friday", rangeUTF16: 0..<6, marker: "**"), "**Friday**")
+    }
+
+    func testUnwrapStrong() {
+        XCTAssertEqual(MarkdownDisplay.wrap("**Friday**", rangeUTF16: 2..<8, marker: "**"), "Friday")
+    }
+
+    func testSetHeadingLevel() {
+        XCTAssertEqual(MarkdownDisplay.setHeading("## title2", level: 3), "### title2")
+        XCTAssertEqual(MarkdownDisplay.setHeading("title2", level: 3), "### title2")
+    }
 }

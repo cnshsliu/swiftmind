@@ -105,6 +105,60 @@ public struct MarkdownDisplay: Equatable, Sendable {
         return min(max(start, 0) + displayReplacement.utf16.count, sourceCount + displayReplacement.utf16.count)
     }
 
+    /// Wrap `rangeUTF16` in `marker`, or remove a matching pair already around it.
+    public static func wrap(_ source: String, rangeUTF16: Range<Int>, marker: String) -> String {
+        let ns = source as NSString
+        let location = min(max(rangeUTF16.lowerBound, 0), ns.length)
+        let length = min(max(rangeUTF16.count, 0), ns.length - location)
+        let range = NSRange(location: location, length: length)
+        let markerLength = (marker as NSString).length
+        if range.location >= markerLength,
+           range.location + range.length + markerLength <= ns.length,
+           ns.substring(with: NSRange(location: range.location - markerLength, length: markerLength)) == marker,
+           ns.substring(with: NSRange(location: range.location + range.length, length: markerLength)) == marker {
+            let outer = NSRange(
+                location: range.location - markerLength,
+                length: range.length + markerLength * 2
+            )
+            return ns.replacingCharacters(in: outer, with: ns.substring(with: range))
+        }
+        let inner = range.length > 0 ? ns.substring(with: range) : ""
+        return ns.replacingCharacters(in: range, with: marker + inner + marker)
+    }
+
+    /// Set the heading level of the block containing `atUTF16`, or the first
+    /// block when the offset is omitted. A paragraph gains a prefix.
+    public static func setHeading(_ source: String, level: Int, atUTF16: Int? = nil) -> String {
+        let clamped = min(6, max(1, level))
+        let prefix = String(repeating: "#", count: clamped) + " "
+        let doc = MarkdownDocument.parse(source)
+        let block: MarkdownBlock?
+        if let atUTF16 {
+            let index = String.Index(utf16Offset: min(max(atUTF16, 0), source.utf16.count), in: source)
+            block = blockContaining(index, in: doc.blocks) ?? doc.blocks.first
+        } else {
+            block = doc.blocks.first
+        }
+        guard let block else { return prefix + source }
+        let ns = source as NSString
+        if case .heading = block.kind {
+            let marker = NSRange(block.marker, in: source)
+            if marker.length > 0 {
+                return ns.replacingCharacters(in: marker, with: prefix)
+            }
+        }
+        let start = NSRange(block.source, in: source).location
+        return ns.replacingCharacters(in: NSRange(location: start, length: 0), with: prefix)
+    }
+
+    private static func blockContaining(_ index: String.Index, in blocks: [MarkdownBlock]) -> MarkdownBlock? {
+        for block in blocks {
+            if let child = blockContaining(index, in: block.children) { return child }
+            if block.source.contains(index) || index == block.source.upperBound { return block }
+        }
+        return nil
+    }
+
     private static func appendBlocks(
         _ blocks: [MarkdownBlock],
         source: String,

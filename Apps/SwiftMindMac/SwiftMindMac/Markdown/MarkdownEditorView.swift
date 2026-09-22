@@ -104,6 +104,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         ])
 
         coord.textView = textView
+        coord.bindShortcuts(to: textView)
         coord.setText(text, of: textView)
         DispatchQueue.main.async {
             host.window?.makeFirstResponder(textView)
@@ -114,6 +115,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     func updateNSView(_ host: MarkdownEditorHost, context: Context) {
         guard let textView = host.scrollView.documentView as? MarkdownSourceTextView else { return }
         textView.onCancel = onCancel
+        context.coordinator.bindShortcuts(to: textView)
         host.setAccessibilityIdentifier(chromeIdentifier)
         context.coordinator.parent = self
         // External reset (editor open, undo/CLI/agent reload): only push when
@@ -158,6 +160,60 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         init(parent: MarkdownEditorView) {
             self.parent = parent
+        }
+
+        func bindShortcuts(to textView: MarkdownSourceTextView) {
+            textView.onFormat = { [weak self] marker in self?.applyWrap(marker) }
+            textView.onLink = { [weak self] in self?.applyLink() }
+            textView.onHeading = { [weak self] level in self?.applyHeading(level) }
+        }
+
+        func applyWrap(_ marker: String) {
+            guard let textView else { return }
+            let range = sourceSelection(in: textView)
+            let updated = MarkdownDisplay.wrap(markdown, rangeUTF16: range, marker: marker)
+            commitMarkdown(updated, caret: range.lowerBound + (marker as NSString).length)
+        }
+
+        func applyLink() {
+            guard let textView else { return }
+            let range = sourceSelection(in: textView)
+            let ns = markdown as NSString
+            let selected = range.isEmpty
+                ? "title"
+                : ns.substring(with: NSRange(location: range.lowerBound, length: range.count))
+            let replacement = "[\(selected)](url)"
+            let updated = ns.replacingCharacters(
+                in: NSRange(location: range.lowerBound, length: range.count),
+                with: replacement
+            )
+            commitMarkdown(updated, caret: range.lowerBound + 1)
+        }
+
+        func applyHeading(_ level: Int) {
+            guard let textView else { return }
+            let caret = sourceOffset(at: textView.selectedRange().location)
+            let updated = MarkdownDisplay.setHeading(markdown, level: level, atUTF16: caret)
+            commitMarkdown(updated, caret: caret)
+        }
+
+        private func commitMarkdown(_ updated: String, caret: Int) {
+            markdown = updated
+            reveal = .none
+            parent.text = updated
+            guard let textView else { return }
+            show(MarkdownDisplay.project(updated, reveal: .none), in: textView, sourceCaret: caret)
+        }
+
+        private func sourceSelection(in textView: MarkdownSourceTextView) -> Range<Int> {
+            let sel = textView.selectedRange()
+            let start = min(max(sourceOffset(at: sel.location), 0), (markdown as NSString).length)
+            guard sel.length > 0 else { return start..<start }
+            let last = sel.location + sel.length - 1
+            let end = last >= 0 && last < sourceUTF16.count
+                ? sourceUTF16[last] + 1
+                : (markdown as NSString).length
+            return start..<max(start, end)
         }
 
         @objc func insertImageClicked() {
@@ -364,13 +420,25 @@ final class MarkdownSourceTextView: NSTextView {
         case 48 where mods.isEmpty: // Tab — never moves focus
             indentListLine(outdent: false)
         case 11 where mods == .command: // ⌘B
-            toggleWrap(marker: "**")
+            onFormat?("**")
         case 34 where mods == .command: // ⌘I
-            toggleWrap(marker: "*")
+            onFormat?("*")
+        case 40 where mods == .command: // ⌘K
+            onLink?()
+        case 18 where mods == [.command, .option]: // ⌘⌥1
+            onHeading?(1)
+        case 19 where mods == [.command, .option]: // ⌘⌥2
+            onHeading?(2)
+        case 20 where mods == [.command, .option]: // ⌘⌥3
+            onHeading?(3)
         default:
             super.keyDown(with: event)
         }
     }
+
+    var onFormat: ((String) -> Void)?
+    var onLink: (() -> Void)?
+    var onHeading: ((Int) -> Void)?
 
     // MARK: - Toolbar insertions (3b)
 
