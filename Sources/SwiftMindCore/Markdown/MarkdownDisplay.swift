@@ -59,8 +59,15 @@ public struct MarkdownDisplay: Equatable, Sendable {
         } else {
             let first = min(max(lower, 0), mapCount - 1)
             let last = min(max(upper - 1, 0), mapCount - 1)
-            start = sourceUTF16[first]
-            end = sourceUTF16[last] + 1
+            let rawStart = sourceUTF16[first]
+            let rawEnd = sourceUTF16[last] + 1
+            let displaySlice = utf16Slice(of: text, range: displayUTF16)
+            (start, end) = expandedEdit(
+                start: rawStart,
+                end: rawEnd,
+                source: source,
+                displaySlice: displaySlice
+            )
         }
         let location = min(max(start, 0), sourceCount)
         let limit = min(max(end, location), sourceCount)
@@ -107,14 +114,16 @@ public struct MarkdownDisplay: Equatable, Sendable {
         into text: inout String,
         map: inout [Int]
     ) {
-        // An image click reveals the whole line. Do not also append U+FFFC.
-        if case .block(let range) = reveal, block.source == range {
-            appendSource(block.source, source: source, into: &text, map: &map)
-            return
-        }
-        // Marker reveal keeps the rendered body, so a heading is not the raw line twice.
-        if case .block(let range) = reveal, block.marker == range {
-            appendSource(block.marker, source: source, into: &text, map: &map)
+        // Image, fence, and math are the raw source when revealed. A heading,
+        // list, or quote keeps its rendered body after the marker.
+        if case .block(let range) = reveal {
+            if block.source == range || (block.marker == range && showsRawWhenMarkerRevealed(block)) {
+                appendSource(block.source, source: source, into: &text, map: &map)
+                return
+            }
+            if block.marker == range {
+                appendSource(block.marker, source: source, into: &text, map: &map)
+            }
         }
         switch block.kind {
         case .image(let alt, _):
@@ -195,6 +204,78 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 }
             }
         }
+    }
+
+    private static func showsRawWhenMarkerRevealed(_ block: MarkdownBlock) -> Bool {
+        switch block.kind {
+        case .image, .codeFence, .mathBlock:
+            return true
+        case .heading, .paragraph, .listItem, .quote:
+            return false
+        }
+    }
+
+    /// A whole-span delete includes the hidden markers. An image object
+    /// character stands for the whole image line. A partial edit does not.
+    private func expandedEdit(start: Int, end: Int, source: String, displaySlice: String) -> (Int, Int) {
+        var lo = start
+        var hi = end
+        func offset(_ index: String.Index) -> Int {
+            Self.utf16Offset(of: index, in: source) ?? lo
+        }
+        func cover(open: Range<String.Index>, content: Range<String.Index>, close: Range<String.Index>) {
+            let contentStart = offset(content.lowerBound)
+            let contentEnd = offset(content.upperBound)
+            guard contentStart < contentEnd, lo <= contentStart, hi >= contentEnd else { return }
+            lo = min(lo, offset(open.lowerBound))
+            hi = max(hi, offset(close.upperBound))
+        }
+        func walkInlines(_ inlines: [MarkdownInline]) {
+            for inline in inlines {
+                switch inline {
+                case .text:
+                    break
+                case .strong(let open, let content, let close),
+                     .emphasis(let open, let content, let close):
+                    cover(open: open, content: open.upperBound..<close.lowerBound, close: close)
+                    walkInlines(content)
+                case .code(let open, let content, let close),
+                     .math(let open, let content, let close):
+                    cover(open: open, content: content, close: close)
+                case .link(let labelOpen, let label, let labelClose, _, let close):
+                    cover(
+                        open: labelOpen,
+                        content: labelOpen.upperBound..<labelClose.lowerBound,
+                        close: close
+                    )
+                    walkInlines(label)
+                }
+            }
+        }
+        func walkBlocks(_ blocks: [MarkdownBlock]) {
+            for block in blocks {
+                if case .image(let alt, _) = block.kind, displaySlice == "\u{FFFC}" {
+                    let anchor = offset(alt.lowerBound)
+                    if lo <= anchor && hi > anchor {
+                        lo = min(lo, offset(block.source.lowerBound))
+                        hi = max(hi, offset(block.source.upperBound))
+                    }
+                }
+                walkInlines(block.inlines)
+                walkBlocks(block.children)
+            }
+        }
+        walkBlocks(MarkdownDocument.parse(source).blocks)
+        return (lo, hi)
+    }
+
+    private func utf16Slice(of string: String, range: Range<Int>) -> String {
+        let utf16 = string.utf16
+        let lower = min(max(range.lowerBound, 0), utf16.count)
+        let upper = min(max(range.upperBound, lower), utf16.count)
+        let start = utf16.index(utf16.startIndex, offsetBy: lower)
+        let end = utf16.index(start, offsetBy: upper - lower)
+        return String(decoding: utf16[start..<end], as: UTF16.self)
     }
 
     /// True when `reveal` names this inline's content, not a nested span.

@@ -74,6 +74,37 @@ final class MarkdownDisplayTests: XCTestCase {
         XCTAssertEqual(deleted, "Ship .")
     }
 
+    func testRevealImageMarkerIsTheRawLine() {
+        let source = "![ab](u)\n"
+        let doc = MarkdownDocument.parse(source)
+        let display = MarkdownDisplay.project(source, reveal: .block(doc.blocks[0].marker))
+        XCTAssertFalse(display.text.contains("\u{FFFC}"))
+        XCTAssertTrue(display.text.hasPrefix("![ab](u)"))
+        XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
+    }
+
+    func testDeleteWholeStrongRemovesMarkers() {
+        let source = "Ship **Friday**."
+        let previous = MarkdownDisplay.project(source, reveal: .none)
+        let deleted = previous.splicing(source: source, displayReplacement: "", displayUTF16: 5..<11)
+        XCTAssertEqual(deleted, "Ship .")
+    }
+
+    func testDeleteOneLetterInsideStrongKeepsMarkers() {
+        let source = "Ship **Friday**."
+        let previous = MarkdownDisplay.project(source, reveal: .none)
+        let deleted = previous.splicing(source: source, displayReplacement: "", displayUTF16: 5..<6)
+        XCTAssertEqual(deleted, "Ship **riday**.")
+    }
+
+    func testDeleteImageObjectRemovesTheLine() {
+        let source = "![ab](u)"
+        let previous = MarkdownDisplay.project(source, reveal: .none)
+        XCTAssertEqual(previous.text, "\u{FFFC}")
+        let deleted = previous.splicing(source: source, displayReplacement: "", displayUTF16: 0..<1)
+        XCTAssertEqual(deleted, "")
+    }
+
     func testInsertInsideHiddenStrongDoesNotEatMarkers() {
         let source = "Ship **Friday**."
         let previous = MarkdownDisplay.project(source, reveal: .none)
