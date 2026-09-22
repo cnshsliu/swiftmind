@@ -21,10 +21,16 @@ public final class MapStore {
         set {
             guard newValue != layoutEngine.config else { return }
             layoutEngine.config = newValue
+            noteCardHeights = [:]
             invalidateGeometry()
             contentRevision &+= 1
         }
     }
+
+    /// Measured expanded-note card heights. Cleared when content or layout
+    /// config changes; not cleared by `invalidateGeometry` (that would drop
+    /// the override before the relayout that consumes it).
+    public private(set) var noteCardHeights: [NodeID: Double] = [:]
 
     /// Geometry-only snapshot (selection flags cleared). Invalidated on content change.
     private var cachedGeometry: MapSnapshot?
@@ -41,6 +47,17 @@ public final class MapStore {
         return geometry.applying(selection: selection)
     }
 
+    /// Replace the parser's expanded-note height guess for one relayout.
+    /// A repeat within 1 point is ignored so measurement cannot loop.
+    public func updateMeasuredNoteHeight(_ height: Double, for id: NodeID) {
+        guard height > 0, map.node(id: id) != nil else { return }
+        let capped = min(height, layoutEngine.config.expandedNoteMaxHeight)
+        if let existing = noteCardHeights[id], abs(existing - capped) <= 1 { return }
+        noteCardHeights[id] = capped
+        invalidateGeometry()
+        contentRevision &+= 1
+    }
+
     public func select(_ id: NodeID, additive: Bool = false) {
         selection.select(id, additive: additive)
         selectionRevision &+= 1
@@ -52,6 +69,7 @@ public final class MapStore {
     }
 
     public func dispatch(_ command: any MapCommand) throws {
+        noteCardHeights = [:]
         // Capture a sibling focus target before a delete removes the primary.
         var focusAfterDelete: NodeID?
         if let delete = command as? DeleteNodesCommand,
@@ -150,7 +168,11 @@ public final class MapStore {
             return cachedGeometry
         }
         // Layout without selection; flags applied in `applying(selection:)`.
-        let fresh = layoutEngine.layout(map: map, selection: SelectionState())
+        let fresh = layoutEngine.layout(
+            map: map,
+            selection: SelectionState(),
+            measuredNoteHeights: noteCardHeights
+        )
         cachedGeometry = fresh
         cachedForContentRevision = contentRevision
         return fresh

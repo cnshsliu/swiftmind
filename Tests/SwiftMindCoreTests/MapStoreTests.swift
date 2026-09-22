@@ -111,4 +111,21 @@ final class MapStoreTests: XCTestCase {
         XCTAssertNil(store.selection.primary)
         XCTAssertTrue(store.selection.selectedIDs.isEmpty)
     }
+
+    func testMeasuredNoteHeightRelayoutsOnce() {
+        var map = MindMap.makeEmpty(title: "t")
+        map.root.isNoteExpanded = true
+        map.root.noteMarkdown = "hello"
+        let store = MapStore(map: map)
+        let rootID = map.root.id
+        let before = store.snapshot().nodes.first { $0.id == rootID }!.frame.height
+        store.updateMeasuredNoteHeight(80, for: rootID)
+        let after = store.snapshot().nodes.first { $0.id == rootID }!.frame.height
+        XCTAssertEqual(after, 80)
+        XCTAssertNotEqual(after, before)
+        let revision = store.contentRevision
+        store.updateMeasuredNoteHeight(80.4, for: rootID)
+        XCTAssertEqual(store.contentRevision, revision)
+        XCTAssertEqual(store.snapshot().nodes.first { $0.id == rootID }!.frame.height, 80)
+    }
 }
