@@ -111,7 +111,6 @@ model concepts.
 
 ## Non-goals
 
-- True WYSIWYG persistence (rendered HTML in the file) — notes stay raw
-  Markdown.
-- Measured two-pass card heights (see 1c).
-- Syntax-aware Markdown parsing beyond the existing segmenter/inline pass.
+Superseded by `2026-09-21-wysiwyg-notes-design.md`: rendered editing with
+Markdown still stored in the file, measured card height, and a source-ranged
+parser. Rendered HTML is still not written into the file.
