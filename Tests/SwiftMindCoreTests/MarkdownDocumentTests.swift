@@ -122,4 +122,55 @@ final class MarkdownDocumentTests: XCTestCase {
             return XCTFail("dollar amounts stay text")
         }
     }
+
+    func testStrongMarkerRanges() {
+        let source = "Ship **Friday**."
+        let doc = MarkdownDocument.parse(source)
+        guard case .strong(let open, let content, let close) = doc.blocks[0].inlines[1] else {
+            return XCTFail("expected strong as the second inline, got \(doc.blocks[0].inlines)")
+        }
+        XCTAssertEqual(String(source[open]), "**")
+        XCTAssertEqual(content.count, 1)
+        guard case .text(let text) = content[0] else { return XCTFail("expected text") }
+        XCTAssertEqual(String(source[text]), "Friday")
+        XCTAssertEqual(String(source[close]), "**")
+    }
+
+    func testUnmatchedStarsStayText() {
+        let source = "a * b"
+        let doc = MarkdownDocument.parse(source)
+        guard case .text(let range) = doc.blocks[0].inlines.first else {
+            return XCTFail("expected one text run")
+        }
+        XCTAssertEqual(String(source[range]), "a * b")
+    }
+
+    func testInlineCodeHidesInnerStars() {
+        let source = "`**x**`"
+        let doc = MarkdownDocument.parse(source)
+        guard case .code(_, let content, _) = doc.blocks[0].inlines[0] else {
+            return XCTFail("expected code")
+        }
+        XCTAssertEqual(String(source[content]), "**x**")
+    }
+
+    func testLinkRanges() {
+        let source = "See [the spec](https://example.com)."
+        let doc = MarkdownDocument.parse(source)
+        guard case .link(_, let label, _, let url, _) = doc.blocks[0].inlines[1] else {
+            return XCTFail("expected a link, got \(doc.blocks[0].inlines)")
+        }
+        guard case .text(let labelRange) = label[0] else { return XCTFail("expected label text") }
+        XCTAssertEqual(String(source[labelRange]), "the spec")
+        XCTAssertEqual(String(source[url]), "https://example.com")
+    }
+
+    func testInlineMathNotADollarAmount() {
+        let source = "Use $x$ here, not $5."
+        let doc = MarkdownDocument.parse(source)
+        guard case .math(_, let latex, _) = doc.blocks[0].inlines[1] else {
+            return XCTFail("expected math, got \(doc.blocks[0].inlines)")
+        }
+        XCTAssertEqual(String(source[latex]), "x")
+    }
 }

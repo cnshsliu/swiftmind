@@ -112,7 +112,7 @@ enum MarkdownParser {
                 kind: .paragraph,
                 source: start..<end,
                 marker: start..<start,
-                inlines: [.text(content)]
+                inlines: parseInlines(source, in: content)
             ))
             index = end
         }
@@ -160,7 +160,7 @@ enum MarkdownParser {
             kind: .listItem(ordered: ordered, checked: checked, indent: indent),
             source: start..<blockEnd,
             marker: markerStart..<i,
-            inlines: [.text(i..<lineEnd)]
+            inlines: parseInlines(source, in: i..<lineEnd)
         )
     }
 
@@ -214,7 +214,7 @@ enum MarkdownParser {
             kind: .heading(level: level),
             source: start..<blockEnd,
             marker: start..<markerEnd,
-            inlines: [.text(markerEnd..<lineEnd)]
+            inlines: parseInlines(source, in: markerEnd..<lineEnd)
         )
     }
 
@@ -306,8 +306,179 @@ enum MarkdownParser {
             kind: .quote,
             source: start..<blockEnd,
             marker: start..<markerEnd,
-            inlines: [.text(markerEnd..<lineEnd)]
+            inlines: parseInlines(source, in: markerEnd..<lineEnd)
         )
+    }
+
+    static func parseInlines(_ source: String, in range: Range<String.Index>) -> [MarkdownInline] {
+        var output: [MarkdownInline] = []
+        var index = range.lowerBound
+        var textStart = index
+        func flushText(to end: String.Index) {
+            guard textStart < end else { return }
+            output.append(.text(textStart..<end))
+            textStart = end
+        }
+        while index < range.upperBound {
+            if source[index] == "`",
+               let found = closedSpan(source, from: index, limit: range.upperBound, marker: "`") {
+                flushText(to: index)
+                output.append(.code(open: found.open, content: found.content, close: found.close))
+                index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            if source[index] == "*",
+               let found = wrapped(source, from: index, limit: range.upperBound, marker: "**") {
+                flushText(to: index)
+                output.append(.strong(
+                    open: found.open,
+                    content: parseInlines(source, in: found.content),
+                    close: found.close
+                ))
+                index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            if source[index] == "*",
+               let found = wrapped(source, from: index, limit: range.upperBound, marker: "*") {
+                flushText(to: index)
+                output.append(.emphasis(
+                    open: found.open,
+                    content: parseInlines(source, in: found.content),
+                    close: found.close
+                ))
+                index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            if source[index] == "[", let link = parseLink(source, from: index, limit: range.upperBound) {
+                flushText(to: index)
+                output.append(link.inline)
+                index = link.end
+                textStart = index
+                continue
+            }
+            if source[index] == "$",
+               isMathOpen(source, at: index, limit: range.upperBound, rangeStart: range.lowerBound),
+               let found = wrapped(source, from: index, limit: range.upperBound, marker: "$") {
+                flushText(to: index)
+                output.append(.math(open: found.open, latex: found.content, close: found.close))
+                index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            index = source.index(after: index)
+        }
+        flushText(to: range.upperBound)
+        return output
+    }
+
+    /// `marker` must sit at `from`. The next copy closes a non-empty, single-line span.
+    static func wrapped(
+        _ source: String,
+        from index: String.Index,
+        limit: String.Index,
+        marker: String
+    ) -> (open: Range<String.Index>, content: Range<String.Index>, close: Range<String.Index>)? {
+        guard let openEnd = markerEnd(source, from: index, limit: limit, marker: marker) else { return nil }
+        var cursor = openEnd
+        while cursor < limit {
+            if source[cursor] == "\n" { return nil }
+            if let closeEnd = markerEnd(source, from: cursor, limit: limit, marker: marker) {
+                guard cursor > openEnd else { return nil }
+                return (index..<openEnd, openEnd..<cursor, cursor..<closeEnd)
+            }
+            cursor = source.index(after: cursor)
+        }
+        return nil
+    }
+
+    static func closedSpan(
+        _ source: String,
+        from index: String.Index,
+        limit: String.Index,
+        marker: String
+    ) -> (open: Range<String.Index>, content: Range<String.Index>, close: Range<String.Index>)? {
+        wrapped(source, from: index, limit: limit, marker: marker)
+    }
+
+    /// Opening `$` at the start of `rangeStart`, after whitespace, or after `([{>-~`.
+    /// The closer from `wrapped` must follow a non-space and precede end, whitespace, or `)],.;:!?`.
+    static func isMathOpen(
+        _ source: String,
+        at index: String.Index,
+        limit: String.Index,
+        rangeStart: String.Index
+    ) -> Bool {
+        guard index < limit else { return false }
+        if index > rangeStart {
+            let previous = source[source.index(before: index)]
+            guard previous.isWhitespace || "([{>-~".contains(previous) else { return false }
+        }
+        let nextIndex = source.index(after: index)
+        guard nextIndex < limit else { return false }
+        let next = source[nextIndex]
+        guard !next.isWhitespace, next != "$" else { return false }
+        guard let found = wrapped(source, from: index, limit: limit, marker: "$") else { return false }
+        guard !source[source.index(before: found.close.lowerBound)].isWhitespace else { return false }
+        let after = found.close.upperBound
+        if after < limit {
+            let following = source[after]
+            guard following.isWhitespace || ")],.;:!?".contains(following) else { return false }
+        }
+        return true
+    }
+
+    static func parseLink(
+        _ source: String,
+        from index: String.Index,
+        limit: String.Index
+    ) -> (inline: MarkdownInline, end: String.Index)? {
+        guard index < limit, source[index] == "[" else { return nil }
+        let labelStart = source.index(after: index)
+        var cursor = labelStart
+        while cursor < limit {
+            if source[cursor] == "\n" { return nil }
+            if source[cursor] == "]" {
+                let afterBracket = source.index(after: cursor)
+                if afterBracket < limit, source[afterBracket] == "(" {
+                    let urlStart = source.index(after: afterBracket)
+                    var urlEnd = urlStart
+                    while urlEnd < limit, source[urlEnd] != "\n", source[urlEnd] != ")" {
+                        urlEnd = source.index(after: urlEnd)
+                    }
+                    guard urlEnd < limit, source[urlEnd] == ")" else { return nil }
+                    let closeEnd = source.index(after: urlEnd)
+                    return (
+                        inline: .link(
+                            labelOpen: index..<labelStart,
+                            label: parseInlines(source, in: labelStart..<cursor),
+                            labelClose: cursor..<urlStart,
+                            url: urlStart..<urlEnd,
+                            close: urlEnd..<closeEnd
+                        ),
+                        end: closeEnd
+                    )
+                }
+            }
+            cursor = source.index(after: cursor)
+        }
+        return nil
+    }
+
+    static func markerEnd(
+        _ source: String,
+        from index: String.Index,
+        limit: String.Index,
+        marker: String
+    ) -> String.Index? {
+        var cursor = index
+        for character in marker {
+            guard cursor < limit, source[cursor] == character else { return nil }
+            cursor = source.index(after: cursor)
+        }
+        return cursor
     }
 
     static func endOfLine(_ source: String, _ index: String.Index) -> String.Index {
