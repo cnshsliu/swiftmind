@@ -1233,6 +1233,33 @@ struct MapCanvasView: View {
         .position(x: frame.midX, y: frame.midY)
         .allowsHitTesting(false)
         .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
+        .onAppear {
+            updateMeasuredNoteCardHeight(document, for: visual.id)
+        }
+        .onChange(of: document) { _, updated in
+            updateMeasuredNoteCardHeight(updated, for: visual.id)
+        }
+    }
+
+    /// Hosts the card's renderer and stores the height in map points. Zero is
+    /// a failed measure. The store ignores a repeat within 1 point, so a
+    /// follow-up layout cannot loop. The canvas observes `session`, not the
+    /// store; this is view state and must not mark the file dirty.
+    @MainActor
+    private func updateMeasuredNoteCardHeight(_ markdown: String, for id: NodeID) {
+        let measured = NoteCardMeasurer.height(
+            markdown: markdown,
+            width: CGFloat(session.store.layoutConfig.expandedNoteWidth),
+            fontSize: 12,
+            maxImageHeight: mediaImageHeight
+        )
+        guard measured > 0 else { return }
+        let revision = session.store.contentRevision
+        session.store.updateMeasuredNoteHeight(Double(measured), for: id)
+        guard session.store.contentRevision != revision else { return }
+        Task { @MainActor in
+            session.objectWillChange.send()
+        }
     }
 
     /// The document a card renders: the live editor draft while editing,
