@@ -77,6 +77,11 @@ enum MarkdownParser {
             }
             let lineEnd = end
             if end < source.endIndex { end = source.index(after: end) }
+            if let heading = headingBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
+                blocks.append(heading)
+                index = end
+                continue
+            }
             let content = start..<lineEnd
             blocks.append(MarkdownBlock(
                 kind: .paragraph,
@@ -87,5 +92,27 @@ enum MarkdownParser {
             index = end
         }
         return MarkdownDocument(blocks: blocks)
+    }
+
+    static func headingBlock(
+        _ source: String,
+        start: String.Index,
+        lineEnd: String.Index,
+        blockEnd: String.Index
+    ) -> MarkdownBlock? {
+        var i = start
+        var level = 0
+        while i < lineEnd, source[i] == "#", level < 6 {
+            level += 1
+            i = source.index(after: i)
+        }
+        guard level >= 1, i < lineEnd, source[i] == " " else { return nil }
+        let markerEnd = source.index(after: i)
+        return MarkdownBlock(
+            kind: .heading(level: level),
+            source: start..<blockEnd,
+            marker: start..<markerEnd,
+            inlines: [.text(markerEnd..<lineEnd)]
+        )
     }
 }
