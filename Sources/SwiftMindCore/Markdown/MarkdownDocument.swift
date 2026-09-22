@@ -82,6 +82,11 @@ enum MarkdownParser {
                 index = end
                 continue
             }
+            if let item = listItemBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
+                blocks.append(item)
+                index = end
+                continue
+            }
             let content = start..<lineEnd
             blocks.append(MarkdownBlock(
                 kind: .paragraph,
@@ -91,7 +96,84 @@ enum MarkdownParser {
             ))
             index = end
         }
-        return MarkdownDocument(blocks: blocks)
+        return MarkdownDocument(blocks: nestLists(blocks))
+    }
+
+    static func listItemBlock(
+        _ source: String,
+        start: String.Index,
+        lineEnd: String.Index,
+        blockEnd: String.Index
+    ) -> MarkdownBlock? {
+        var i = start
+        var indent = 0
+        while i < lineEnd, source[i] == " " {
+            indent += 1
+            i = source.index(after: i)
+        }
+        guard i < lineEnd else { return nil }
+        let markerStart = i
+        var ordered = false
+        if source[i] == "-" || source[i] == "*" {
+            i = source.index(after: i)
+            guard i < lineEnd, source[i] == " " else { return nil }
+            i = source.index(after: i)
+        } else if source[i].isNumber {
+            ordered = true
+            while i < lineEnd, source[i].isNumber { i = source.index(after: i) }
+            guard i < lineEnd, source[i] == "." else { return nil }
+            i = source.index(after: i)
+            guard i < lineEnd, source[i] == " " else { return nil }
+            i = source.index(after: i)
+        } else {
+            return nil
+        }
+        var checked: Bool? = nil
+        if !ordered, i < lineEnd, source[i] == "[" {
+            let box = source[i..<lineEnd]
+            if box.hasPrefix("[ ] ") || box.hasPrefix("[x] ") || box.hasPrefix("[X] ") {
+                checked = source[source.index(i, offsetBy: 1)] != " "
+                i = source.index(i, offsetBy: 4)
+            }
+        }
+        return MarkdownBlock(
+            kind: .listItem(ordered: ordered, checked: checked, indent: indent),
+            source: start..<blockEnd,
+            marker: markerStart..<i,
+            inlines: [.text(i..<lineEnd)]
+        )
+    }
+
+    static func nestLists(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+        func indent(of block: MarkdownBlock) -> Int? {
+            guard case .listItem(_, _, let indent) = block.kind else { return nil }
+            return indent
+        }
+        var roots: [MarkdownBlock] = []
+        var stack: [(indent: Int, block: MarkdownBlock)] = []
+        func close(to indentLimit: Int) {
+            while let top = stack.last, top.indent >= indentLimit {
+                stack.removeLast()
+                if var parent = stack.last {
+                    parent.block.children.append(top.block)
+                    parent.block.source = parent.block.source.lowerBound..<top.block.source.upperBound
+                    stack[stack.count - 1] = parent
+                } else {
+                    roots.append(top.block)
+                }
+            }
+        }
+        for block in blocks {
+            guard let itemIndent = indent(of: block) else {
+                close(to: -1)
+                roots.append(block)
+                continue
+            }
+            close(to: itemIndent)
+            stack.append((itemIndent, block))
+        }
+        close(to: -1)
+        return roots
     }
 
     static func headingBlock(
