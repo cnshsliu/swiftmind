@@ -18,4 +18,25 @@ final class MarkdownDisplayTests: XCTestCase {
         let display = MarkdownDisplay.project("![sketch](data:image/png;base64,QQ==)", reveal: .none)
         XCTAssertEqual(display.text, "\u{FFFC}")
     }
+
+    func testFenceKeepsInteriorBlankLine() {
+        let source = "```\nfoo\n\n```\n"
+        let display = MarkdownDisplay.project(source, reveal: .none)
+        XCTAssertEqual(display.text, "foo\n\n")
+        XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
+    }
+
+    func testEmptyFenceDoesNotAddALine() {
+        let source = "before\n```\n```\nafter\n"
+        let display = MarkdownDisplay.project(source, reveal: .none)
+        XCTAssertEqual(display.text, "before\nafter\n")
+        XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
+    }
+
+    func testMathKeepsInteriorBlankLine() {
+        let source = "$$\nx\n\n$$\n"
+        let display = MarkdownDisplay.project(source, reveal: .none)
+        XCTAssertEqual(display.text, "x\n\n")
+        XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
+    }
 }

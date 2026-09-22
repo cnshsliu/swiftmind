@@ -80,11 +80,11 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 appendLineBreak(block, source: source, into: &text, map: &map)
             }
         case .codeFence, .mathBlock:
-            appendInlines(block.inlines, source: source, into: &text, map: &map)
-            if sourceContainsNewline(block, source: source),
-               !rawBodyEndsWithNewline(block.inlines, source: source) {
-                appendLineBreak(block, source: source, into: &text, map: &map)
-            }
+            // The parser's text range drops the newline before the closer, which
+            // deletes a trailing blank line. The interior is everything after the
+            // opening line and before the closing delimiter line.
+            let interior = block.marker.upperBound..<closingLineStart(block, source: source)
+            appendSource(interior, source: source, into: &text, map: &map)
         case .heading, .paragraph, .listItem, .quote:
             appendInlines(block.inlines, source: source, into: &text, map: &map)
             var childStart = coverageEnd(block)
@@ -163,17 +163,26 @@ public struct MarkdownDisplay: Equatable, Sendable {
         }
     }
 
-    private static func sourceContainsNewline(_ block: MarkdownBlock, source: String) -> Bool {
-        source[block.source].contains("\n")
+    /// Start of the closing delimiter line. A closed fence or math block's source
+    /// ends on that line; unclosed markers never become these block kinds.
+    private static func closingLineStart(_ block: MarkdownBlock, source: String) -> String.Index {
+        let origin = block.marker.upperBound
+        var index = block.source.upperBound
+        if index > origin, source[source.index(before: index)] == "\n" {
+            index = source.index(before: index)
+        }
+        while index > origin {
+            let previous = source.index(before: index)
+            if source[previous] == "\n" {
+                return index
+            }
+            index = previous
+        }
+        return origin
     }
 
-    private static func rawBodyEndsWithNewline(_ inlines: [MarkdownInline], source: String) -> Bool {
-        for inline in inlines.reversed() {
-            guard case .text(let range) = inline else { continue }
-            guard range.lowerBound < range.upperBound else { return false }
-            return source[source.index(before: range.upperBound)] == "\n"
-        }
-        return false
+    private static func sourceContainsNewline(_ block: MarkdownBlock, source: String) -> Bool {
+        source[block.source].contains("\n")
     }
 
     private static func newlineRange(at index: String.Index, in source: String) -> Range<String.Index>? {
