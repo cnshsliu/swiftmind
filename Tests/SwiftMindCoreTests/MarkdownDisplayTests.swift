@@ -112,4 +112,25 @@ final class MarkdownDisplayTests: XCTestCase {
         let inserted = previous.splicing(source: source, displayReplacement: "X", displayUTF16: 5..<5)
         XCTAssertEqual(inserted, "Ship **XFriday**.")
     }
+
+    func testRevealFenceMarkerIsTheRawBlock() {
+        let source = "```\nfoo\n\n```\n"
+        let doc = MarkdownDocument.parse(source)
+        let display = MarkdownDisplay.project(source, reveal: .block(doc.blocks[0].marker))
+        XCTAssertEqual(display.text, source)
+    }
+
+    func testRevealMathMarkerIsTheRawBlock() {
+        let source = "$$\nx\n\n$$\n"
+        let doc = MarkdownDocument.parse(source)
+        let display = MarkdownDisplay.project(source, reveal: .block(doc.blocks[0].marker))
+        XCTAssertEqual(display.text, source)
+    }
+
+    func testRevealHeadingKeepsInnerMarkersHidden() {
+        let source = "## **x**\n"
+        let doc = MarkdownDocument.parse(source)
+        let display = MarkdownDisplay.project(source, reveal: .block(doc.blocks[0].marker))
+        XCTAssertEqual(display.text, "## x\n")
+    }
 }

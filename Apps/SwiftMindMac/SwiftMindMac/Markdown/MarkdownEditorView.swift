@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SwiftMindCore
 
 /// One-shot insertion request from the note-editor toolbar (spec 3b). The
 /// editor applies it to the text storage at the caret (flowing into the
@@ -146,10 +147,14 @@ struct MarkdownEditorView: NSViewRepresentable {
         var parent: MarkdownEditorView
         weak var textView: MarkdownSourceTextView?
         private var isProgrammaticUpdate = false
-        private var styleTask: Task<Void, Never>?
         /// Last toolbar insertion already applied — `updateNSView` can fire
         /// again before the async binding clear, and must not re-insert.
         var lastAppliedInsertionID: UUID?
+        /// Markdown source. The text view shows the projection, not this string.
+        private var markdown = ""
+        private var sourceUTF16: [Int] = []
+        private var lastDisplay = ""
+        private var reveal: MarkdownDisplay.Reveal = .none
 
         init(parent: MarkdownEditorView) {
             self.parent = parent
@@ -167,37 +172,166 @@ struct MarkdownEditorView: NSViewRepresentable {
             textView?.applyInsertion(.link)
         }
 
-        /// Push a new text into the view (no-op when unchanged) and restyle
-        /// immediately — open/commit boundaries must never show raw text.
+        /// Push markdown into the view as its rendered projection.
         func setText(_ text: String, of textView: MarkdownSourceTextView) {
-            guard textView.string != text else { return }
-            isProgrammaticUpdate = true
-            textView.string = text
-            isProgrammaticUpdate = false
-            textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-            textView.scrollRangeToVisible(textView.selectedRange())
-            Self.applyStyling(to: textView)
+            guard text != markdown else { return }
+            markdown = text
+            reveal = .none
+            let display = MarkdownDisplay.project(text, reveal: .none)
+            show(display, in: textView, sourceCaret: display.sourceUTF16.last.map { $0 + 1 })
         }
 
         func textDidChange(_ notification: Notification) {
             guard !isProgrammaticUpdate,
                   let textView = notification.object as? MarkdownSourceTextView else { return }
-            parent.text = textView.string
-            // Attribute pass is debounced; the source string is already exact.
-            styleTask?.cancel()
-            styleTask = Task { @MainActor [weak textView] in
-                try? await Task.sleep(nanoseconds: 150_000_000)
-                guard !Task.isCancelled, let textView else { return }
-                Self.applyStyling(to: textView)
+            let edited = textView.string
+            let change = Self.displayChange(from: lastDisplay, to: edited)
+            let previous = MarkdownDisplay(text: lastDisplay, sourceUTF16: sourceUTF16)
+            let updated = previous.splicing(
+                source: markdown,
+                displayReplacement: change.replacement,
+                displayUTF16: change.range
+            )
+            let caret = previous.sourceCaretUTF16(
+                displayReplacement: change.replacement,
+                displayUTF16: change.range,
+                source: markdown
+            )
+            markdown = updated
+            parent.text = updated
+            let display = MarkdownDisplay.project(updated, reveal: reveal)
+            show(display, in: textView, sourceCaret: caret)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard !isProgrammaticUpdate,
+                  let textView = notification.object as? MarkdownSourceTextView else { return }
+            let next = reveal(at: textView.selectedRange().location)
+            guard next != reveal else { return }
+            reveal = next
+            let caret = sourceOffset(at: textView.selectedRange().location)
+            let display = MarkdownDisplay.project(markdown, reveal: reveal)
+            show(display, in: textView, sourceCaret: caret)
+        }
+
+        private func show(
+            _ display: MarkdownDisplay,
+            in textView: MarkdownSourceTextView,
+            sourceCaret: Int?
+        ) {
+            isProgrammaticUpdate = true
+            textView.string = display.text
+            sourceUTF16 = display.sourceUTF16
+            lastDisplay = display.text
+            let location = displayLocation(forSource: sourceCaret, count: (display.text as NSString).length)
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+            textView.scrollRangeToVisible(textView.selectedRange())
+            isProgrammaticUpdate = false
+        }
+
+        private func displayLocation(forSource caret: Int?, count: Int) -> Int {
+            guard let caret else { return count }
+            if let index = sourceUTF16.firstIndex(where: { $0 >= caret }) {
+                return index
+            }
+            return count
+        }
+
+        private func sourceOffset(at displayLocation: Int) -> Int {
+            if displayLocation <= 0 { return 0 }
+            if displayLocation >= sourceUTF16.count {
+                return (markdown as NSString).length
+            }
+            return sourceUTF16[displayLocation]
+        }
+
+        private func reveal(at displayLocation: Int) -> MarkdownDisplay.Reveal {
+            let offset = sourceOffset(at: displayLocation)
+            let index = String.Index(utf16Offset: offset, in: markdown)
+            let doc = MarkdownDocument.parse(markdown)
+            if let inline = Self.inlineContaining(index, in: doc.blocks) {
+                return .inline(Self.contentRange(of: inline))
+            }
+            if let block = Self.blockContaining(index, in: doc.blocks),
+               index < block.marker.upperBound || Self.isObject(block) {
+                return .block(Self.isObject(block) ? block.source : block.marker)
+            }
+            return .none
+        }
+
+        private static func isObject(_ block: MarkdownBlock) -> Bool {
+            switch block.kind {
+            case .image, .codeFence, .mathBlock: return true
+            default: return false
             }
         }
 
-        /// Attributes-only restyle. Never touches the undo stack or the text.
-        static func applyStyling(to textView: MarkdownSourceTextView) {
-            guard let storage = textView.textStorage, !textView.hasMarkedText() else { return }
-            textView.undoManager?.disableUndoRegistration()
-            MarkdownStyler.apply(to: storage)
-            textView.undoManager?.enableUndoRegistration()
+        private static func contentRange(of inline: MarkdownInline) -> Range<String.Index> {
+            switch inline {
+            case .text(let range): return range
+            case .strong(let open, _, let close), .emphasis(let open, _, let close):
+                return open.upperBound..<close.lowerBound
+            case .code(_, let content, _): return content
+            case .link(let labelOpen, _, let labelClose, _, _):
+                return labelOpen.upperBound..<labelClose.lowerBound
+            case .math(_, let latex, _): return latex
+            }
+        }
+
+        private static func inlineContaining(_ index: String.Index, in blocks: [MarkdownBlock]) -> MarkdownInline? {
+            for block in blocks {
+                if let found = inlineContaining(index, in: block.inlines) { return found }
+                if let found = inlineContaining(index, in: block.children) { return found }
+            }
+            return nil
+        }
+
+        private static func inlineContaining(_ index: String.Index, in inlines: [MarkdownInline]) -> MarkdownInline? {
+            for item in inlines {
+                switch item {
+                case .text(let range):
+                    if range.contains(index) { return item }
+                case .strong(let open, let content, let close),
+                     .emphasis(let open, let content, let close):
+                    if (open.lowerBound..<close.upperBound).contains(index) {
+                        return inlineContaining(index, in: content) ?? item
+                    }
+                case .code(let open, _, let close), .math(let open, _, let close):
+                    if (open.lowerBound..<close.upperBound).contains(index) { return item }
+                case .link(let labelOpen, let label, _, _, let close):
+                    if (labelOpen.lowerBound..<close.upperBound).contains(index) {
+                        return inlineContaining(index, in: label) ?? item
+                    }
+                }
+            }
+            return nil
+        }
+
+        private static func blockContaining(_ index: String.Index, in blocks: [MarkdownBlock]) -> MarkdownBlock? {
+            for block in blocks {
+                if let child = blockContaining(index, in: block.children) { return child }
+                if block.source.contains(index) { return block }
+            }
+            return nil
+        }
+
+        private static func displayChange(from old: String, to new: String) -> (range: Range<Int>, replacement: String) {
+            let oldUnits = Array(old.utf16)
+            let newUnits = Array(new.utf16)
+            var prefix = 0
+            while prefix < oldUnits.count && prefix < newUnits.count && oldUnits[prefix] == newUnits[prefix] {
+                prefix += 1
+            }
+            var suffix = 0
+            while suffix < (oldUnits.count - prefix) && suffix < (newUnits.count - prefix)
+                    && oldUnits[oldUnits.count - 1 - suffix] == newUnits[newUnits.count - 1 - suffix] {
+                suffix += 1
+            }
+            let replacement = String(
+                decoding: newUnits[prefix..<(newUnits.count - suffix)],
+                as: UTF16.self
+            )
+            return (prefix..<(oldUnits.count - suffix), replacement)
         }
     }
 }

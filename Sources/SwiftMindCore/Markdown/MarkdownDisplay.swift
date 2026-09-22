@@ -78,6 +78,33 @@ public struct MarkdownDisplay: Equatable, Sendable {
         )
     }
 
+    /// Source UTF-16 offset where the caret should sit after `splicing`.
+    public func sourceCaretUTF16(
+        displayReplacement: String,
+        displayUTF16: Range<Int>,
+        source: String
+    ) -> Int {
+        let mapCount = sourceUTF16.count
+        let sourceCount = source.utf16.count
+        let lower = displayUTF16.lowerBound
+        let start: Int
+        if lower == displayUTF16.upperBound {
+            if lower >= 0 && lower < mapCount {
+                start = sourceUTF16[lower]
+            } else if lower <= 0 {
+                start = 0
+            } else {
+                start = sourceCount
+            }
+        } else if mapCount == 0 || lower >= mapCount || displayUTF16.upperBound <= 0 {
+            start = lower <= 0 ? 0 : sourceCount
+        } else {
+            let first = min(max(lower, 0), mapCount - 1)
+            start = sourceUTF16[first]
+        }
+        return min(max(start, 0) + displayReplacement.utf16.count, sourceCount + displayReplacement.utf16.count)
+    }
+
     private static func appendBlocks(
         _ blocks: [MarkdownBlock],
         source: String,
