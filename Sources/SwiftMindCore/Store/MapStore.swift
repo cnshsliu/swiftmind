@@ -27,9 +27,9 @@ public final class MapStore {
         }
     }
 
-    /// Measured expanded-note card heights. Cleared when content or layout
-    /// config changes; not cleared by `invalidateGeometry` (that would drop
-    /// the override before the relayout that consumes it).
+    /// Measured expanded-note card heights. Cleared after a successful content
+    /// change or a layout-config change. Not cleared inside `invalidateGeometry`
+    /// — that would drop the override before the relayout that consumes it.
     public private(set) var noteCardHeights: [NodeID: Double] = [:]
 
     /// Geometry-only snapshot (selection flags cleared). Invalidated on content change.
@@ -69,7 +69,6 @@ public final class MapStore {
     }
 
     public func dispatch(_ command: any MapCommand) throws {
-        noteCardHeights = [:]
         // Capture a sibling focus target before a delete removes the primary.
         var focusAfterDelete: NodeID?
         if let delete = command as? DeleteNodesCommand,
@@ -97,6 +96,7 @@ public final class MapStore {
                 }
             }
         }
+        noteCardHeights = [:]
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
@@ -122,6 +122,7 @@ public final class MapStore {
 
     public func undo() throws {
         try bus.undo(on: &map)
+        noteCardHeights = [:]
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
@@ -129,6 +130,7 @@ public final class MapStore {
 
     public func redo() throws {
         try bus.redo(on: &map)
+        noteCardHeights = [:]
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
@@ -158,6 +160,7 @@ public final class MapStore {
         self.map = map
         bus.clearHistory()
         selection = SelectionState(selectedIDs: [map.root.id], primary: map.root.id)
+        noteCardHeights = [:]
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1

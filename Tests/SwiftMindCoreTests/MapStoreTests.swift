@@ -128,4 +128,35 @@ final class MapStoreTests: XCTestCase {
         XCTAssertEqual(store.contentRevision, revision)
         XCTAssertEqual(store.snapshot().nodes.first { $0.id == rootID }!.frame.height, 80)
     }
+
+    func testContentReplacementDropsMeasuredNoteHeights() throws {
+        var map = MindMap.makeEmpty(title: "t")
+        map.root.isNoteExpanded = true
+        map.root.noteMarkdown = "hello"
+        let store = MapStore(map: map)
+        let rootID = map.root.id
+        store.updateMeasuredNoteHeight(80, for: rootID)
+        XCTAssertEqual(store.noteCardHeights[rootID], 80)
+
+        // A failed command does not change the map, so the measurement stays.
+        XCTAssertThrowsError(
+            try store.dispatch(SetNoteCommand(nodeID: NodeID(rawValue: "missing"), noteMarkdown: "nope"))
+        )
+        XCTAssertEqual(store.noteCardHeights[rootID], 80)
+
+        try store.dispatch(SetNoteCommand(nodeID: rootID, noteMarkdown: "changed"))
+        XCTAssertTrue(store.noteCardHeights.isEmpty)
+
+        store.updateMeasuredNoteHeight(80, for: rootID)
+        try store.undo()
+        XCTAssertTrue(store.noteCardHeights.isEmpty)
+
+        store.updateMeasuredNoteHeight(80, for: rootID)
+        try store.redo()
+        XCTAssertTrue(store.noteCardHeights.isEmpty)
+
+        store.updateMeasuredNoteHeight(80, for: rootID)
+        store.replaceMap(MindMap.makeEmpty(title: "fresh"))
+        XCTAssertTrue(store.noteCardHeights.isEmpty)
+    }
 }
