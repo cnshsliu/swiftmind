@@ -16,17 +16,13 @@ public struct MarkdownDisplay: Equatable, Sendable {
         self.sourceUTF16 = sourceUTF16
     }
 
-    /// `.inline` and `.block` project like `.none` until reveal is implemented.
     public static func project(_ source: String, reveal: Reveal) -> MarkdownDisplay {
-        switch reveal {
-        case .none, .inline, .block:
-            break
-        }
         var text = ""
         var map: [Int] = []
         let end = appendBlocks(
             MarkdownDocument.parse(source).blocks,
             source: source,
+            reveal: reveal,
             from: source.startIndex,
             into: &text,
             map: &map
@@ -38,9 +34,34 @@ public struct MarkdownDisplay: Equatable, Sendable {
         return MarkdownDisplay(text: text, sourceUTF16: map)
     }
 
+    /// Map a display edit back onto markdown. A zero-length range inserts.
+    /// A non-empty range replaces the source units covered by those display units.
+    public func splicing(source: String, displayReplacement: String, displayUTF16: Range<Int>) -> String {
+        let mapCount = sourceUTF16.count
+        let sourceCount = source.utf16.count
+        let lower = displayUTF16.lowerBound
+        let upper = displayUTF16.upperBound
+        let start: Int
+        if lower <= 0 || mapCount == 0 {
+            start = 0
+        } else {
+            let before = min(lower - 1, mapCount - 1)
+            start = sourceUTF16[before] + 1
+        }
+        let end = upper >= 0 && upper < mapCount ? sourceUTF16[upper] : sourceCount
+        let location = min(max(start, 0), sourceCount)
+        let length = min(max(0, end - location), sourceCount - location)
+        let ns = source as NSString
+        return ns.replacingCharacters(
+            in: NSRange(location: location, length: length),
+            with: displayReplacement
+        )
+    }
+
     private static func appendBlocks(
         _ blocks: [MarkdownBlock],
         source: String,
+        reveal: Reveal,
         from start: String.Index,
         into text: inout String,
         map: inout [Int]
@@ -53,6 +74,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
             appendBlock(
                 block,
                 source: source,
+                reveal: reveal,
                 anotherFollows: offset + 1 < blocks.count,
                 into: &text,
                 map: &map
@@ -67,10 +89,20 @@ public struct MarkdownDisplay: Equatable, Sendable {
     private static func appendBlock(
         _ block: MarkdownBlock,
         source: String,
+        reveal: Reveal,
         anotherFollows: Bool,
         into text: inout String,
         map: inout [Int]
     ) {
+        // An image click reveals the whole line. Do not also append U+FFFC.
+        if case .block(let range) = reveal, block.source == range {
+            appendSource(block.source, source: source, into: &text, map: &map)
+            return
+        }
+        // Marker reveal keeps the rendered body, so a heading is not the raw line twice.
+        if case .block(let range) = reveal, block.marker == range {
+            appendSource(block.marker, source: source, into: &text, map: &map)
+        }
         switch block.kind {
         case .image(let alt, _):
             // U+FFFC replaces the image syntax, not the line break after it.
@@ -86,30 +118,90 @@ public struct MarkdownDisplay: Equatable, Sendable {
             let interior = block.marker.upperBound..<closingLineStart(block, source: source)
             appendSource(interior, source: source, into: &text, map: &map)
         case .heading, .paragraph, .listItem, .quote:
-            appendInlines(block.inlines, source: source, into: &text, map: &map)
+            appendInlines(block.inlines, source: source, reveal: reveal, into: &text, map: &map)
             var childStart = coverageEnd(block)
             if sourceContainsNewline(block, source: source) || anotherFollows || !block.children.isEmpty {
                 childStart = appendLineBreak(block, source: source, into: &text, map: &map)
             }
-            _ = appendBlocks(block.children, source: source, from: childStart, into: &text, map: &map)
+            _ = appendBlocks(
+                block.children,
+                source: source,
+                reveal: reveal,
+                from: childStart,
+                into: &text,
+                map: &map
+            )
         }
     }
 
     private static func appendInlines(
         _ inlines: [MarkdownInline],
         source: String,
+        reveal: Reveal,
         into text: inout String,
         map: inout [Int]
     ) {
         for inline in inlines {
             switch inline {
-            case .text(let range), .code(_, let range, _), .math(_, let range, _):
+            case .text(let range):
                 appendSource(range, source: source, into: &text, map: &map)
-            case .strong(_, let content, _), .emphasis(_, let content, _):
-                appendInlines(content, source: source, into: &text, map: &map)
-            case .link(_, let label, _, _, _):
-                appendInlines(label, source: source, into: &text, map: &map)
+            case .strong(let open, let content, let close),
+                 .emphasis(let open, let content, let close):
+                if inlineRevealed(inline, reveal: reveal) {
+                    appendSource(open, source: source, into: &text, map: &map)
+                    appendInlines(content, source: source, reveal: reveal, into: &text, map: &map)
+                    appendSource(close, source: source, into: &text, map: &map)
+                } else {
+                    appendInlines(content, source: source, reveal: reveal, into: &text, map: &map)
+                }
+            case .code(let open, let content, let close):
+                if inlineRevealed(inline, reveal: reveal) {
+                    appendSource(open, source: source, into: &text, map: &map)
+                    appendSource(content, source: source, into: &text, map: &map)
+                    appendSource(close, source: source, into: &text, map: &map)
+                } else {
+                    appendSource(content, source: source, into: &text, map: &map)
+                }
+            case .math(let open, let latex, let close):
+                if inlineRevealed(inline, reveal: reveal) {
+                    appendSource(open, source: source, into: &text, map: &map)
+                    appendSource(latex, source: source, into: &text, map: &map)
+                    appendSource(close, source: source, into: &text, map: &map)
+                } else {
+                    appendSource(latex, source: source, into: &text, map: &map)
+                }
+            case .link(let labelOpen, let label, let labelClose, let url, let close):
+                if inlineRevealed(inline, reveal: reveal) {
+                    appendSource(labelOpen, source: source, into: &text, map: &map)
+                    appendInlines(label, source: source, reveal: reveal, into: &text, map: &map)
+                    appendSource(labelClose, source: source, into: &text, map: &map)
+                    appendSource(url, source: source, into: &text, map: &map)
+                    appendSource(close, source: source, into: &text, map: &map)
+                } else {
+                    appendInlines(label, source: source, reveal: reveal, into: &text, map: &map)
+                }
             }
+        }
+    }
+
+    /// True when `reveal` names this inline's content, not a nested span.
+    private static func inlineRevealed(_ inline: MarkdownInline, reveal: Reveal) -> Bool {
+        guard case .inline(let range) = reveal else { return false }
+        return contentRange(of: inline) == range
+    }
+
+    private static func contentRange(of inline: MarkdownInline) -> Range<String.Index> {
+        switch inline {
+        case .text(let range):
+            return range
+        case .strong(let open, _, let close), .emphasis(let open, _, let close):
+            return open.upperBound..<close.lowerBound
+        case .code(_, let content, _):
+            return content
+        case .link(let labelOpen, _, let labelClose, _, _):
+            return labelOpen.upperBound..<labelClose.lowerBound
+        case .math(_, let latex, _):
+            return latex
         }
     }
 

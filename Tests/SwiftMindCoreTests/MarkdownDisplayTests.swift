@@ -39,4 +39,38 @@ final class MarkdownDisplayTests: XCTestCase {
         XCTAssertEqual(display.text, "x\n\n")
         XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
     }
+
+    func testRevealStrongShowsMarkers() {
+        let source = "Ship **Friday**."
+        let doc = MarkdownDocument.parse(source)
+        guard case .strong(_, let content, _) = doc.blocks[0].inlines[1],
+              case .text(let range) = content[0] else {
+            return XCTFail("missing strong")
+        }
+        let display = MarkdownDisplay.project(source, reveal: .inline(range))
+        XCTAssertEqual(display.text, "Ship **Friday**.")
+        XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
+    }
+
+    func testRevealHeadingPrefix() {
+        let source = "## title2\n"
+        let doc = MarkdownDocument.parse(source)
+        let display = MarkdownDisplay.project(source, reveal: .block(doc.blocks[0].marker))
+        XCTAssertEqual(display.text, "## title2\n")
+        XCTAssertEqual(display.sourceUTF16.count, display.text.utf16.count)
+    }
+
+    func testSpliceInsertsIntoMarkdown() {
+        let source = "Ship Friday."
+        let previous = MarkdownDisplay.project(source, reveal: .none)
+        let inserted = previous.splicing(source: source, displayReplacement: "X", displayUTF16: 5..<5)
+        XCTAssertEqual(inserted, "Ship XFriday.")
+    }
+
+    func testSpliceDeletesMarkdown() {
+        let source = "Ship Friday."
+        let previous = MarkdownDisplay.project(source, reveal: .none)
+        let deleted = previous.splicing(source: source, displayReplacement: "", displayUTF16: 5..<11)
+        XCTAssertEqual(deleted, "Ship .")
+    }
 }
