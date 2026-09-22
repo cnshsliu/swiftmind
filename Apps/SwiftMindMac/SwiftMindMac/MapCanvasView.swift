@@ -1243,23 +1243,30 @@ struct MapCanvasView: View {
         .onChange(of: session.contentRevision) { _, _ in
             updateMeasuredNoteCardHeight(document, for: visual.id)
         }
+        // Zoom changes the card's view width; the font stays 12pt, so wrapping changes.
+        .onChange(of: session.viewport.scale) { _, _ in
+            updateMeasuredNoteCardHeight(document, for: visual.id)
+        }
     }
 
-    /// Hosts the card's renderer and stores the height in map points. Zero is
-    /// a failed measure. The store ignores a repeat within 1 point, so a
+    /// Hosts the card's renderer at the zoomed width (layout width × scale,
+    /// font stays 12pt) and stores map points (`measured / scale`). Zero is a
+    /// failed measure. The store ignores a repeat within 1 point, so a
     /// follow-up layout cannot loop. The canvas observes `session`, not the
     /// store; this is view state and must not mark the file dirty.
     @MainActor
     private func updateMeasuredNoteCardHeight(_ markdown: String, for id: NodeID) {
+        let scale = session.viewport.scale
+        guard scale.isFinite, scale > 0 else { return }
         let measured = NoteCardMeasurer.height(
             markdown: markdown,
-            width: CGFloat(session.store.layoutConfig.expandedNoteWidth),
+            width: CGFloat(session.store.layoutConfig.expandedNoteWidth) * CGFloat(scale),
             fontSize: 12,
             maxImageHeight: mediaImageHeight
         )
         guard measured > 0 else { return }
         let revision = session.store.contentRevision
-        session.store.updateMeasuredNoteHeight(Double(measured), for: id)
+        session.store.updateMeasuredNoteHeight(Double(measured) / scale, for: id)
         guard session.store.contentRevision != revision else { return }
         Task { @MainActor in
             session.objectWillChange.send()
