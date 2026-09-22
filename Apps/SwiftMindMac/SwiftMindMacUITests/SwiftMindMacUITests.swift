@@ -636,6 +636,43 @@ final class SwiftMindMacUITests: XCTestCase {
         )
     }
 
+    /// Typing `**x**` renders as x and the file still stores the markers.
+    func testNoteEditorHidesBoldMarkers() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText("**x**")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let value = (editor.value as? String) ?? ""
+        XCTAssertFalse(value.contains("*"), "rendered display hides ** — got \(value)")
+        XCTAssertTrue(value.contains("x"))
+        app.typeKey(.return, modifierFlags: .command)
+        XCTAssertTrue(waitForScratchMap { $0.contains("**x**") }, "file still stores the markers")
+    }
+
+    /// A wrapped paragraph measures taller than one line and stays under the cap.
+    func testExpandedCardIsTallerThanOneLine() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText(String(repeating: "word ", count: 80))
+        app.typeKey(.return, modifierFlags: .command)
+        app.typeKey(.init("x"), modifierFlags: [])
+        let card = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'noteCard-'")
+        ).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 3))
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        XCTAssertGreaterThan(card.frame.height, 40)
+        XCTAssertLessThanOrEqual(card.frame.height, 420)
+    }
+
     /// On-card mode (3a): with Settings `swiftmind.noteEditMode=onCard` and
     /// an expanded note, `E` hosts the editor at the card (`noteEditorOnCard`).
     func testOnCardNoteEditorOpensAndCommits() throws {
