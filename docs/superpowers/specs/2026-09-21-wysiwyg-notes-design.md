@@ -1,6 +1,6 @@
 # WYSIWYG notes, measured cards, Markdown AST — design (2026-09-21)
 
-Status: approved interaction, pending spec review.
+Status: approved. Plan: `docs/superpowers/plans/2026-09-22-wysiwyg-notes.md`.
 
 Reverses three non-goals in `2026-09-21-note-editing-ux-design.md`. Both
 editor hosts stay (Settings `swiftmind.noteEditMode`: `panel` | `onCard`).
