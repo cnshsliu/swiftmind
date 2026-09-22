@@ -13,7 +13,11 @@ public struct LayoutEngine: Sendable {
         self.config = config
     }
 
-    public func layout(map: MindMap, selection: SelectionState = SelectionState()) -> MapSnapshot {
+    public func layout(
+        map: MindMap,
+        selection: SelectionState = SelectionState(),
+        measuredNoteHeights: [NodeID: Double] = [:]
+    ) -> MapSnapshot {
         var nodes: [NodeVisual] = []
         var edges: [EdgeVisual] = []
 
@@ -22,7 +26,7 @@ public struct LayoutEngine: Sendable {
         let sheet = map.styleSheet
         let root = map.root
 
-        let rootSize = measure(root, sheet: sheet)
+        let rootSize = measure(root, sheet: sheet, measuredNoteHeights: measuredNoteHeights)
         let rootFrame: Rect2D
         if let pin = root.positionPin {
             rootFrame = Rect2D(
@@ -59,6 +63,7 @@ public struct LayoutEngine: Sendable {
             sheet: sheet,
             filter: filter,
             graph: graph,
+            measuredNoteHeights: measuredNoteHeights,
             nodes: &nodes,
             edges: &edges
         )
@@ -86,7 +91,11 @@ public struct LayoutEngine: Sendable {
 
     // MARK: - Measure
 
-    private func measure(_ node: Node, sheet: StyleSheet) -> (width: Double, height: Double) {
+    private func measure(
+        _ node: Node,
+        sheet: StyleSheet,
+        measuredNoteHeights: [NodeID: Double]
+    ) -> (width: Double, height: Double) {
         let style = StyleResolver.resolve(node: node, sheet: sheet)
         if node.sketch != nil {
             // Sketch node: sized from the trimmed content board (scaled to fit
@@ -107,20 +116,16 @@ public struct LayoutEngine: Sendable {
             return (boardW + config.paddingX * 2, h)
         }
         if node.isNoteExpanded {
-            // Deterministic estimate (core stays UI-free): each markdown
-            // line costs one row, fenced code counts its actual lines, each
-            // image reserves one mediaMaxSize row, plus the virtual H1 line —
-            // padded and capped. The card view scrolls overflow in-place.
-            let bodyHeight = node.noteMarkdown.isEmpty
-                ? 0
-                : MarkdownSegmenter.estimatedHeight(
-                    of: node.noteMarkdown,
-                    lineHeight: config.expandedNoteLineHeight,
-                    imageHeight: config.mediaMaxSize
-                )
-            let estimated = bodyHeight + config.expandedNoteLineHeight
-                + config.paddingX * 2
-            var h = min(config.expandedNoteMaxHeight, max(config.nodeHeight, estimated))
+            // AST guess stays UI-free. A measured card height replaces it.
+            // Both are capped; the card view scrolls overflow in-place.
+            let guess = MarkdownMeasure(
+                width: config.expandedNoteWidth,
+                charWidth: max(config.charWidth, style.fontSize * 0.55),
+                lineHeight: config.expandedNoteLineHeight,
+                imageHeight: config.mediaMaxSize
+            ).height(of: node.noteMarkdown) + config.expandedNoteLineHeight + config.paddingX * 2
+            let raw = measuredNoteHeights[node.id] ?? max(config.nodeHeight, guess)
+            var h = min(config.expandedNoteMaxHeight, raw)
             if Self.hasFormula(node) { h += config.formulaBadgeHeight }
             return (config.expandedNoteWidth, h)
         }
@@ -155,7 +160,8 @@ public struct LayoutEngine: Sendable {
         _ children: [Node],
         sheet: StyleSheet,
         filter: MapFilter?,
-        graph: MapGraph
+        graph: MapGraph,
+        measuredNoteHeights: [NodeID: Double]
     ) -> [(Node, NodeSide)] {
         var rightWeight = 0.0
         var leftWeight = 0.0
@@ -170,7 +176,13 @@ public struct LayoutEngine: Sendable {
                 // Lighter side wins; prefer left when equal.
                 side = leftWeight <= rightWeight ? .left : .right
             }
-            let w = subtreeHeight(child, sheet: sheet, filter: filter, graph: graph)
+            let w = subtreeHeight(
+                child,
+                sheet: sheet,
+                filter: filter,
+                graph: graph,
+                measuredNoteHeights: measuredNoteHeights
+            )
             if side == .left {
                 leftWeight += w
             } else {
@@ -183,17 +195,34 @@ public struct LayoutEngine: Sendable {
 
     /// Vertical extent of a node plus all expanded unpinned descendants
     /// (single outward column — Mode 1 never splits a branch left+right).
-    private func subtreeHeight(_ node: Node, sheet: StyleSheet, filter: MapFilter?, graph: MapGraph) -> Double {
-        let selfH = measure(node, sheet: sheet).height
+    private func subtreeHeight(
+        _ node: Node,
+        sheet: StyleSheet,
+        filter: MapFilter?,
+        graph: MapGraph,
+        measuredNoteHeights: [NodeID: Double]
+    ) -> Double {
+        let selfH = measure(node, sheet: sheet, measuredNoteHeights: measuredNoteHeights).height
         guard !node.isFolded else { return selfH }
         let kids = visibleChildren(of: node, filter: filter, graph: graph).filter { $0.positionPin == nil }
         guard !kids.isEmpty else { return selfH }
-        return max(selfH, columnHeight(kids, sheet: sheet, filter: filter, graph: graph))
+        return max(
+            selfH,
+            columnHeight(kids, sheet: sheet, filter: filter, graph: graph, measuredNoteHeights: measuredNoteHeights)
+        )
     }
 
-    private func columnHeight(_ nodes: [Node], sheet: StyleSheet, filter: MapFilter?, graph: MapGraph) -> Double {
+    private func columnHeight(
+        _ nodes: [Node],
+        sheet: StyleSheet,
+        filter: MapFilter?,
+        graph: MapGraph,
+        measuredNoteHeights: [NodeID: Double]
+    ) -> Double {
         guard !nodes.isEmpty else { return 0 }
-        return nodes.map { subtreeHeight($0, sheet: sheet, filter: filter, graph: graph) }.reduce(0, +)
+        return nodes.map {
+            subtreeHeight($0, sheet: sheet, filter: filter, graph: graph, measuredNoteHeights: measuredNoteHeights)
+        }.reduce(0, +)
             + Double(max(0, nodes.count - 1)) * config.verticalGap
     }
 
@@ -207,13 +236,20 @@ public struct LayoutEngine: Sendable {
         sheet: StyleSheet,
         filter: MapFilter?,
         graph: MapGraph,
+        measuredNoteHeights: [NodeID: Double],
         nodes: inout [NodeVisual],
         edges: inout [EdgeVisual]
     ) {
         guard !root.isFolded else { return }
 
         let children = visibleChildren(of: root, filter: filter, graph: graph)
-        let assigned = assignRootChildSides(children, sheet: sheet, filter: filter, graph: graph)
+        let assigned = assignRootChildSides(
+            children,
+            sheet: sheet,
+            filter: filter,
+            graph: graph,
+            measuredNoteHeights: measuredNoteHeights
+        )
         let lefts = assigned.filter { $0.1 == .left }.map(\.0)
         let rights = assigned.filter { $0.1 == .right }.map(\.0)
 
@@ -227,6 +263,7 @@ public struct LayoutEngine: Sendable {
             sheet: sheet,
             filter: filter,
             graph: graph,
+            measuredNoteHeights: measuredNoteHeights,
             nodes: &nodes,
             edges: &edges
         )
@@ -240,6 +277,7 @@ public struct LayoutEngine: Sendable {
             sheet: sheet,
             filter: filter,
             graph: graph,
+            measuredNoteHeights: measuredNoteHeights,
             nodes: &nodes,
             edges: &edges
         )
@@ -255,6 +293,7 @@ public struct LayoutEngine: Sendable {
         sheet: StyleSheet,
         filter: MapFilter?,
         graph: MapGraph,
+        measuredNoteHeights: [NodeID: Double],
         nodes: inout [NodeVisual],
         edges: inout [EdgeVisual]
     ) {
@@ -272,6 +311,7 @@ public struct LayoutEngine: Sendable {
             sheet: sheet,
             filter: filter,
             graph: graph,
+            measuredNoteHeights: measuredNoteHeights,
             nodes: &nodes,
             edges: &edges
         )
@@ -287,18 +327,31 @@ public struct LayoutEngine: Sendable {
         sheet: StyleSheet,
         filter: MapFilter?,
         graph: MapGraph,
+        measuredNoteHeights: [NodeID: Double],
         nodes: inout [NodeVisual],
         edges: inout [EdgeVisual]
     ) {
         let auto = children.filter { $0.positionPin == nil }
         let pinned = children.filter { $0.positionPin != nil }
 
-        let totalH = columnHeight(auto, sheet: sheet, filter: filter, graph: graph)
+        let totalH = columnHeight(
+            auto,
+            sheet: sheet,
+            filter: filter,
+            graph: graph,
+            measuredNoteHeights: measuredNoteHeights
+        )
         var cursorY = parentFrame.midY - totalH / 2
 
         for child in auto {
-            let size = measure(child, sheet: sheet)
-            let blockH = subtreeHeight(child, sheet: sheet, filter: filter, graph: graph)
+            let size = measure(child, sheet: sheet, measuredNoteHeights: measuredNoteHeights)
+            let blockH = subtreeHeight(
+                child,
+                sheet: sheet,
+                filter: filter,
+                graph: graph,
+                measuredNoteHeights: measuredNoteHeights
+            )
             let centerY = cursorY + blockH / 2
             // Outward only: left branch → further left; right branch → further right.
             let x: Double
@@ -333,7 +386,8 @@ public struct LayoutEngine: Sendable {
                 selection: selection,
                 sheet: sheet,
                 filter: filter,
-            graph: graph,
+                graph: graph,
+                measuredNoteHeights: measuredNoteHeights,
                 nodes: &nodes,
                 edges: &edges
             )
@@ -341,7 +395,7 @@ public struct LayoutEngine: Sendable {
         }
 
         for child in pinned {
-            let size = measure(child, sheet: sheet)
+            let size = measure(child, sheet: sheet, measuredNoteHeights: measuredNoteHeights)
             let pin = child.positionPin!
             let frame = Rect2D(
                 x: pin.x - size.width / 2,
@@ -370,7 +424,8 @@ public struct LayoutEngine: Sendable {
                 selection: selection,
                 sheet: sheet,
                 filter: filter,
-            graph: graph,
+                graph: graph,
+                measuredNoteHeights: measuredNoteHeights,
                 nodes: &nodes,
                 edges: &edges
             )

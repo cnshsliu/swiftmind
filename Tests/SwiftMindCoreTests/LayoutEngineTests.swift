@@ -286,4 +286,26 @@ final class LayoutEngineTests: XCTestCase {
         // 2 text rows (2*20) + 1 image media row (160) + H1 (20) + 2*12 padding
         XCTAssertEqual(card.frame.height, 244, accuracy: 0.001)
     }
+
+    func testMeasuredNoteHeightOverridesGuess() {
+        var map = MindMap.makeEmpty(title: "T")
+        map.root.isNoteExpanded = true
+        map.root.noteMarkdown = "hello"
+        let guess = LayoutEngine().layout(map: map).nodes.first { $0.id == map.root.id }!.frame.height
+        let overridden = LayoutEngine().layout(
+            map: map,
+            measuredNoteHeights: [map.root.id: 80]
+        )
+        let height = overridden.nodes.first { $0.id == map.root.id }!.frame.height
+        XCTAssertEqual(height, 80)
+        XCTAssertNotEqual(height, guess)
+        let capped = LayoutEngine().layout(
+            map: map,
+            measuredNoteHeights: [map.root.id: 900]
+        )
+        XCTAssertEqual(
+            capped.nodes.first { $0.id == map.root.id }!.frame.height,
+            LayoutConfig().expandedNoteMaxHeight
+        )
+    }
 }
