@@ -1239,6 +1239,10 @@ struct MapCanvasView: View {
         .onChange(of: document) { _, updated in
             updateMeasuredNoteCardHeight(updated, for: visual.id)
         }
+        // dispatch clears measured heights; the same document must be measured again.
+        .onChange(of: session.contentRevision) { _, _ in
+            updateMeasuredNoteCardHeight(document, for: visual.id)
+        }
     }
 
     /// Hosts the card's renderer and stores the height in map points. Zero is
