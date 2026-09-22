@@ -73,4 +73,12 @@ final class MarkdownDisplayTests: XCTestCase {
         let deleted = previous.splicing(source: source, displayReplacement: "", displayUTF16: 5..<11)
         XCTAssertEqual(deleted, "Ship .")
     }
+
+    func testInsertInsideHiddenStrongDoesNotEatMarkers() {
+        let source = "Ship **Friday**."
+        let previous = MarkdownDisplay.project(source, reveal: .none)
+        XCTAssertEqual(previous.text, "Ship Friday.")
+        let inserted = previous.splicing(source: source, displayReplacement: "X", displayUTF16: 5..<5)
+        XCTAssertEqual(inserted, "Ship **XFriday**.")
+    }
 }

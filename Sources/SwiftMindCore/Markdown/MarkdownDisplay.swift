@@ -34,26 +34,39 @@ public struct MarkdownDisplay: Equatable, Sendable {
         return MarkdownDisplay(text: text, sourceUTF16: map)
     }
 
-    /// Map a display edit back onto markdown. A zero-length range inserts.
-    /// A non-empty range replaces the source units covered by those display units.
+    /// Map a display edit back onto markdown. An empty range inserts and does not
+    /// delete hidden markers. A non-empty range replaces only the source units of
+    /// the display units it covers, not markers in the gaps outside that range.
     public func splicing(source: String, displayReplacement: String, displayUTF16: Range<Int>) -> String {
         let mapCount = sourceUTF16.count
         let sourceCount = source.utf16.count
         let lower = displayUTF16.lowerBound
         let upper = displayUTF16.upperBound
         let start: Int
-        if lower <= 0 || mapCount == 0 {
-            start = 0
+        let end: Int
+        if lower == upper {
+            if lower >= 0 && lower < mapCount {
+                start = sourceUTF16[lower]
+            } else if lower <= 0 {
+                start = 0
+            } else {
+                start = sourceCount
+            }
+            end = start
+        } else if mapCount == 0 || lower >= mapCount || upper <= 0 {
+            start = lower <= 0 ? 0 : sourceCount
+            end = start
         } else {
-            let before = min(lower - 1, mapCount - 1)
-            start = sourceUTF16[before] + 1
+            let first = min(max(lower, 0), mapCount - 1)
+            let last = min(max(upper - 1, 0), mapCount - 1)
+            start = sourceUTF16[first]
+            end = sourceUTF16[last] + 1
         }
-        let end = upper >= 0 && upper < mapCount ? sourceUTF16[upper] : sourceCount
         let location = min(max(start, 0), sourceCount)
-        let length = min(max(0, end - location), sourceCount - location)
+        let limit = min(max(end, location), sourceCount)
         let ns = source as NSString
         return ns.replacingCharacters(
-            in: NSRange(location: location, length: length),
+            in: NSRange(location: location, length: limit - location),
             with: displayReplacement
         )
     }
