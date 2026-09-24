@@ -91,6 +91,44 @@ public struct LayoutEngine: Sendable {
 
     // MARK: - Measure
 
+    /// Estimated rendered width of a single-line title, Unicode-aware:
+    /// Latin-ish scalars average `charWidth` (≥ 0.55×fontSize), while CJK and
+    /// other full-width glyphs render ~fontSize wide and count double. Shared
+    /// with the Mac inline editor so its box matches the frame a commit will
+    /// produce. Empty text still reserves one unit (min width floors later).
+    public static func estimatedTextWidth(_ text: String, fontSize: Double, charWidth: Double) -> Double {
+        let base = max(charWidth, fontSize * 0.55)
+        var units = 0.0
+        for scalar in text.unicodeScalars {
+            units += Self.isWideScalar(scalar) ? 2 : 1
+        }
+        return max(1, units) * base
+    }
+
+    /// Full-width scalar ranges: CJK ideographs & extensions, kana, hangul,
+    /// full-width forms, CJK punctuation, and the square/unit blocks.
+    static func isWideScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x1100...0x115F,       // Hangul Jamo
+             0x2E80...0x303E,       // CJK Radicals, Kangxi, CJK Symbols & Punctuation
+             0x3041...0x33FF,       // Hiragana, Katakana, Bopomofo, CJK Compatibility
+             0x3400...0x4DBF,       // CJK Extension A
+             0x4E00...0x9FFF,       // CJK Unified Ideographs
+             0xA000...0xA4CF,       // Yi
+             0xAC00...0xD7A3,       // Hangul Syllables
+             0xF900...0xFAFF,       // CJK Compatibility Ideographs
+             0xFE10...0xFE19,       // Vertical forms
+             0xFE30...0xFE6F,       // CJK Compatibility Forms
+             0xFF00...0xFF60,       // Fullwidth Forms
+             0xFFE0...0xFFE6,       // Fullwidth signs
+             0x1F300...0x1FAFF,     // Emoji (render wide)
+             0x20000...0x3FFFD:     // CJK Extensions B+
+            return true
+        default:
+            return false
+        }
+    }
+
     private func measure(
         _ node: Node,
         sheet: StyleSheet,
@@ -129,8 +167,8 @@ public struct LayoutEngine: Sendable {
             if Self.hasFormula(node) { h += config.formulaBadgeHeight }
             return (config.expandedNoteWidth, h)
         }
-        let cw = max(config.charWidth, style.fontSize * 0.55)
-        let textWidth = Double(max(1, node.text.count)) * cw
+        // Unicode-aware: CJK glyphs render ~fontSize wide, not ~0.55×fontSize.
+        let textWidth = Self.estimatedTextWidth(node.text, fontSize: style.fontSize, charWidth: config.charWidth)
         let iconCount = min(3, node.icons.count)
         let iconWidth = iconCount == 0 ? 0 : Double(iconCount) * config.iconSlotWidth + 4
         var badgeWidth = 0.0

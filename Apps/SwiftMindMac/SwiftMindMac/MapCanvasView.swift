@@ -1214,8 +1214,18 @@ struct MapCanvasView: View {
     @ViewBuilder
     private func editOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
+        // Track the draft, not the committed frame: the box must grow (and
+        // shrink) with what is typed, so the text never overflows mid-edit.
+        // Same estimator the layout uses, so the box matches the frame the
+        // commit will produce (CJK counts double — see estimatedTextWidth).
+        let draftWidth = LayoutEngine.estimatedTextWidth(
+            editDraft,
+            fontSize: Double(visual.style.fontSize),
+            charWidth: 8
+        ) * Double(scale)
         // Single accent ring only (no inner node stroke + outer selection ring).
         TextField("Title", text: $editDraft)
+            .accessibilityIdentifier("titleEditField")
             .textFieldStyle(.plain)
             .font(.system(
                 size: CGFloat(visual.style.fontSize) * scale,

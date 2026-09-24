@@ -308,4 +308,38 @@ final class LayoutEngineTests: XCTestCase {
             LayoutConfig().expandedNoteMaxHeight
         )
     }
+
+    // MARK: - CJK title width (bug 2026-09-24: 中文 titles overflow their frame)
+
+    private func cjkChildWidth(_ text: String) -> Double {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try! bus.execute(InsertChildCommand(parentID: map.root.id, text: text, side: .right), on: &map)
+        let id = map.root.children[0].id
+        return LayoutEngine().layout(map: map).nodes.first { $0.id == id }!.frame.width
+    }
+
+    func testCJKTitleGetsWiderFrameThanLatinOfSameLength() throws {
+        // CJK glyphs render ~fontSize wide; Latin averages ~0.55×fontSize.
+        // A CJK title must reserve roughly twice the Latin width.
+        let latin = cjkChildWidth(String(repeating: "a", count: 40))
+        let cjk = cjkChildWidth(String(repeating: "文", count: 40))
+        XCTAssertGreaterThan(cjk, latin * 1.7,
+            "40 CJK chars should reserve ~2x the width of 40 Latin chars")
+    }
+
+    func testLongCJKTitleFrameFitsText() throws {
+        // Regression shape of the reported bug: 42-char Chinese title.
+        // Real render ≈ 42 × fontSize(14) ≈ 588pt; estimate must reach that.
+        let width = cjkChildWidth("这是一段很长的中文文本用于测试节点框宽度是否能够跟随文字长度自动调整以避免溢出")
+        XCTAssertGreaterThan(width, 500)
+    }
+
+    func testEstimatedTextWidthCountsWideScalarsDouble() {
+        // Shared estimator used by layout AND the Mac editor overlay.
+        XCTAssertEqual(LayoutEngine.estimatedTextWidth("abcd", fontSize: 14, charWidth: 8), 4 * 8)
+        XCTAssertEqual(LayoutEngine.estimatedTextWidth("中文", fontSize: 14, charWidth: 8), 4 * 8)
+        XCTAssertEqual(LayoutEngine.estimatedTextWidth("a中b", fontSize: 14, charWidth: 8), 4 * 8)
+        XCTAssertEqual(LayoutEngine.estimatedTextWidth("", fontSize: 14, charWidth: 8), 8)
+    }
 }

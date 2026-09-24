@@ -870,6 +870,56 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: "/tmp/uitest_shot.png"))
     }
 
+    /// Bug repro (reported 2026-09-24): create node, type short text,
+    /// confirm; then re-edit and replace with very long text — the frame
+    /// stays short and the text overflows. Screenshots land in
+    /// /tmp/title-edit-shots so the frames can be inspected off-line.
+    func testTitleEditShortToLongFrame() throws {
+        focusCanvasWithSelection() // ⌘T → "New Idea" selected + editing
+        let out = URL(fileURLWithPath: "/tmp/title-edit-shots")
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        func shot(_ name: String) {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            try? app.windows.firstMatch.screenshot().pngRepresentation
+                .write(to: out.appendingPathComponent(name))
+        }
+
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("abcd")
+        app.typeKey(.return, modifierFlags: [])
+        shot("1-abcd-committed.png")
+
+        // Re-edit the same node: Return renames the selected node.
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("this text was edited in place from a short four letter word into something far longer than before")
+        shot("2-long-mid-edit.png")
+
+        // NOTE: no frame assertion here — the overlay TextField does not
+        // expose itself to the macOS accessibility tree (identifier, focus
+        // predicate, and empty-identifier queries all miss it). The mid-edit
+        // box width is guarded by 2-long-mid-edit.png + 4-cjk-mid-edit.png
+        // (visual regression, like testZZAppStoreScreenshots) and the
+        // committed-frame width by LayoutEngineTests' CJK tests.
+
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        shot("3-long-committed.png")
+
+        // Round 2: CJK long text — the layout's 8pt/char estimate may break.
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("这是一段很长的中文文本用于测试节点框宽度是否能够跟随文字长度自动调整以避免溢出")
+        shot("4-cjk-mid-edit.png")
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        shot("5-cjk-committed.png")
+
+        XCTAssertGreaterThanOrEqual(settledNodeCount(), 2)
+    }
+
     /// App Store listing screenshots: relaunch WITHOUT the scratch map so the
     /// default launch behavior opens the bundled Welcome map (a good demo
     /// backdrop) and capture canvas / outline / note-editor / My Brain.
