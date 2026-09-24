@@ -78,9 +78,9 @@ struct MapCanvasView: View {
     // MARK: Floating note editor
     @State private var noteEditorNodeID: NodeID?
     @State private var noteEditorDraft: String = ""
-    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is double-click / ⌘E on any
+    /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is ⌘E on any
     /// non-sketch node; `.onCard` (Settings → Notes) hosts the editor at an
-    /// expanded card's frame.
+    /// expanded card's frame. Double-click renames, the same as Return.
     @State private var noteEditorPlacement: NoteEditorPlacement = .floatingRight
     @State private var noteCommitTask: Task<Void, Never>?
     /// Normal-form document of the last committed model state; contentRevision
@@ -852,7 +852,9 @@ struct MapCanvasView: View {
             return
         }
 
-        // Nudge so the node center sits inside the safe rect (prefer centering if far out).
+        // Nudge so the node sits inside the safe rect. A card taller than
+        // that rect cannot meet both edges; applying both corrections flips
+        // between top-align and bottom-align on every click.
         let center = CGPoint(x: viewFrame.midX, y: viewFrame.midY)
         var dx: CGFloat = 0
         var dy: CGFloat = 0
@@ -862,14 +864,17 @@ struct MapCanvasView: View {
             || center.y < -margin || center.y > canvasSize.height + margin
 
         if farOutside {
-            // Center the active node in the viewport.
             dx = canvasSize.width / 2 - center.x
             dy = canvasSize.height / 2 - center.y
         } else {
-            if viewFrame.minX < bounds.minX { dx = bounds.minX - viewFrame.minX }
-            if viewFrame.maxX > bounds.maxX { dx = bounds.maxX - viewFrame.maxX }
-            if viewFrame.minY < bounds.minY { dy = bounds.minY - viewFrame.minY }
-            if viewFrame.maxY > bounds.maxY { dy = bounds.maxY - viewFrame.maxY }
+            dx = Self.panToKeepVisible(
+                frameMin: viewFrame.minX, frameMax: viewFrame.maxX,
+                safeMin: bounds.minX, safeMax: bounds.maxX
+            )
+            dy = Self.panToKeepVisible(
+                frameMin: viewFrame.minY, frameMax: viewFrame.maxY,
+                safeMin: bounds.minY, safeMax: bounds.maxY
+            )
         }
 
         guard dx != 0 || dy != 0 else { return }
@@ -885,6 +890,27 @@ struct MapCanvasView: View {
         }
     }
 
+    /// How far to pan one axis so `frame` meets the safe interval.
+    /// A frame larger than the interval stays put while it already overlaps
+    /// that interval. A frame that fits is pulled fully inside.
+    static func panToKeepVisible(
+        frameMin: CGFloat, frameMax: CGFloat,
+        safeMin: CGFloat, safeMax: CGFloat
+    ) -> CGFloat {
+        let frameSize = frameMax - frameMin
+        let safeSize = safeMax - safeMin
+        if frameSize <= safeSize {
+            if frameMin < safeMin { return safeMin - frameMin }
+            if frameMax > safeMax { return safeMax - frameMax }
+            return 0
+        }
+        let overlaps = frameMax > safeMin && frameMin < safeMax
+        if overlaps { return 0 }
+        // Wholly outside: bring the leading edge to the near side of the safe rect.
+        if frameMax <= safeMin { return safeMin - frameMin }
+        return safeMax - frameMax
+    }
+
     // MARK: - Drawing
 
     private func draw(
@@ -896,6 +922,13 @@ struct MapCanvasView: View {
     ) {
         context.translateBy(x: size.width / 2 + offset.width, y: size.height / 2 + offset.height)
         context.scaleBy(x: scale, y: scale)
+
+        func drawCentered(_ text: Text, in rect: CGRect, context: inout GraphicsContext) {
+            guard rect.width > 1, rect.height > 1 else { return }
+            // Canvas resolves Text only; multilineTextAlignment returns a View.
+            let resolved = context.resolve(text)
+            context.draw(resolved, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+        }
 
         for edge in snapshot.edges {
             let from = CGPoint(x: edge.fromPoint.x, y: edge.fromPoint.y)
@@ -1034,7 +1067,7 @@ struct MapCanvasView: View {
                         weight: node.style.isBold ? .bold : .regular
                     ))
                     .foregroundColor(textColor)
-                context.draw(text, in: adjustedTextRect)
+                drawCentered(text, in: adjustedTextRect, context: &context)
             }
 
             // Sketch node: title strip above a drawing board (the committed
@@ -1046,10 +1079,19 @@ struct MapCanvasView: View {
                     let title = Text(node.text)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(textColor)
-                    context.draw(
-                        title,
-                        in: CGRect(x: rect.minX, y: rect.minY + 2, width: rect.width, height: titleH)
+                    let titleRect = CGRect(
+                        x: rect.minX + 4,
+                        y: rect.minY + 2,
+                        width: max(0, rect.width - 8),
+                        height: titleH
                     )
+                    let measured = context.resolve(title)
+                        .measure(in: CGSize(width: max(titleRect.width, 1), height: 80))
+                    if measured.height <= titleH + 2 {
+                        drawCentered(title, in: titleRect, context: &context)
+                    } else {
+                        context.draw(title, in: titleRect)
+                    }
                 }
                 let boardW = rect.width - cfg.paddingX * 2
                 let boardH = rect.height - 16 - titleH
@@ -1182,7 +1224,10 @@ struct MapCanvasView: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 10 * scale)
             .padding(.vertical, 6 * scale)
-            .frame(width: max(frame.width + 8 * scale, 88), height: max(frame.height + 4 * scale, 32))
+            .frame(
+                width: max(frame.width + 8 * scale, draftWidth + 28 * scale, 88),
+                height: max(frame.height + 4 * scale, 32)
+            )
             .background(
                 RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
                     .fill(Color(nsColor: .textBackgroundColor))
@@ -1219,54 +1264,53 @@ struct MapCanvasView: View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
         let document = noteCardDocument(for: visual.id, fallbackTitle: visual.text)
         let scroll = session.noteCardScroll[visual.id]?.offset ?? 0
+        // Draw at map size (fixed 12pt, fixed wrap), then scale the whole
+        // picture with the zoom. The visible lines stay the same at every zoom.
+        let mapWidth = CGFloat(visual.frame.width)
+        let mapHeight = CGFloat(visual.frame.height)
         MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
             .offset(y: -scroll)
-            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
-            .clipped() // layout height is an estimate; overflow scrolls
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
-        )
-        .position(x: frame.midX, y: frame.midY)
-        .allowsHitTesting(false)
-        .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
-        .onAppear {
-            updateMeasuredNoteCardHeight(document, for: visual.id)
-        }
-        .onChange(of: document) { _, updated in
-            updateMeasuredNoteCardHeight(updated, for: visual.id)
-        }
-        // dispatch clears measured heights; the same document must be measured again.
-        .onChange(of: session.contentRevision) { _, _ in
-            updateMeasuredNoteCardHeight(document, for: visual.id)
-        }
-        // Zoom changes the card's view width; the font stays 12pt, so wrapping changes.
-        .onChange(of: session.viewport.scale) { _, _ in
-            updateMeasuredNoteCardHeight(document, for: visual.id)
-        }
+            .frame(width: mapWidth, height: mapHeight, alignment: .topLeading)
+            .clipped()
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+            )
+            .scaleEffect(scale, anchor: .center)
+            .frame(width: frame.width, height: frame.height)
+            .position(x: frame.midX, y: frame.midY)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
+            .onAppear {
+                updateMeasuredNoteCardHeight(document, for: visual.id)
+            }
+            .onChange(of: document) { _, updated in
+                updateMeasuredNoteCardHeight(updated, for: visual.id)
+            }
+            // dispatch clears measured heights; the same document must be measured again.
+            .onChange(of: session.contentRevision) { _, _ in
+                updateMeasuredNoteCardHeight(document, for: visual.id)
+            }
     }
 
-    /// Hosts the card's renderer at the zoomed width (layout width × scale,
-    /// font stays 12pt) and stores map points (`measured / scale`). Zero is a
-    /// failed measure. The store ignores a repeat within 1 point, so a
-    /// follow-up layout cannot loop. The canvas observes `session`, not the
-    /// store; this is view state and must not mark the file dirty.
+    /// Measures the card at its map width and 12pt type, and stores that
+    /// height in map points. Zoom scales the finished picture; it does not
+    /// reflow the note. Zero is a failed measure. The store ignores a repeat
+    /// within 1 point, so a follow-up layout cannot loop. The canvas observes
+    /// `session`, not the store; this is view state and must not mark the file dirty.
     @MainActor
     private func updateMeasuredNoteCardHeight(_ markdown: String, for id: NodeID) {
-        let scale = session.viewport.scale
-        guard scale.isFinite, scale > 0 else { return }
         let measured = NoteCardMeasurer.height(
             markdown: markdown,
-            width: CGFloat(session.store.layoutConfig.expandedNoteWidth) * CGFloat(scale),
+            width: CGFloat(session.store.layoutConfig.expandedNoteWidth),
             fontSize: 12,
             maxImageHeight: mediaImageHeight
         )
         guard measured > 0 else { return }
         let revision = session.store.contentRevision
-        session.store.updateMeasuredNoteHeight(Double(measured) / scale, for: id)
+        session.store.updateMeasuredNoteHeight(Double(measured), for: id)
         guard session.store.contentRevision != revision else { return }
         Task { @MainActor in
             session.objectWillChange.send()
@@ -1283,15 +1327,17 @@ struct MapCanvasView: View {
         return NoteDocument.compose(title: node?.text ?? fallbackTitle, body: node?.noteMarkdown ?? "")
     }
 
-    /// Estimated rendered content height of a card's document, in view points.
+    /// Rendered content height of a card's document, in map points.
     private func noteCardContentHeight(for id: NodeID) -> CGFloat {
+        if let measured = session.store.noteCardHeights[id] {
+            return CGFloat(measured)
+        }
         let config = session.store.layoutConfig
-        let mapPoints = MarkdownSegmenter.estimatedHeight(
+        return CGFloat(MarkdownSegmenter.estimatedHeight(
             of: noteCardDocument(for: id, fallbackTitle: ""),
             lineHeight: config.expandedNoteLineHeight,
             imageHeight: config.mediaMaxSize
-        )
-        return CGFloat(mapPoints) * scale
+        ))
     }
 
     /// The expanded card under a view-space point, but only when its content
@@ -1305,8 +1351,7 @@ struct MapCanvasView: View {
               id != session.liveNoteDocument?.nodeID,
               let visual = snapshot.nodes.first(where: { $0.id == id }),
               visual.isNoteExpanded else { return nil }
-        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
-        let overflow = noteCardContentHeight(for: id) - frame.height
+        let overflow = noteCardContentHeight(for: id) - CGFloat(visual.frame.height)
         return overflow > 1 ? id : nil
     }
 
@@ -1314,16 +1359,18 @@ struct MapCanvasView: View {
     /// move map content down (see the pan branch), so card scroll subtracts
     /// them. A re-committed note (document changed) restarts from the top.
     private func scrollNoteCard(_ id: NodeID, by deltaY: CGFloat) {
-        let viewSize = CGSize(width: session.lastCanvasWidth, height: session.lastCanvasHeight)
+        let scale = CGFloat(session.viewport.scale)
+        guard scale.isFinite, scale > 0 else { return }
         let snapshot = session.store.snapshot()
         guard let visual = snapshot.nodes.first(where: { $0.id == id }) else { return }
-        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
-        let overflow = max(0, noteCardContentHeight(for: id) - frame.height)
+        let overflow = max(0, noteCardContentHeight(for: id) - CGFloat(visual.frame.height))
         guard overflow > 0 else { return }
         let document = noteCardDocument(for: id, fallbackTitle: visual.text)
         let current = session.noteCardScroll[id]
         let base = current?.document == document ? current?.offset ?? 0 : 0
-        let next = min(max(0, base - deltaY), overflow)
+        // The wheel reports screen points. The card is laid out in map points
+        // and then scaled, so one screen point moves 1/scale map points.
+        let next = min(max(0, base - deltaY / scale), overflow)
         session.noteCardScroll[id] = NoteCardScrollState(offset: next, document: document)
     }
 
@@ -1359,7 +1406,7 @@ struct MapCanvasView: View {
     }
 
     /// Markdown editor: floating to the right (`e`), covering the node
-    /// (double-click / ⌘E), or hosted at the expanded card's frame when the
+    /// (⌘E), or hosted at the expanded card's frame when the
     /// on-card mode is on (Settings → Notes). All placements share the draft,
     /// baseline, debounce and undo coalescing; Esc cancels back to the
     /// editor-open baseline, ⌘Enter and click-away commit & close.
@@ -1821,7 +1868,7 @@ struct MapCanvasView: View {
         beginEdit(nodeID: id, snapshot: snapshot)
     }
 
-    /// ⌘E / double-click: prefer node under pointer; else primary selection.
+    /// ⌘E: prefer node under pointer; else primary selection.
     private func beginEditPreferringHover(snapshot: MapSnapshot) {
         if let hover = hoverLocation,
            let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
@@ -1847,11 +1894,11 @@ struct MapCanvasView: View {
         beginTitleEdit(nodeID: id, snapshot: snapshot)
     }
 
-    /// ⌘E / "Edit Note at Node" / double-click: honest note editing. Sketch
+    /// ⌘E / "Edit Note at Node": honest note editing. Sketch
     /// nodes route to the drawing board; every other node opens the note
     /// editor in place — even with an empty note (the virtual document is
     /// just `# title`) — or on the card itself when the on-card mode is on
-    /// and the note is expanded. Plain title editing stays on Return / Rename.
+    /// and the note is expanded. Return and double-click rename the title.
     private func beginEdit(nodeID: NodeID, snapshot: MapSnapshot) {
         guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
         if let node = session.store.map.node(id: nodeID), node.sketch != nil {
@@ -2084,8 +2131,7 @@ struct MapCanvasView: View {
     }
 
     private func doubleTapEditGesture(snapshot: MapSnapshot) -> some Gesture {
-        // Prefer Return to edit; double-tap still works but is secondary.
-        // In My Brain mode: open map file or fold/unfold vault folder.
+        // Same as Return. In My Brain mode: open the map or fold the folder.
         SpatialTapGesture(count: 2)
             .onEnded { event in
                 if editingNodeID != nil {
@@ -2098,7 +2144,10 @@ struct MapCanvasView: View {
                     }
                     return
                 }
-                beginEdit(at: event.location, snapshot: snapshot)
+                guard let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) else {
+                    return
+                }
+                beginTitleEdit(nodeID: id, snapshot: snapshot)
             }
     }
 

@@ -16,6 +16,26 @@ public struct MarkdownDisplay: Equatable, Sendable {
         self.sourceUTF16 = sourceUTF16
     }
 
+    /// The smallest edit that turns `old` into `new`.
+    public static func displayChange(from old: String, to new: String) -> (range: Range<Int>, replacement: String) {
+        let oldUnits = Array(old.utf16)
+        let newUnits = Array(new.utf16)
+        var prefix = 0
+        while prefix < oldUnits.count && prefix < newUnits.count && oldUnits[prefix] == newUnits[prefix] {
+            prefix += 1
+        }
+        var suffix = 0
+        while suffix < (oldUnits.count - prefix) && suffix < (newUnits.count - prefix)
+                && oldUnits[oldUnits.count - 1 - suffix] == newUnits[newUnits.count - 1 - suffix] {
+            suffix += 1
+        }
+        let replacement = String(
+            decoding: newUnits[prefix..<(newUnits.count - suffix)],
+            as: UTF16.self
+        )
+        return (prefix..<(oldUnits.count - suffix), replacement)
+    }
+
     public static func project(_ source: String, reveal: Reveal) -> MarkdownDisplay {
         var text = ""
         var map: [Int] = []
@@ -38,6 +58,45 @@ public struct MarkdownDisplay: Equatable, Sendable {
     /// delete hidden markers. A non-empty range replaces only the source units of
     /// the display units it covers, not markers in the gaps outside that range.
     public func splicing(source: String, displayReplacement: String, displayUTF16: Range<Int>) -> String {
+        applyingEdit(
+            source: source,
+            displayUTF16: displayUTF16,
+            replacement: displayReplacement
+        ).markdown
+    }
+
+    /// Apply a display edit and return the caret in the new markdown, in
+    /// UTF-16 offsets. The caret sits where the replacement ends, clamped to
+    /// the new string so a deletion cannot jump to the old end.
+    public func applyingEdit(
+        source: String,
+        displayUTF16: Range<Int>,
+        replacement: String
+    ) -> (markdown: String, caretUTF16: Int) {
+        let bounds = sourceBounds(displayUTF16: displayUTF16, source: source)
+        let ns = source as NSString
+        let markdown = ns.replacingCharacters(in: bounds, with: replacement)
+        let caret = min(
+            bounds.location + (replacement as NSString).length,
+            (markdown as NSString).length
+        )
+        return (markdown, caret)
+    }
+
+    /// Display index of a caret that sits before the source offset `caret`.
+    /// A hole (hidden markers) stays between the surrounding visible
+    /// characters. It does not fall through to the end of the note.
+    public func displayIndex(forSourceUTF16 caret: Int) -> Int {
+        guard !sourceUTF16.isEmpty else { return 0 }
+        if caret <= sourceUTF16[0] { return 0 }
+        if let exact = sourceUTF16.firstIndex(of: caret) { return exact }
+        if let prior = sourceUTF16.lastIndex(where: { $0 < caret }) {
+            return min(prior + 1, sourceUTF16.count)
+        }
+        return 0
+    }
+
+    private func sourceBounds(displayUTF16: Range<Int>, source: String) -> NSRange {
         let mapCount = sourceUTF16.count
         let sourceCount = source.utf16.count
         let lower = displayUTF16.lowerBound
@@ -71,11 +130,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
         }
         let location = min(max(start, 0), sourceCount)
         let limit = min(max(end, location), sourceCount)
-        let ns = source as NSString
-        return ns.replacingCharacters(
-            in: NSRange(location: location, length: limit - location),
-            with: displayReplacement
-        )
+        return NSRange(location: location, length: limit - location)
     }
 
     /// Source UTF-16 offset where the caret should sit after `splicing`.
@@ -84,25 +139,11 @@ public struct MarkdownDisplay: Equatable, Sendable {
         displayUTF16: Range<Int>,
         source: String
     ) -> Int {
-        let mapCount = sourceUTF16.count
-        let sourceCount = source.utf16.count
-        let lower = displayUTF16.lowerBound
-        let start: Int
-        if lower == displayUTF16.upperBound {
-            if lower >= 0 && lower < mapCount {
-                start = sourceUTF16[lower]
-            } else if lower <= 0 {
-                start = 0
-            } else {
-                start = sourceCount
-            }
-        } else if mapCount == 0 || lower >= mapCount || displayUTF16.upperBound <= 0 {
-            start = lower <= 0 ? 0 : sourceCount
-        } else {
-            let first = min(max(lower, 0), mapCount - 1)
-            start = sourceUTF16[first]
-        }
-        return min(max(start, 0) + displayReplacement.utf16.count, sourceCount + displayReplacement.utf16.count)
+        applyingEdit(
+            source: source,
+            displayUTF16: displayUTF16,
+            replacement: displayReplacement
+        ).caretUTF16
     }
 
     /// Wrap `rangeUTF16` in `marker`, or remove a matching pair already around it.
@@ -124,6 +165,72 @@ public struct MarkdownDisplay: Equatable, Sendable {
         }
         let inner = range.length > 0 ? ns.substring(with: range) : ""
         return ns.replacingCharacters(in: range, with: marker + inner + marker)
+    }
+
+    /// Marks to show for a caret at this source UTF-16 offset.
+    /// A heading reveals its `#` prefix anywhere on that line.
+    public static func reveal(atUTF16 offset: Int, in source: String) -> Reveal {
+        guard !source.isEmpty else { return .none }
+        let clamped = min(max(offset, 0), source.utf16.count)
+        let index = String.Index(utf16Offset: clamped, in: source)
+        let doc = MarkdownDocument.parse(source)
+        if let block = blockContaining(index, in: doc.blocks) {
+            switch block.kind {
+            case .heading:
+                return .block(block.marker)
+            case .image, .codeFence, .mathBlock:
+                return .block(block.source)
+            case .quote:
+                return .block(block.marker)
+            case .listItem:
+                if index < block.marker.upperBound { return .block(block.marker) }
+            case .paragraph:
+                break
+            }
+        }
+        if let inline = inlineContaining(index, in: doc.blocks) {
+            if case .text = inline { return .none }
+            return .inline(contentRange(of: inline))
+        }
+        return .none
+    }
+
+    private static func inlineContaining(_ index: String.Index, in blocks: [MarkdownBlock]) -> MarkdownInline? {
+        for block in blocks {
+            if let found = inlineContaining(index, in: block.inlines) { return found }
+            if let found = inlineContaining(index, in: block.children) { return found }
+        }
+        return nil
+    }
+
+    private static func inlineContaining(_ index: String.Index, in inlines: [MarkdownInline]) -> MarkdownInline? {
+        for item in inlines {
+            switch item {
+            case .text(let range):
+                if range.contains(index) { return item }
+            case .strong(let open, let content, let close),
+                 .emphasis(let open, let content, let close):
+                if (open.lowerBound..<close.upperBound).contains(index) {
+                    // The words are a `.text` child. The caret is on this span,
+                    // so reveal these markers unless a nested span is tighter.
+                    if let inner = inlineContaining(index, in: content), case .text = inner {
+                        return item
+                    }
+                    return inlineContaining(index, in: content) ?? item
+                }
+            case .code(let open, _, let close), .math(let open, _, let close),
+                 .kbd(let open, _, let close):
+                if (open.lowerBound..<close.upperBound).contains(index) { return item }
+            case .link(let labelOpen, let label, _, _, let close):
+                if (labelOpen.lowerBound..<close.upperBound).contains(index) {
+                    if let inner = inlineContaining(index, in: label), case .text = inner {
+                        return item
+                    }
+                    return inlineContaining(index, in: label) ?? item
+                }
+            }
+        }
+        return nil
     }
 
     /// Set the heading level of the block containing `atUTF16`, or the first
@@ -202,7 +309,9 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 appendSource(block.source, source: source, into: &text, map: &map)
                 return
             }
-            if block.marker == range {
+            if block.marker == range, case .listItem = block.kind {
+                // List markers stay visible; the body path appends them once.
+            } else if block.marker == range {
                 appendSource(block.marker, source: source, into: &text, map: &map)
             }
         }
@@ -214,13 +323,34 @@ public struct MarkdownDisplay: Equatable, Sendable {
             if sourceContainsNewline(block, source: source) || anotherFollows {
                 appendLineBreak(block, source: source, into: &text, map: &map)
             }
-        case .codeFence, .mathBlock:
+        case .codeFence:
             // The parser's text range drops the newline before the closer, which
             // deletes a trailing blank line. The interior is everything after the
             // opening line and before the closing delimiter line.
             let interior = block.marker.upperBound..<closingLineStart(block, source: source)
             appendSource(interior, source: source, into: &text, map: &map)
+        case .mathBlock:
+            // A one-line `$$…$$` still owns its trailing newline, so "source
+            // contains a newline" is not the multiline test. The opener is
+            // its own line only when the marker itself contains a newline.
+            if source[block.marker].contains("\n") {
+                let interior = block.marker.upperBound..<closingLineStart(block, source: source)
+                appendSource(interior, source: source, into: &text, map: &map)
+            } else if case .text(let latex)? = block.inlines.first {
+                appendSource(latex, source: source, into: &text, map: &map)
+                if sourceContainsNewline(block, source: source) || anotherFollows {
+                    appendLineBreak(block, source: source, into: &text, map: &map)
+                }
+            }
         case .heading, .paragraph, .listItem, .quote:
+            if case .listItem = block.kind {
+                appendSource(
+                    block.source.lowerBound..<block.marker.upperBound,
+                    source: source,
+                    into: &text,
+                    map: &map
+                )
+            }
             appendInlines(block.inlines, source: source, reveal: reveal, into: &text, map: &map)
             var childStart = coverageEnd(block)
             if sourceContainsNewline(block, source: source) || anotherFollows || !block.children.isEmpty {
@@ -264,6 +394,14 @@ public struct MarkdownDisplay: Equatable, Sendable {
                     appendSource(close, source: source, into: &text, map: &map)
                 } else {
                     appendSource(content, source: source, into: &text, map: &map)
+                }
+            case .kbd(let open, let label, let close):
+                if inlineRevealed(inline, reveal: reveal) {
+                    appendSource(open, source: source, into: &text, map: &map)
+                    appendSource(label, source: source, into: &text, map: &map)
+                    appendSource(close, source: source, into: &text, map: &map)
+                } else {
+                    appendSource(label, source: source, into: &text, map: &map)
                 }
             case .math(let open, let latex, let close):
                 if inlineRevealed(inline, reveal: reveal) {
@@ -321,7 +459,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
                     cover(open: open, content: open.upperBound..<close.lowerBound, close: close)
                     walkInlines(content)
                 case .code(let open, let content, let close),
-                     .math(let open, let content, let close):
+                     .math(let open, let content, let close),
+                     .kbd(let open, let content, let close):
                     cover(open: open, content: content, close: close)
                 case .link(let labelOpen, let label, let labelClose, _, let close):
                     cover(
@@ -371,7 +510,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
             return range
         case .strong(let open, _, let close), .emphasis(let open, _, let close):
             return open.upperBound..<close.lowerBound
-        case .code(_, let content, _):
+        case .code(_, let content, _), .kbd(_, let content, _):
             return content
         case .link(let labelOpen, _, let labelClose, _, _):
             return labelOpen.upperBound..<labelClose.lowerBound
@@ -423,7 +562,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
             return range.upperBound
         case .strong(_, _, let close), .emphasis(_, _, let close), .math(_, _, let close):
             return close.upperBound
-        case .code(_, _, let close):
+        case .code(_, _, let close), .kbd(_, _, let close):
             return close.upperBound
         case .link(_, _, _, _, let close):
             return close.upperBound

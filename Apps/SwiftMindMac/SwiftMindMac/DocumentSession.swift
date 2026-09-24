@@ -315,6 +315,7 @@ final class DocumentSession: ObservableObject {
 
 /// Scroll state of one expanded note card (see `DocumentSession.noteCardScroll`).
 struct NoteCardScrollState: Equatable {
+    /// Offset in map points, applied before the card is scaled with the zoom.
     var offset: CGFloat
     /// Rendered card document at the time the offset was last set; a mismatch
     /// means the note was re-committed and the offset resets to the top.

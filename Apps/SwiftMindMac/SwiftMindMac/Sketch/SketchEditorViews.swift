@@ -119,6 +119,11 @@ struct SketchEditorView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .contentShape(Rectangle())
+            .overlay {
+                SketchRightPanCatcher { delta in
+                    panBoard(by: delta)
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -161,6 +166,14 @@ struct SketchEditorView: View {
             )
         }
         fitComputed = true
+    }
+
+    /// Right-drag (and, later, a two-finger pan) moves the paper. `delta` is
+    /// in board points, y down. Strokes stay in content space.
+    private func panBoard(by delta: CGSize) {
+        guard fitComputed, fitScale > 0 else { return }
+        contentRect.origin.x -= delta.width / fitScale
+        contentRect.origin.y -= delta.height / fitScale
     }
 
     /// Board (gesture) point → content (stroke) point.
@@ -359,6 +372,51 @@ private struct CommittedStrokesImage: View {
             )
         )
         .resizable()
+    }
+}
+
+/// Right-mouse pan catcher. Left clicks pass through so the pen and eraser
+/// still draw. A later two-finger pan calls the same delta callback.
+private struct SketchRightPanCatcher: NSViewRepresentable {
+    var onPan: (CGSize) -> Void
+
+    func makeNSView(context: Context) -> RightPanView {
+        let view = RightPanView()
+        view.onPan = onPan
+        return view
+    }
+
+    func updateNSView(_ view: RightPanView, context: Context) {
+        view.onPan = onPan
+    }
+
+    final class RightPanView: NSView {
+        var onPan: ((CGSize) -> Void)?
+        private var last: CGPoint = .zero
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent else { return nil }
+            switch event.type {
+            case .rightMouseDown, .rightMouseDragged, .rightMouseUp:
+                return super.hitTest(point)
+            default:
+                return nil
+            }
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            last = convert(event.locationInWindow, from: nil)
+        }
+
+        override func rightMouseDragged(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            // AppKit y grows up; the board's y grows down.
+            let delta = CGSize(width: point.x - last.x, height: last.y - point.y)
+            last = point
+            onPan?(delta)
+        }
+
+        override func rightMouseUp(with event: NSEvent) {}
     }
 }
 

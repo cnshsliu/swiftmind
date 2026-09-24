@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftMindCore
 import AppKit
+import PencilKit
 
 /// Trailing inspector for the selected node's text, note, links, icons, and style.
 struct InspectorView: View {
@@ -46,12 +47,12 @@ struct InspectorView: View {
                         .onChange(of: titleFocused) { _, focused in
                             if !focused { commitTitle(for: node.id) }
                         }
-                    Text("Saves on Return or when you leave the field")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
 
                 Section("Note") {
+                    if node.sketch != nil {
+                        SketchNotePreview(node: node)
+                    }
                     let bodyMarkdown: String = {
                         if let live = session.liveNoteDocument, live.nodeID == node.id {
                             return NoteDocument.split(live.document).body
@@ -62,7 +63,7 @@ struct InspectorView: View {
                         MarkdownTextView(markdown: bodyMarkdown, fontSize: 13, maxImageHeight: mediaImageHeight)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("notePreview")
-                    } else {
+                    } else if node.sketch == nil {
                         Text("No note — select the node on the canvas and press E (or ⌘E) to edit")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -76,10 +77,19 @@ struct InspectorView: View {
                     } else {
                         ForEach(Array(node.links.enumerated()), id: \.offset) { index, link in
                             HStack {
-                                Text(linkDescription(link))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer()
+                                Button {
+                                    follow(link)
+                                } label: {
+                                    Text(linkDescription(link))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.primary)
+                                .pointingHandCursor()
+                                .help(linkHelp(link))
                                 Button(role: .destructive) {
                                     removeLink(at: index, node: node)
                                 } label: {
@@ -91,7 +101,8 @@ struct InspectorView: View {
                         }
                     }
 
-                    TextField("https://…", text: $urlDraft)
+                    TextField("URL", text: $urlDraft, prompt: Text("https://…"))
+                        .labelsHidden()
                         .onSubmit { addURL(to: node) }
 
                     Button("Add URL") {
@@ -129,6 +140,8 @@ struct InspectorView: View {
                                     .lineLimit(1)
                             }
                             .buttonStyle(.plain)
+                            .pointingHandCursor()
+                            .help("Show this node")
                         }
                     }
                 }
@@ -348,6 +361,26 @@ struct InspectorView: View {
 
     // MARK: - Links
 
+    private func follow(_ link: NodeLink) {
+        switch link {
+        case .url(let url):
+            NSWorkspace.shared.open(url)
+        case .node(let id):
+            guard session.store.map.node(id: id) != nil else {
+                session.showToast("That node is no longer on the map")
+                return
+            }
+            session.select(id)
+        }
+    }
+
+    private func linkHelp(_ link: NodeLink) -> String {
+        switch link {
+        case .url: return "Open in browser"
+        case .node: return "Show this node"
+        }
+    }
+
     private func linkDescription(_ link: NodeLink) -> String {
         switch link {
         case .url(let url):
@@ -413,6 +446,67 @@ struct InspectorView: View {
     }
 }
 
+private extension View {
+    /// The arrow stays for ordinary rows. Link rows use the hand.
+    func pointingHandCursor() -> some View {
+        onContinuousHover { phase in
+            switch phase {
+            case .active:
+                NSCursor.pointingHand.set()
+            case .ended:
+                NSCursor.arrow.set()
+            }
+        }
+    }
+}
+
+// MARK: - Sketch preview
+
+/// The selected drawing, in the same Note section that shows rendered markdown.
+struct SketchNotePreview: View {
+    let node: Node
+
+    var body: some View {
+        if let image = rendered, let size = boardSize {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(size, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("sketchPreview")
+        } else {
+            Label("Empty drawing — press D to draw", systemImage: "scribble")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("sketchPreview")
+        }
+    }
+
+    private var boardSize: CGSize? {
+        if let w = node.sketchWidth, let h = node.sketchHeight, w > 0, h > 0 {
+            return CGSize(width: w, height: h)
+        }
+        guard let data = node.sketch, let drawing = try? PKDrawing(data: data) else { return nil }
+        let bounds = drawing.bounds
+        guard !bounds.isNull, !bounds.isEmpty, !bounds.isInfinite, bounds.width > 0, bounds.height > 0 else {
+            return nil
+        }
+        return bounds.size
+    }
+
+    private var rendered: NSImage? {
+        guard let data = node.sketch, let size = boardSize else { return nil }
+        return SketchSupport.image(
+            nodeID: node.id,
+            data: data,
+            boardSize: size,
+            scale: 2
+        )
+    }
+}
+
 // MARK: - Formula
 
 /// L1 formula editor: monospaced field, live result, inline #ERR, clear button.
@@ -433,7 +527,8 @@ struct FormulaInspectorSection: View {
 
     var body: some View {
         Group {
-            TextField("e.g. sum(children, attr: \"cost\")", text: $draft)
+            TextField("Formula", text: $draft, prompt: Text("e.g. sum(children, attr: \"cost\")"))
+                .labelsHidden()
                 .font(.body.monospaced())
                 .focused($fieldFocused)
                 .onSubmit { commit() }

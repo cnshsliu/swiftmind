@@ -157,6 +157,14 @@ struct MarkdownEditorView: NSViewRepresentable {
         private var sourceUTF16: [Int] = []
         private var lastDisplay = ""
         private var reveal: MarkdownDisplay.Reveal = .none
+        private var session = MarkdownEditingSession(markdown: "")
+        /// Bumped on every caret placement so a late text-system update
+        /// cannot drag the caret to the end after a newer keystroke.
+        private var caretGeneration = 0
+        private var lastEditDebug = ""
+        /// The caret we just placed. The text view often jumps to the end
+        /// once textDidChange returns; the next selection change snaps back.
+        private var pinnedCaret: Int?
 
         init(parent: MarkdownEditorView) {
             self.parent = parent
@@ -166,6 +174,45 @@ struct MarkdownEditorView: NSViewRepresentable {
             textView.onFormat = { [weak self] marker in self?.applyWrap(marker) }
             textView.onLink = { [weak self] in self?.applyLink() }
             textView.onHeading = { [weak self] level in self?.applyHeading(level) }
+            textView.onCommand = { [weak self] command in self?.perform(command) }
+            textView.onInsert = { [weak self] text in self?.insertTyped(text) }
+        }
+
+        /// Typing or paste over a highlight. The session replaces that range;
+        /// the text view must not apply a second edit.
+        func insertTyped(_ text: String) {
+            guard let textView else { return }
+            let selected = textView.selectedRange()
+            session.setSelection(selected.location..<(selected.location + selected.length))
+            session.insert(text)
+            markdown = session.markdown
+            reveal = session.reveal
+            parent.text = session.markdown
+            present(session, in: textView)
+        }
+
+        func perform(_ command: MarkdownSourceTextView.Command) {
+            guard let textView else { return }
+            let selected = textView.selectedRange()
+            session.setSelection(selected.location..<(selected.location + selected.length))
+            switch command {
+            case .backspace: session.backspace()
+            case .forwardDelete: session.forwardDelete()
+            case .newline: session.newline()
+            case .deleteSelection: session.deleteSelection()
+            case .decomposeBackward: session.decomposeBackward()
+            case .deleteWordBackward: session.deleteWordBackward()
+            case .deleteWordForward: session.deleteWordForward()
+            case .deleteToBeginningOfLine: session.deleteToBeginningOfLine()
+            case .deleteToEndOfLine: session.deleteToEndOfLine()
+            case .deleteToEndOfParagraph: session.deleteToEndOfParagraph()
+            case .indent: session.indent(outdent: false)
+            case .outdent: session.indent(outdent: true)
+            }
+            markdown = session.markdown
+            reveal = session.reveal
+            parent.text = session.markdown
+            present(session, in: textView)
         }
 
         func applyWrap(_ marker: String) {
@@ -198,11 +245,12 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
 
         private func commitMarkdown(_ updated: String, caret: Int) {
-            markdown = updated
-            reveal = .none
-            parent.text = updated
+            session.replaceMarkdown(updated, sourceCaret: caret)
+            markdown = session.markdown
+            reveal = session.reveal
+            parent.text = session.markdown
             guard let textView else { return }
-            show(MarkdownDisplay.project(updated, reveal: .none), in: textView, sourceCaret: caret)
+            present(session, in: textView)
         }
 
         private func sourceSelection(in textView: MarkdownSourceTextView) -> Range<Int> {
@@ -230,67 +278,112 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         /// Push markdown into the view as its rendered projection.
         func setText(_ text: String, of textView: MarkdownSourceTextView) {
-            guard text != markdown else { return }
-            markdown = text
-            reveal = .none
-            let display = MarkdownDisplay.project(text, reveal: .none)
-            show(display, in: textView, sourceCaret: display.sourceUTF16.last.map { $0 + 1 })
+            guard text != session.markdown else { return }
+            session = MarkdownEditingSession(markdown: text)
+            markdown = session.markdown
+            reveal = session.reveal
+            parent.text = session.markdown
+            present(session, in: textView)
         }
 
         func textDidChange(_ notification: Notification) {
             guard !isProgrammaticUpdate,
                   let textView = notification.object as? MarkdownSourceTextView else { return }
             let edited = textView.string
-            let change = Self.displayChange(from: lastDisplay, to: edited)
-            let previous = MarkdownDisplay(text: lastDisplay, sourceUTF16: sourceUTF16)
-            let updated = previous.splicing(
-                source: markdown,
-                displayReplacement: change.replacement,
-                displayUTF16: change.range
-            )
-            let caret = previous.sourceCaretUTF16(
-                displayReplacement: change.replacement,
-                displayUTF16: change.range,
-                source: markdown
-            )
-            markdown = updated
-            parent.text = updated
-            let display = MarkdownDisplay.project(updated, reveal: reveal)
-            show(display, in: textView, sourceCaret: caret)
+            // Setting `textView.string` posts textDidChange again after this
+            // method returns. That second call sees no change; applying it
+            // would park the caret at the end of the note.
+            guard edited != session.display.text else { return }
+            let change = MarkdownDisplay.displayChange(from: session.display.text, to: edited)
+            if ProcessInfo.processInfo.arguments.contains("-uitesting") {
+                lastEditDebug = "edit:\(change.range) repl:\(change.replacement.debugDescription)"
+            }
+            session.replaceDisplay(utf16: change.range, with: change.replacement)
+            markdown = session.markdown
+            reveal = session.reveal
+            parent.text = session.markdown
+            present(session, in: textView)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !isProgrammaticUpdate,
                   let textView = notification.object as? MarkdownSourceTextView else { return }
-            let next = reveal(at: textView.selectedRange().location)
-            guard next != reveal else { return }
-            reveal = next
-            let caret = sourceOffset(at: textView.selectedRange().location)
-            let display = MarkdownDisplay.project(markdown, reveal: reveal)
-            show(display, in: textView, sourceCaret: caret)
+            // insertText updates the storage, then moves the caret, and only
+            // then posts textDidChange. Reprojecting on that caret move would
+            // put the old note back and drop the keystroke.
+            if textView.string != session.display.text { return }
+            if let pinned = pinnedCaret {
+                pinnedCaret = nil
+                let end = (textView.string as NSString).length
+                if textView.selectedRange() == NSRange(location: end, length: 0), pinned != end {
+                    isProgrammaticUpdate = true
+                    textView.setSelectedRange(NSRange(location: min(pinned, end), length: 0))
+                    textView.scrollRangeToVisible(textView.selectedRange())
+                    if ProcessInfo.processInfo.arguments.contains("-uitesting") {
+                        textView.setAccessibilityLabel("\(lastEditDebug) caret:\(min(pinned, end))")
+                    }
+                    isProgrammaticUpdate = false
+                    return
+                }
+            }
+            let before = session.display.text
+            let selected = textView.selectedRange()
+            session.setSelection(selected.location..<(selected.location + selected.length))
+            guard session.display.text != before else { return }
+            markdown = session.markdown
+            reveal = session.reveal
+            present(session, in: textView)
         }
 
-        private func show(
-            _ display: MarkdownDisplay,
-            in textView: MarkdownSourceTextView,
-            sourceCaret: Int?
-        ) {
+        private func present(_ session: MarkdownEditingSession, in textView: MarkdownSourceTextView) {
             isProgrammaticUpdate = true
-            textView.string = display.text
-            sourceUTF16 = display.sourceUTF16
-            lastDisplay = display.text
-            let location = displayLocation(forSource: sourceCaret, count: (display.text as NSString).length)
-            textView.setSelectedRange(NSRange(location: location, length: 0))
-            textView.scrollRangeToVisible(textView.selectedRange())
+            sourceUTF16 = session.display.sourceUTF16
+            lastDisplay = session.display.text
+            textView.string = session.display.text
+            MarkdownDisplayStyler.apply(
+                to: textView,
+                markdown: session.markdown,
+                sourceUTF16: session.display.sourceUTF16
+            )
+            placeSelection(session.selection, in: textView)
             isProgrammaticUpdate = false
         }
 
-        private func displayLocation(forSource caret: Int?, count: Int) -> Int {
-            guard let caret else { return count }
-            if let index = sourceUTF16.firstIndex(where: { $0 >= caret }) {
-                return index
+        private func placeSelection(_ range: Range<Int>, in textView: NSTextView) {
+            caretGeneration += 1
+            let generation = caretGeneration
+            let length = (textView.string as NSString).length
+            let lower = min(max(range.lowerBound, 0), length)
+            let upper = min(max(range.upperBound, lower), length)
+            let collapsed = lower == upper
+            pinnedCaret = collapsed ? lower : nil
+            if let source = textView as? MarkdownSourceTextView {
+                source.enforcedCaret = collapsed ? lower : nil
             }
-            return count
+            let selected = NSRange(location: lower, length: upper - lower)
+            textView.setSelectedRange(selected)
+            textView.scrollRangeToVisible(selected)
+            if ProcessInfo.processInfo.arguments.contains("-uitesting") {
+                textView.setAccessibilityLabel("\(lastEditDebug) caret:\(lower)")
+            }
+            // Styling and the text view itself move a caret to the end after
+            // this method returns. Only pull that jump back. A selection the
+            // user makes in the meantime stays.
+            guard collapsed else { return }
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView, generation == self.caretGeneration else { return }
+                let length = (textView.string as NSString).length
+                let restored = min(lower, length)
+                guard textView.selectedRange() == NSRange(location: length, length: 0),
+                      restored != length else { return }
+                self.isProgrammaticUpdate = true
+                textView.setSelectedRange(NSRange(location: restored, length: 0))
+                textView.scrollRangeToVisible(textView.selectedRange())
+                if ProcessInfo.processInfo.arguments.contains("-uitesting") {
+                    textView.setAccessibilityLabel("\(self.lastEditDebug) caret:\(restored)")
+                }
+                self.isProgrammaticUpdate = false
+            }
         }
 
         private func sourceOffset(at displayLocation: Int) -> Int {
@@ -302,93 +395,9 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
 
         private func reveal(at displayLocation: Int) -> MarkdownDisplay.Reveal {
-            let offset = sourceOffset(at: displayLocation)
-            let index = String.Index(utf16Offset: offset, in: markdown)
-            let doc = MarkdownDocument.parse(markdown)
-            if let inline = Self.inlineContaining(index, in: doc.blocks) {
-                return .inline(Self.contentRange(of: inline))
-            }
-            if let block = Self.blockContaining(index, in: doc.blocks),
-               index < block.marker.upperBound || Self.isObject(block) {
-                return .block(Self.isObject(block) ? block.source : block.marker)
-            }
-            return .none
+            MarkdownDisplay.reveal(atUTF16: sourceOffset(at: displayLocation), in: markdown)
         }
 
-        private static func isObject(_ block: MarkdownBlock) -> Bool {
-            switch block.kind {
-            case .image, .codeFence, .mathBlock: return true
-            default: return false
-            }
-        }
-
-        private static func contentRange(of inline: MarkdownInline) -> Range<String.Index> {
-            switch inline {
-            case .text(let range): return range
-            case .strong(let open, _, let close), .emphasis(let open, _, let close):
-                return open.upperBound..<close.lowerBound
-            case .code(_, let content, _): return content
-            case .link(let labelOpen, _, let labelClose, _, _):
-                return labelOpen.upperBound..<labelClose.lowerBound
-            case .math(_, let latex, _): return latex
-            }
-        }
-
-        private static func inlineContaining(_ index: String.Index, in blocks: [MarkdownBlock]) -> MarkdownInline? {
-            for block in blocks {
-                if let found = inlineContaining(index, in: block.inlines) { return found }
-                if let found = inlineContaining(index, in: block.children) { return found }
-            }
-            return nil
-        }
-
-        private static func inlineContaining(_ index: String.Index, in inlines: [MarkdownInline]) -> MarkdownInline? {
-            for item in inlines {
-                switch item {
-                case .text(let range):
-                    if range.contains(index) { return item }
-                case .strong(let open, let content, let close),
-                     .emphasis(let open, let content, let close):
-                    if (open.lowerBound..<close.upperBound).contains(index) {
-                        return inlineContaining(index, in: content) ?? item
-                    }
-                case .code(let open, _, let close), .math(let open, _, let close):
-                    if (open.lowerBound..<close.upperBound).contains(index) { return item }
-                case .link(let labelOpen, let label, _, _, let close):
-                    if (labelOpen.lowerBound..<close.upperBound).contains(index) {
-                        return inlineContaining(index, in: label) ?? item
-                    }
-                }
-            }
-            return nil
-        }
-
-        private static func blockContaining(_ index: String.Index, in blocks: [MarkdownBlock]) -> MarkdownBlock? {
-            for block in blocks {
-                if let child = blockContaining(index, in: block.children) { return child }
-                if block.source.contains(index) { return block }
-            }
-            return nil
-        }
-
-        private static func displayChange(from old: String, to new: String) -> (range: Range<Int>, replacement: String) {
-            let oldUnits = Array(old.utf16)
-            let newUnits = Array(new.utf16)
-            var prefix = 0
-            while prefix < oldUnits.count && prefix < newUnits.count && oldUnits[prefix] == newUnits[prefix] {
-                prefix += 1
-            }
-            var suffix = 0
-            while suffix < (oldUnits.count - prefix) && suffix < (newUnits.count - prefix)
-                    && oldUnits[oldUnits.count - 1 - suffix] == newUnits[newUnits.count - 1 - suffix] {
-                suffix += 1
-            }
-            let replacement = String(
-                decoding: newUnits[prefix..<(newUnits.count - suffix)],
-                as: UTF16.self
-            )
-            return (prefix..<(oldUnits.count - suffix), replacement)
-        }
     }
 }
 
@@ -405,20 +414,182 @@ final class MarkdownEditorHost: NSView {
 final class MarkdownSourceTextView: NSTextView {
     var onCancel: (() -> Void)?
 
+    enum Command {
+        case backspace
+        case forwardDelete
+        case newline
+        case deleteSelection
+        case decomposeBackward
+        case deleteWordBackward
+        case deleteWordForward
+        case deleteToBeginningOfLine
+        case deleteToEndOfLine
+        case deleteToEndOfParagraph
+        case indent
+        case outdent
+    }
+
+    var onCommand: ((Command) -> Void)?
+    /// Replaces the current selection. Set while a highlight is being typed over.
+    var onInsert: ((String) -> Void)?
+    /// While set, a caret move that the text system makes on its own is
+    /// pulled back. Arrow keys and clicks clear it first.
+    var enforcedCaret: Int?
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawKeyCaps(in: dirtyRect)
+        super.draw(dirtyRect)
+    }
+
+    /// Rounded key cap behind each `<kbd>` label. The glyphs are the key name.
+    private func drawKeyCaps(in dirtyRect: NSRect) {
+        guard let layout = layoutManager, let container = textContainer, let storage = textStorage else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        guard full.length > 0 else { return }
+        storage.enumerateAttribute(.swiftMindKeyCap, in: full) { value, range, _ in
+            guard value != nil, range.length > 0 else { return }
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            layout.enumerateEnclosingRects(
+                forGlyphRange: glyphs,
+                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                in: container
+            ) { rect, _ in
+                var box = rect
+                box.origin.x += self.textContainerOrigin.x - 3
+                box.origin.y += self.textContainerOrigin.y
+                box.size.width += 6
+                guard box.intersects(dirtyRect) else { return }
+                KeyCapChrome.draw(in: box)
+            }
+        }
+    }
+
+    override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        if let enforced = enforcedCaret, !stillSelecting, charRange.length == 0, charRange.location != enforced {
+            super.setSelectedRange(NSRange(location: min(enforced, (string as NSString).length), length: 0), affinity: affinity, stillSelecting: false)
+            return
+        }
+        super.setSelectedRange(charRange, affinity: affinity, stillSelecting: stillSelecting)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        enforcedCaret = nil
+        super.mouseDown(with: event)
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
 
+    override func deleteBackward(_ sender: Any?) {
+        if let onCommand { onCommand(.backspace); return }
+        super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        if let onCommand { onCommand(.forwardDelete); return }
+        super.deleteForward(sender)
+    }
+
+    override func delete(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteSelection); return }
+        super.delete(sender)
+    }
+
+    override func deleteBackwardByDecomposingPreviousCharacter(_ sender: Any?) {
+        if let onCommand { onCommand(.decomposeBackward); return }
+        super.deleteBackwardByDecomposingPreviousCharacter(sender)
+    }
+
+    override func deleteWordBackward(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteWordBackward); return }
+        super.deleteWordBackward(sender)
+    }
+
+    override func deleteWordForward(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteWordForward); return }
+        super.deleteWordForward(sender)
+    }
+
+    override func deleteToBeginningOfLine(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteToBeginningOfLine); return }
+        super.deleteToBeginningOfLine(sender)
+    }
+
+    override func deleteToBeginningOfParagraph(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteToBeginningOfLine); return }
+        super.deleteToBeginningOfParagraph(sender)
+    }
+
+    override func deleteToEndOfLine(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteToEndOfLine); return }
+        super.deleteToEndOfLine(sender)
+    }
+
+    override func deleteToEndOfParagraph(_ sender: Any?) {
+        if let onCommand { onCommand(.deleteToEndOfParagraph); return }
+        super.deleteToEndOfParagraph(sender)
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        if let onCommand { onCommand(.newline); return }
+        super.insertNewline(sender)
+    }
+
+    /// A typed or pasted character replaces the highlight. A caret still goes
+    /// through the text view so input methods can compose.
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        if replacementRange.location == NSNotFound,
+           selectedRange().length > 0,
+           !hasMarkedText(),
+           let onInsert,
+           let text = Self.plainText(insertString) {
+            onInsert(text)
+            return
+        }
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
+    private static func plainText(_ insertString: Any) -> String? {
+        if let text = insertString as? String { return text }
+        if let text = insertString as? NSAttributedString { return text.string }
+        return nil
+    }
+
     override func keyDown(with event: NSEvent) {
+        enforcedCaret = nil
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
         switch event.keyCode {
         case 36, 76 where mods.isEmpty: // Return
+            if let onCommand { onCommand(.newline); return }
             if continueListLine() { return }
             super.keyDown(with: event)
         case 48 where mods == .shift: // ⇧Tab
+            if let onCommand { onCommand(.outdent); return }
             indentListLine(outdent: true)
         case 48 where mods.isEmpty: // Tab — never moves focus
+            if let onCommand { onCommand(.indent); return }
             indentListLine(outdent: false)
+        case 115: // Home
+            moveCaret(event, forward: false)
+        case 119: // End
+            moveCaret(event, forward: true)
+        case 116 where mods.isEmpty || mods == .shift: // Page Up
+            if mods.contains(.shift) { pageUpAndModifySelection(nil) } else { pageUp(nil) }
+        case 121 where mods.isEmpty || mods == .shift: // Page Down
+            if mods.contains(.shift) { pageDownAndModifySelection(nil) } else { pageDown(nil) }
+        case 126 where mods == .command: // ⌘↑
+            moveToBeginningOfDocument(nil)
+        case 125 where mods == .command: // ⌘↓
+            moveToEndOfDocument(nil)
+        case 123 where mods == .command: // ⌘←
+            moveToBeginningOfLine(nil)
+        case 124 where mods == .command: // ⌘→
+            moveToEndOfLine(nil)
+        case 0 where mods == .control: // ⌃A
+            moveToBeginningOfLine(nil)
+        case 14 where mods == .control: // ⌃E
+            moveToEndOfLine(nil)
         case 11 where mods == .command: // ⌘B
             onFormat?("**")
         case 34 where mods == .command: // ⌘I
@@ -433,6 +604,23 @@ final class MarkdownSourceTextView: NSTextView {
             onHeading?(3)
         default:
             super.keyDown(with: event)
+        }
+    }
+
+    /// Home/End move within the line. ⌘Home/⌘End move through the note.
+    /// Shift extends the selection. Page Up/Down move by a screen.
+    private func moveCaret(_ event: NSEvent, forward: Bool) {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let toDocument = mods.contains(.command)
+        let selecting = mods.contains(.shift)
+        if toDocument && forward {
+            selecting ? moveToEndOfDocumentAndModifySelection(nil) : moveToEndOfDocument(nil)
+        } else if toDocument {
+            selecting ? moveToBeginningOfDocumentAndModifySelection(nil) : moveToBeginningOfDocument(nil)
+        } else if forward {
+            selecting ? moveToEndOfLineAndModifySelection(nil) : moveToEndOfLine(nil)
+        } else {
+            selecting ? moveToBeginningOfLineAndModifySelection(nil) : moveToBeginningOfLine(nil)
         }
     }
 
@@ -631,6 +819,201 @@ final class MarkdownSourceTextView: NSTextView {
         guard shouldChangeText(in: range, replacementString: s) else { return }
         textStorage?.replaceCharacters(in: range, with: s)
         didChangeText()
+    }
+}
+
+/// Styles the rendered editor string from the markdown tree. Markers may be
+/// hidden; bold, italic, code, and headings still look like the card.
+enum MarkdownDisplayStyler {
+    private static let body = NSFont.systemFont(ofSize: 13)
+    private static let headingSizes: [CGFloat] = [20, 17, 15, 14, 13, 13]
+    private static let codeBackground = NSColor.labelColor.withAlphaComponent(0.08)
+
+    static func apply(to textView: NSTextView, markdown: String, sourceUTF16: [Int]) {
+        guard let storage = textView.textStorage else { return }
+        let length = (storage.string as NSString).length
+        guard length == sourceUTF16.count else { return }
+        textView.undoManager?.disableUndoRegistration()
+        storage.beginEditing()
+        storage.setAttributes(
+            [.font: body, .foregroundColor: NSColor.labelColor],
+            range: NSRange(location: 0, length: length)
+        )
+        let document = MarkdownDocument.parse(markdown)
+        for block in document.blocks {
+            style(block, source: markdown, map: sourceUTF16, storage: storage)
+        }
+        storage.endEditing()
+        textView.undoManager?.enableUndoRegistration()
+    }
+
+    private static func style(
+        _ block: MarkdownBlock,
+        source: String,
+        map: [Int],
+        storage: NSTextStorage
+    ) {
+        switch block.kind {
+        case .heading(let level):
+            let size = headingSizes[min(max(level, 1), headingSizes.count) - 1]
+            add(block.source, source: source, map: map, storage: storage, attributes: [
+                .font: NSFont.systemFont(ofSize: size, weight: .bold),
+            ])
+            add(block.marker, source: source, map: map, storage: storage, attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        case .codeFence:
+            add(block.source, source: source, map: map, storage: storage, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                .backgroundColor: codeBackground,
+            ])
+        case .mathBlock:
+            add(block.source, source: source, map: map, storage: storage, attributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+                .foregroundColor: NSColor.controlAccentColor,
+            ])
+        case .listItem:
+            add(block.marker, source: source, map: map, storage: storage, attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        case .paragraph, .quote, .image:
+            break
+        }
+        style(inlines: block.inlines, source: source, map: map, storage: storage)
+        for child in block.children {
+            style(child, source: source, map: map, storage: storage)
+        }
+    }
+
+    private static func style(
+        inlines: [MarkdownInline],
+        source: String,
+        map: [Int],
+        storage: NSTextStorage
+    ) {
+        for inline in inlines {
+            switch inline {
+            case .text:
+                break
+            case .strong(_, let content, _):
+                emphasize(span(content, source: source), source: source, map: map, storage: storage, trait: .boldFontMask)
+                style(inlines: content, source: source, map: map, storage: storage)
+            case .emphasis(_, let content, _):
+                emphasize(span(content, source: source), source: source, map: map, storage: storage, trait: .italicFontMask)
+                style(inlines: content, source: source, map: map, storage: storage)
+            case .code(_, let content, _):
+                add(content, source: source, map: map, storage: storage, attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                    .backgroundColor: codeBackground,
+                ])
+            case .kbd(_, let label, _):
+                add(label, source: source, map: map, storage: storage, attributes: [
+                    .font: NSFont.systemFont(ofSize: body.pointSize * 0.72, weight: .medium),
+                    .swiftMindKeyCap: true,
+                ])
+            case .math(_, let latex, _):
+                add(latex, source: source, map: map, storage: storage, attributes: [
+                    .foregroundColor: NSColor.controlAccentColor,
+                ])
+            case .link(_, let label, _, _, _):
+                add(span(label, source: source), source: source, map: map, storage: storage, attributes: [
+                    .foregroundColor: NSColor.controlAccentColor,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                ])
+                style(inlines: label, source: source, map: map, storage: storage)
+            }
+        }
+    }
+
+    /// Source range covering nested inline content, so bold applies to the words.
+    private static func span(_ inlines: [MarkdownInline], source: String) -> Range<String.Index> {
+        var lower = source.endIndex
+        var upper = source.startIndex
+        func visit(_ inline: MarkdownInline) {
+            let range: Range<String.Index>
+            switch inline {
+            case .text(let text): range = text
+            case .strong(let open, _, let close), .emphasis(let open, _, let close),
+                 .code(let open, _, let close), .math(let open, _, let close),
+                 .kbd(let open, _, let close):
+                range = open.lowerBound..<close.upperBound
+            case .link(let open, _, _, _, let close):
+                range = open.lowerBound..<close.upperBound
+            }
+            if range.lowerBound < lower { lower = range.lowerBound }
+            if range.upperBound > upper { upper = range.upperBound }
+        }
+        inlines.forEach(visit)
+        guard lower < upper else { return source.startIndex..<source.startIndex }
+        return lower..<upper
+    }
+
+    private static func emphasize(
+        _ range: Range<String.Index>,
+        source: String,
+        map: [Int],
+        storage: NSTextStorage,
+        trait: NSFontTraitMask
+    ) {
+        guard !range.isEmpty,
+              let start = utf16(range.lowerBound, in: source),
+              let end = utf16(range.upperBound, in: source),
+              start < end else { return }
+        var runStart: Int?
+        func apply(from startIndex: Int, to endIndex: Int) {
+            let existing = storage.attribute(.font, at: startIndex, effectiveRange: nil) as? NSFont ?? body
+            let font = NSFontManager.shared.convert(existing, toHaveTrait: trait)
+            storage.addAttribute(.font, value: font, range: NSRange(location: startIndex, length: endIndex - startIndex))
+        }
+        for index in 0..<map.count {
+            let inside = map[index] >= start && map[index] < end
+            if inside {
+                if runStart == nil { runStart = index }
+            } else if let startIndex = runStart {
+                apply(from: startIndex, to: index)
+                runStart = nil
+            }
+        }
+        if let startIndex = runStart {
+            apply(from: startIndex, to: map.count)
+        }
+    }
+
+    private static func add(
+        _ range: Range<String.Index>,
+        source: String,
+        map: [Int],
+        storage: NSTextStorage,
+        attributes: [NSAttributedString.Key: Any]
+    ) {
+        guard !range.isEmpty,
+              let start = utf16(range.lowerBound, in: source),
+              let end = utf16(range.upperBound, in: source),
+              start < end else { return }
+        var runStart: Int?
+        for index in 0..<map.count {
+            let inside = map[index] >= start && map[index] < end
+            if inside {
+                if runStart == nil { runStart = index }
+            } else if let startIndex = runStart {
+                storage.addAttributes(
+                    attributes,
+                    range: NSRange(location: startIndex, length: index - startIndex)
+                )
+                runStart = nil
+            }
+        }
+        if let startIndex = runStart {
+            storage.addAttributes(
+                attributes,
+                range: NSRange(location: startIndex, length: map.count - startIndex)
+            )
+        }
+    }
+
+    private static func utf16(_ index: String.Index, in source: String) -> Int? {
+        guard let utf16Index = index.samePosition(in: source.utf16) else { return nil }
+        return source.utf16.distance(from: source.utf16.startIndex, to: utf16Index)
     }
 }
 

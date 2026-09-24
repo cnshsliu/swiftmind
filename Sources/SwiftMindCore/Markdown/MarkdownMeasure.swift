@@ -51,7 +51,8 @@ public struct MarkdownMeasure: Equatable, Sendable {
     private func plain(_ inlines: [MarkdownInline], in source: String) -> String {
         inlines.map { inline -> String in
             switch inline {
-            case .text(let range), .code(_, let range, _), .math(_, let range, _):
+            case .text(let range), .code(_, let range, _), .math(_, let range, _),
+                 .kbd(_, let range, _):
                 return String(source[range])
             case .strong(_, let content, _), .emphasis(_, let content, _):
                 return plain(content, in: source)

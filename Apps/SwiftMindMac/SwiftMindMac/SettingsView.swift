@@ -58,7 +58,7 @@ enum MediaSizeLevel: String, CaseIterable, Identifiable {
     }
 }
 
-/// Where note editing happens (⌘E / double-click / `e`). Persisted as
+/// Where note editing happens (⌘E / `e`). Persisted as
 /// `swiftmind.noteEditMode`; `panel` is the floating/in-place overlay editor,
 /// `onCard` hosts the same editor at an expanded note card's frame.
 enum NoteEditMode: String, CaseIterable, Identifiable {

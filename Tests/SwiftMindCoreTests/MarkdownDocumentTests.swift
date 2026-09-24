@@ -60,6 +60,14 @@ final class MarkdownDocumentTests: XCTestCase {
         )
     }
 
+    func testOrderedRunIncrements() {
+        let source = "1. one\n1. two\n"
+        let doc = MarkdownDocument.parse(source)
+        var next = 0
+        XCTAssertEqual(MarkdownDocument.listMarker(for: doc.blocks[0], source: source, nextOrdered: &next), "1.")
+        XCTAssertEqual(MarkdownDocument.listMarker(for: doc.blocks[1], source: source, nextOrdered: &next), "2.")
+    }
+
     func testOrderedItem() {
         let source = "1. beta"
         let doc = MarkdownDocument.parse(source)
@@ -92,6 +100,17 @@ final class MarkdownDocumentTests: XCTestCase {
             return XCTFail("fence body is raw text")
         }
         XCTAssertEqual(String(source[range]), "**nope**")
+    }
+
+    func testSingleLineMathBlock() {
+        let source = #"$$\frac{a}{b}$$"#
+        let doc = MarkdownDocument.parse(source)
+        XCTAssertEqual(doc.blocks.count, 1)
+        XCTAssertEqual(doc.blocks[0].kind, .mathBlock)
+        guard case .text(let range) = doc.blocks[0].inlines.first else {
+            return XCTFail("expected latex text")
+        }
+        XCTAssertEqual(String(source[range]), #"\frac{a}{b}"#)
     }
 
     func testMathBlockContentRange() {
@@ -163,6 +182,35 @@ final class MarkdownDocumentTests: XCTestCase {
         guard case .text(let labelRange) = label[0] else { return XCTFail("expected label text") }
         XCTAssertEqual(String(source[labelRange]), "the spec")
         XCTAssertEqual(String(source[url]), "https://example.com")
+    }
+
+    func testKeyboardTag() {
+        let source = "Press <kbd>⌘E</kbd> to edit."
+        let doc = MarkdownDocument.parse(source)
+        guard case .kbd(let open, let label, let close) = doc.blocks[0].inlines[1] else {
+            return XCTFail("expected a key, got \(doc.blocks[0].inlines)")
+        }
+        XCTAssertEqual(String(source[open]), "<kbd>")
+        XCTAssertEqual(String(source[label]), "⌘E")
+        XCTAssertEqual(String(source[close]), "</kbd>")
+    }
+
+    func testUnclosedKeyboardTagStaysText() {
+        let source = "Press <kbd>⌘E to edit."
+        let doc = MarkdownDocument.parse(source)
+        guard case .text(let range) = doc.blocks[0].inlines.first else {
+            return XCTFail("expected text, got \(doc.blocks[0].inlines)")
+        }
+        XCTAssertEqual(String(source[range]), source)
+    }
+
+    func testKeyboardTagInsideCodeStaysLiteral() {
+        let source = "`<kbd>E</kbd>`"
+        let doc = MarkdownDocument.parse(source)
+        guard case .code(_, let content, _) = doc.blocks[0].inlines[0] else {
+            return XCTFail("expected code, got \(doc.blocks[0].inlines)")
+        }
+        XCTAssertEqual(String(source[content]), "<kbd>E</kbd>")
     }
 
     func testInlineMathNotADollarAmount() {

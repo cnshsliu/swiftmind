@@ -116,6 +116,10 @@ Notes render Markdown and even math: $e^{i\pi}+1=0$
           <li data-node-id="n_help_start_views" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">Toolbar: switch canvas ⇄ outline, both stay in sync</span>
           </li>
+          <li data-node-id="n_help_start_windows" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Several windows, one map, one undo stack</span>
+            <div class="node-note" hidden="hidden">Open the same map in more than one window. They share one selection and one undo stack: an edit in either window shows up in the other, and &lt;kbd&gt;⌘Z&lt;/kbd&gt; steps back through that shared history.</div>
+          </li>
         </ul>
       </li>
       <li data-node-id="n_help_editing" data-side="right" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
@@ -128,7 +132,7 @@ Notes render Markdown and even math: $e^{i\pi}+1=0$
             <span class="node-title">Drag a node onto another to reparent</span>
           </li>
           <li data-node-id="n_help_edit_rename" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
-            <span class="node-title">Double-click a title to rename; a markdown node opens the note on the node</span>
+            <span class="node-title">Double-click or Return renames the title</span>
           </li>
           <li data-node-id="n_help_edit_pin" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">⇧⌘P pins a node · Option+drag places it freely</span>
@@ -148,9 +152,15 @@ Every paste is one undo step.</div>
           <li data-node-id="n_help_edit_drop" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">Drop text, URLs, images or files right onto the canvas</span>
           </li>
+          <li data-node-id="n_help_edit_capture" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⇧⌘I captures a thought into Inbox</span>
+            <div class="node-note" hidden="hidden">&lt;kbd&gt;⇧⌘I&lt;/kbd&gt; (or ⌘K → Capture…) adds a thought to `Inbox.swiftmind.html` in the default library without switching away from the map you have open.</div>
+          </li>
           <li data-node-id="n_help_edit_sketch" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">D turns a node into a sketch you draw by hand</span>
-            <div class="node-note" hidden="hidden">Select a node and press `D` (or ⇧⌘D): it becomes a **sketch node** with a large borderless drawing board. Draw with the mouse (Apple Pencil on iPad, coming later), erase, undo — `Esc` or **Done** commits and the node shrinks to exactly your drawing, trimmed and centered. Double-click a sketch node to draw more; right-click to remove the sketch.</div>
+            <div class="node-note" hidden="hidden">Select a node and press &lt;kbd&gt;D&lt;/kbd&gt; (or &lt;kbd&gt;⇧⌘D&lt;/kbd&gt;): it becomes a **sketch node** with a large borderless drawing board. Draw with the left mouse button, erase, undo. **Right-drag pans** the board (a two-finger pan will do the same on iPad, coming later, along with Apple Pencil). &lt;kbd&gt;Esc&lt;/kbd&gt; or **Done** commits and the node shrinks to exactly your drawing, trimmed and centered. Double-click a sketch node to draw more; right-click the node (outside the board) to remove the sketch.
+
+Select a sketch and the drawing appears under **Note** in the inspector.</div>
             <ul>
               <li data-node-id="n_help_sketch_demo" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
                 <span class="node-title">Example drawing — select me and press D</span>
@@ -169,6 +179,9 @@ Every paste is one undo step.</div>
           </li>
           <li data-node-id="n_help_nav_zoom" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">⌘+ / ⌘- / ⌘0 / ⌘9 zoom · pinch · ⌘-scroll · two-finger pan</span>
+            <div class="node-note" hidden="hidden">Zoom runs from 25% to 300%. &lt;kbd&gt;⌘+&lt;/kbd&gt; and &lt;kbd&gt;⌘-&lt;/kbd&gt; step, &lt;kbd&gt;⌘0&lt;/kbd&gt; is actual size, &lt;kbd&gt;⌘9&lt;/kbd&gt; fits the whole map. Pinch and &lt;kbd&gt;⌘&lt;/kbd&gt;-scroll zoom around the pointer.
+
+Two-finger scroll pans. **Space-drag** or &lt;kbd&gt;⌘&lt;/kbd&gt;-drag pans even when the pointer is over a node. An expanded note scales with the map, so zooming out shows the same lines, only smaller.</div>
           </li>
           <li data-node-id="n_help_nav_search" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">⌘F searches titles and notes</span>
@@ -183,7 +196,7 @@ Every paste is one undo step.</div>
             <span class="node-title">Keyboard reference (folded — select me, press ⌘.)</span>
             <ul>
               <li data-node-id="n_help_k1" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
-                <span class="node-title">Double-click — rename a title, or edit markdown on the node</span>
+                <span class="node-title">Double-click or Return — rename the title</span>
               </li>
               <li data-node-id="n_help_k2" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
                 <span class="node-title">⌘N / ⌘O / ⌘S — new / open / save</span>
@@ -207,7 +220,7 @@ Every paste is one undo step.</div>
                 <span class="node-title">⌘F — search · ⌘K — command palette</span>
               </li>
               <li data-node-id="n_help_k9" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
-                <span class="node-title">E — note beside node · ⌘E / double-click markdown — edit on node · ⌥⌘E — expand card</span>
+                <span class="node-title">E — note beside node · ⌘E — edit on node · X / ⌥⌘E — show or hide the card</span>
               </li>
               <li data-node-id="n_help_k10" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
                 <span class="node-title">f — follow mode · Esc — clear focus</span>
@@ -218,6 +231,18 @@ Every paste is one undo step.</div>
               <li data-node-id="n_help_k12" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
                 <span class="node-title">⌘+ / ⌘- / ⌘0 / ⌘9 — zoom in / out / actual size / fit whole map</span>
               </li>
+              <li data-node-id="n_help_k13" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⌘B / ⌘I / ⌘K — bold / italic / link in a note · ⌘⌥1–3 — headings</span>
+              </li>
+              <li data-node-id="n_help_k14" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Tab / ⇧Tab — indent a list · ⌘Enter — save the note · Esc — cancel</span>
+              </li>
+              <li data-node-id="n_help_k15" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">⇧⌘I — capture a thought into Inbox</span>
+              </li>
+              <li data-node-id="n_help_k16" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+                <span class="node-title">Space-drag or ⌘-drag — pan, even over a node</span>
+              </li>
             </ul>
           </li>
         </ul>
@@ -226,7 +251,13 @@ Every paste is one undo step.</div>
         <span class="node-title">Notes &amp; Markdown</span>
         <div class="node-note" hidden="hidden">Every node carries a **Markdown note**.
 
-- **Bold**, *italic*, `code`, lists
+**Bold**, *italic*, `code`
+
+- dotted item
+- another dotted item
+
+1. numbered item
+2. another numbered item
 
 &gt; Quotes and
 &gt; everything else you&apos;d expect
@@ -235,10 +266,36 @@ Inline math $\sqrt{x^2+y^2}$ and block math:
 
 $$\frac{-b \pm \sqrt{b^2-4ac}}{2a}$$
 
-Select a node, press `E` for a floating editor to the right, `⌘E` (or double-click) to edit markdown on the node, `⌥⌘E` to pin the rendered card onto the canvas (like this one). The editor shows the formatted note while the file stays Markdown; the marks come back for the piece under the caret. The toolbar inserts an image, math, or a link. Settings (`⌘,`) → **Note editing** can instead edit **directly on an expanded card** — keep both modes while you compare.</div>
+Select a node, press &lt;kbd&gt;E&lt;/kbd&gt; for a floating editor to the right, &lt;kbd&gt;⌘E&lt;/kbd&gt; to edit markdown on the node, double-click or &lt;kbd&gt;Return&lt;/kbd&gt; to rename the title, &lt;kbd&gt;⌥⌘E&lt;/kbd&gt; to pin the rendered card onto the canvas (like this one). The editor shows the formatted note while the file stays Markdown; the marks come back for the piece under the caret. The toolbar inserts an image, math, or a link. Settings (&lt;kbd&gt;⌘,&lt;/kbd&gt;) → **Note editing** can instead edit **directly on an expanded card** — keep both modes while you compare.
+
+In the editor, &lt;kbd&gt;⌘B&lt;/kbd&gt; bolds, &lt;kbd&gt;⌘I&lt;/kbd&gt; italicizes, &lt;kbd&gt;⌘K&lt;/kbd&gt; inserts a link, and &lt;kbd&gt;⌘⌥1&lt;/kbd&gt;–&lt;kbd&gt;⌘⌥3&lt;/kbd&gt; set headings. &lt;kbd&gt;Return&lt;/kbd&gt; continues a list or a quote, and a run of numbered items counts upward. &lt;kbd&gt;Tab&lt;/kbd&gt; and &lt;kbd&gt;⇧Tab&lt;/kbd&gt; indent and outdent. &lt;kbd&gt;⌘Enter&lt;/kbd&gt; saves and closes; &lt;kbd&gt;Esc&lt;/kbd&gt; cancels. The first `#` heading is this node&apos;s title. &lt;kbd&gt;X&lt;/kbd&gt; shows or hides the card (so does &lt;kbd&gt;⌥⌘E&lt;/kbd&gt;). On a long card, the scroll wheel moves the note.
+
+A key cap is written `&lt;kbd&gt;⌘E&lt;/kbd&gt;` and renders as &lt;kbd&gt;⌘E&lt;/kbd&gt;.</div>
         <ul>
           <li data-node-id="n_help_notes_how" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">Or edit notes in the inspector sidebar</span>
+          </li>
+          <li data-node-id="n_help_notes_keys" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">⌘B ⌘I ⌘K · headings · Tab · ⌘Enter commits, Esc cancels</span>
+            <div class="node-note" hidden="hidden">While a note is open:
+
+- &lt;kbd&gt;⌘B&lt;/kbd&gt; bold, &lt;kbd&gt;⌘I&lt;/kbd&gt; italic, &lt;kbd&gt;⌘K&lt;/kbd&gt; link
+- &lt;kbd&gt;⌘⌥1&lt;/kbd&gt; &lt;kbd&gt;⌘⌥2&lt;/kbd&gt; &lt;kbd&gt;⌘⌥3&lt;/kbd&gt; headings
+- &lt;kbd&gt;Return&lt;/kbd&gt; continues a list item or a quote. Numbered items in a run count upward (1, 2, 2, 3 becomes 1, 2, 3, 4)
+- &lt;kbd&gt;Tab&lt;/kbd&gt; indents a list line, &lt;kbd&gt;⇧Tab&lt;/kbd&gt; outdents it
+- &lt;kbd&gt;⌘Enter&lt;/kbd&gt; saves and closes. &lt;kbd&gt;Esc&lt;/kbd&gt; restores the note to what it was when you opened it
+- The first `#` heading in the note is the node&apos;s title
+- &lt;kbd&gt;X&lt;/kbd&gt; or &lt;kbd&gt;⌥⌘E&lt;/kbd&gt; shows or hides the rendered card. The scroll wheel moves a card that is taller than its frame</div>
+          </li>
+          <li data-node-id="n_help_notes_kbd" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
+            <span class="node-title">Key caps: write &lt;kbd&gt;⌘E&lt;/kbd&gt; in a note</span>
+            <div class="node-note" hidden="hidden">Wrap a shortcut in a `&lt;kbd&gt;` tag and the rendered note draws a key cap:
+
+`&lt;kbd&gt;⌘E&lt;/kbd&gt;` → &lt;kbd&gt;⌘E&lt;/kbd&gt;
+
+`&lt;kbd&gt;⌘,&lt;/kbd&gt;` → &lt;kbd&gt;⌘,&lt;/kbd&gt;
+
+The editor shows the tag while the caret is inside it, and the cap when the caret moves on.</div>
           </li>
           <li data-node-id="n_help_notes_math" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">LaTeX subset: Greek, fractions, √, super/subscripts</span>
@@ -331,7 +388,11 @@ A map is a plain `.swiftmind.html` file — nested lists a browser can already r
           </li>
           <li data-node-id="n_help_org_links" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">Links: open a web page or jump across the map</span>
-            <div class="node-note" hidden="hidden">This node has two links (see the inspector): a web page about mind mapping, and a **node link** that jumps straight to the formula demo.</div>
+            <div class="node-note" hidden="hidden">This node has two links (see the inspector): a web page about mind mapping, and a **node link** to the formula demo.
+
+Click a row under **Links**. The pointer turns into a hand. A web address opens in your browser. A row that starts with → selects that node and brings it onto the canvas.
+
+**Linked from** lists nodes that point here. Click one to jump to it.</div>
             <ul class="node-links" hidden="hidden">
               <li data-link-kind="url" data-href="https://en.wikipedia.org/wiki/Mind_map"></li>
               <li data-link-kind="node" data-node-ref="n_help_formulas"></li>

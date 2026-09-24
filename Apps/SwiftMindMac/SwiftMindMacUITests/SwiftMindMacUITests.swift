@@ -637,6 +637,151 @@ final class SwiftMindMacUITests: XCTestCase {
     }
 
     /// Typing `**x**` renders as x and the file still stores the markers.
+    /// Enter at the end of a list item or a quote starts the next line with
+    /// the same marker, and the following letters stay on that line.
+    func testEnterContinuesListAndQuoteBeforeTheNextLine() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText("- dotted item\n- another dotted item")
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(.rightArrow, modifierFlags: .command)
+        app.typeKey(.return, modifierFlags: [])
+        editor.typeText("abcd")
+        let listValue = (editor.value as? String) ?? ""
+        XCTAssertTrue(listValue.contains("abcd"), listValue)
+        XCTAssertFalse(listValue.contains("abcdanother"), listValue)
+        XCTAssertTrue(
+            listValue.contains("- abcd") || listValue.contains("\nabcd\n"),
+            "new list line should hold abcd — \(listValue)"
+        )
+
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText("\n> Quotes and\nmore")
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(.rightArrow, modifierFlags: .command)
+        app.typeKey(.return, modifierFlags: [])
+        editor.typeText("abcd")
+        let quoteValue = (editor.value as? String) ?? ""
+        XCTAssertTrue(quoteValue.contains("> abcd") || quoteValue.contains("\nabcd\n"), quoteValue)
+        XCTAssertFalse(quoteValue.contains("abcdmore"), quoteValue)
+    }
+
+    /// Backspace on the dash of an empty middle list item must not send the
+    /// caret to the end of the note.
+    func testBackspaceOnEmptyListItemKeepsCaret() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText("- dotted item")
+        app.typeKey(.return, modifierFlags: [])
+        // Caret is after the continued "- ". Step back onto the dash and delete it.
+        app.typeKey(.leftArrow, modifierFlags: [])
+        app.typeKey(.delete, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        let value = (editor.value as? String) ?? ""
+        try? value.write(toFile: "/tmp/note-editor-value.txt", atomically: true, encoding: .utf8)
+        try? editor.label.write(toFile: "/tmp/note-editor-label.txt", atomically: true, encoding: .utf8)
+        XCTAssertTrue(value.contains("dotted item"), value)
+        XCTAssertFalse(value.contains("- -"), "list marker doubled — \(value)")
+        let label = editor.label
+        if let caretRange = label.range(of: "caret:"),
+           let caret = Int(label[caretRange.upperBound...].prefix(while: \.isNumber)) {
+            XCTAssertNotEqual(
+                caret,
+                (value as NSString).length,
+                "caret jumped to the end — \(label)\n\(value)"
+            )
+        }
+    }
+
+    /// A highlighted span is removed by Delete and by Forward Delete.
+    /// One character at the caret is the bug.
+    func testDeleteRemovesSelectedText() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText("abcdef")
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.delete, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        var value = (editor.value as? String) ?? ""
+        XCTAssertTrue(value.contains("abc"), value)
+        XCTAssertFalse(value.contains("def"), "Delete must remove the selection — \(value)")
+        XCTAssertFalse(value.contains("abcf"), "Delete removed one character — \(value)")
+
+        editor.typeText("xyz")
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.forwardDelete, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        value = (editor.value as? String) ?? ""
+        XCTAssertTrue(value.contains("abc"), value)
+        XCTAssertTrue(value.contains("x"), value)
+        XCTAssertFalse(value.contains("yz"), "Forward Delete must remove the selection — \(value)")
+        XCTAssertFalse(value.contains("xy"), "Forward Delete removed one character — \(value)")
+
+        editor.typeText("abcdef")
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        app.typeKey(.leftArrow, modifierFlags: .shift)
+        editor.typeText("a")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        value = (editor.value as? String) ?? ""
+        XCTAssertTrue(value.contains("abca"), "typing must leave the character that replaced the selection — \(value)")
+        XCTAssertFalse(value.contains("def"), "typing must replace the selection — \(value)")
+        XCTAssertFalse(value.contains("abcda"), "typing inserted beside the selection — \(value)")
+    }
+
+    /// Backspace and Return keep the rest of the note, and the navigation
+    /// keys do not eat it.
+    func testNoteEditorCaretStaysPutAndNavigationKeysWork() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        app.typeKey(.downArrow, modifierFlags: .command)
+        editor.typeText("\n- alpha\n> quoted")
+
+        // Caret after the dash on the list line: up, then to the line start, then right.
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(.leftArrow, modifierFlags: .command)
+        app.typeKey(.rightArrow, modifierFlags: [])
+        app.typeKey(.delete, modifierFlags: [])
+        var value = (editor.value as? String) ?? ""
+        XCTAssertTrue(value.contains("alpha"), "backspace after '-' must keep the item — got \(value)")
+        XCTAssertFalse(value.contains("- -"), "list marker must not double — got \(value)")
+
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.rightArrow, modifierFlags: .command)
+        app.typeKey(.return, modifierFlags: [])
+        value = (editor.value as? String) ?? ""
+        XCTAssertTrue(value.contains("quoted"), "return in a quote must keep the quote — got \(value)")
+
+        app.typeKey(.home, modifierFlags: [])
+        app.typeKey(.end, modifierFlags: [])
+        app.typeKey(.pageUp, modifierFlags: [])
+        app.typeKey(.pageDown, modifierFlags: [])
+        app.typeKey(.upArrow, modifierFlags: .command)
+        app.typeKey(.downArrow, modifierFlags: .command)
+        value = (editor.value as? String) ?? ""
+        XCTAssertTrue(value.contains("alpha"), "navigation keys must not delete the note — got \(value)")
+        XCTAssertTrue(value.contains("quoted"), "navigation keys must not delete the quote — got \(value)")
+    }
+
     func testNoteEditorHidesBoldMarkers() throws {
         focusCanvasWithSelection()
         app.typeKey(.init("e"), modifierFlags: [])

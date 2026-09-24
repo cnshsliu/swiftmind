@@ -26,8 +26,14 @@ struct MarkdownTextView: View {
     }
 
     enum Piece {
-        case text(String)
+        /// One wrapping run. Key caps sit inside it so they share the line.
+        case flow([Run])
         case inlineMath(String)
+    }
+
+    enum Run {
+        case markdown(String)
+        case key(String)
     }
 
     var body: some View {
@@ -56,12 +62,13 @@ struct MarkdownTextView: View {
             }
             .padding(.leading, CGFloat(indent) * fontSize * 1.2)
         case .quote(let pieces):
-            piecesView(pieces, font: .system(size: fontSize).italic(), metricsSize: fontSize)
-                .padding(.leading, 8)
+            // GitHub blockquote: regular text, inset, one bar on the left.
+            piecesView(pieces, font: .system(size: fontSize), metricsSize: fontSize)
+                .padding(.leading, 12)
                 .overlay(alignment: .leading) {
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.5))
-                        .frame(width: 2)
+                        .fill(Color.secondary.opacity(0.45))
+                        .frame(width: 3)
                 }
         case .code(let source):
             Text(source)
@@ -109,7 +116,7 @@ struct MarkdownTextView: View {
         ParagraphFlowLayout(
             items: pieces.map { piece in
                 switch piece {
-                case .text: return .text(fontSize: metricsSize)
+                case .flow: return .text(fontSize: metricsSize)
                 case .inlineMath(let latex): return .math(latex: latex, fontSize: fontSize)
                 }
             },
@@ -117,12 +124,8 @@ struct MarkdownTextView: View {
         ) {
             ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
                 switch piece {
-                case .text(let s):
-                    if let attr = try? AttributedString(markdown: s) {
-                        Text(attr).font(font)
-                    } else {
-                        Text(s).font(font)
-                    }
+                case .flow(let runs):
+                    flowingText(runs, font: font, fontSize: metricsSize)
                 case .inlineMath(let latex):
                     LaTeXMathView(latex: latex, fontSize: fontSize)
                 }
@@ -130,80 +133,173 @@ struct MarkdownTextView: View {
         }
     }
 
+    /// Markdown runs and key-cap images in one `Text`, so a cap wraps with
+    /// the words instead of starting its own line.
+    private func flowingText(_ runs: [Run], font: Font, fontSize: CGFloat) -> Text {
+        var text: Text?
+        func append(_ next: Text) {
+            text = text.map { $0 + next } ?? next
+        }
+        for run in runs {
+            switch run {
+            case .markdown(let source):
+                // Inline-only keeps spaces and quote line breaks. The full
+                // parser trims both.
+                if let attr = try? AttributedString(
+                    markdown: source,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                ) {
+                    append(Text(attr).font(font))
+                } else {
+                    append(Text(source).font(font))
+                }
+            case .key(let name):
+                let image = KeyCapChrome.image(label: name, fontSize: fontSize)
+                // The image's bottom sits on the baseline. Shift it down by
+                // the font's descender so the cap fills the text line box.
+                let drop = KeyCapChrome.lineBox(fontSize: fontSize).baseline
+                append(Text(Image(nsImage: image)).baselineOffset(drop))
+            }
+        }
+        return text ?? Text("")
+    }
+
     // MARK: - Block assembly (pure)
 
     static func blocks(from markdown: String) -> [Block] {
         var result: [Block] = []
-        func append(_ block: MarkdownBlock) {
-            switch block.kind {
-            case .heading(let level):
-                result.append(.header(level: level, pieces: pieces(from: block.inlines, source: markdown)))
-            case .paragraph:
-                let body = pieces(from: block.inlines, source: markdown)
-                if !body.isEmpty { result.append(.paragraph(body)) }
-            case .listItem(let ordered, let checked, let indent):
-                let marker: String
-                if let checked {
-                    marker = checked ? "☑" : "☐"
-                } else if ordered {
-                    marker = "1."
-                } else {
-                    marker = "•"
+        func append(_ blocks: [MarkdownBlock]) {
+            var nextOrdered = 0
+            for block in blocks {
+                switch block.kind {
+                case .heading(let level):
+                    nextOrdered = 0
+                    result.append(.header(level: level, pieces: pieces(from: block.inlines, source: markdown)))
+                case .paragraph:
+                    nextOrdered = 0
+                    let body = pieces(from: block.inlines, source: markdown)
+                    if !body.isEmpty { result.append(.paragraph(body)) }
+                case .listItem(_, _, let indent):
+                    let marker = MarkdownDocument.listMarker(
+                        for: block, source: markdown, nextOrdered: &nextOrdered
+                    ) ?? "•"
+                    result.append(.listItem(
+                        indent: indent,
+                        marker: marker,
+                        pieces: pieces(from: block.inlines, source: markdown)
+                    ))
+                case .quote:
+                    nextOrdered = 0
+                    let body = pieces(from: block.inlines, source: markdown)
+                    if case .quote(let existing)? = result.last {
+                        result[result.count - 1] = .quote(
+                            Self.coalesced(existing + [.flow([.markdown("\n")])] + body)
+                        )
+                    } else {
+                        result.append(.quote(body))
+                    }
+                case .codeFence:
+                    nextOrdered = 0
+                    let body = block.inlines.compactMap { inline -> String? in
+                        guard case .text(let range) = inline else { return nil }
+                        return String(markdown[range])
+                    }.joined()
+                    result.append(.code(body))
+                case .mathBlock:
+                    nextOrdered = 0
+                    let latex = block.inlines.compactMap { inline -> String? in
+                        guard case .text(let range) = inline else { return nil }
+                        return String(markdown[range])
+                    }.joined()
+                    result.append(.blockMath(latex))
+                case .image(let alt, let url):
+                    nextOrdered = 0
+                    result.append(.image(alt: String(markdown[alt]), urlString: String(markdown[url])))
                 }
-                result.append(.listItem(
-                    indent: indent,
-                    marker: marker,
-                    pieces: pieces(from: block.inlines, source: markdown)
-                ))
-            case .quote:
-                result.append(.quote(pieces(from: block.inlines, source: markdown)))
-            case .codeFence:
-                let body = block.inlines.compactMap { inline -> String? in
-                    guard case .text(let range) = inline else { return nil }
-                    return String(markdown[range])
-                }.joined()
-                result.append(.code(body))
-            case .mathBlock:
-                let latex = block.inlines.compactMap { inline -> String? in
-                    guard case .text(let range) = inline else { return nil }
-                    return String(markdown[range])
-                }.joined()
-                result.append(.blockMath(latex))
-            case .image(let alt, let url):
-                result.append(.image(alt: String(markdown[alt]), urlString: String(markdown[url])))
+                if !block.children.isEmpty { append(block.children) }
             }
-            for child in block.children { append(child) }
         }
-        for block in MarkdownDocument.parse(markdown).blocks { append(block) }
+        append(MarkdownDocument.parse(markdown).blocks)
         return result
     }
 
-    /// Strong, emphasis, code, and links stay as markdown text so
-    /// `AttributedString(markdown:)` is the one inline renderer.
+    /// Bold, code, and links stay markdown so one `Text` wraps the whole run.
+    /// `<kbd>` is a key-cap image in that same run. Math stays its own piece.
     private static func pieces(from inlines: [MarkdownInline], source: String) -> [Piece] {
-        inlines.flatMap { inline -> [Piece] in
+        var result: [Piece] = []
+        for inline in inlines {
             switch inline {
             case .text(let range):
-                let text = String(source[range])
-                return text.isEmpty ? [] : [.text(text)]
+                appendMarkdown(String(source[range]), to: &result)
             case .strong(_, let content, _):
-                return [.text("**" + plain(content, source: source) + "**")]
+                appendMarkdown("**" + plain(content, source: source) + "**", to: &result)
             case .emphasis(_, let content, _):
-                return [.text("*" + plain(content, source: source) + "*")]
+                appendMarkdown("*" + plain(content, source: source) + "*", to: &result)
             case .code(_, let content, _):
-                return [.text("`" + String(source[content]) + "`")]
+                appendMarkdown("`" + String(source[content]) + "`", to: &result)
             case .link(_, let label, _, let url, _):
-                return [.text("[" + plain(label, source: source) + "](" + String(source[url]) + ")")]
+                appendMarkdown(
+                    "[" + plain(label, source: source) + "](" + String(source[url]) + ")",
+                    to: &result
+                )
+            case .kbd(_, let label, _):
+                appendKey(String(source[label]), to: &result)
             case .math(_, let latex, _):
-                return [.inlineMath(String(source[latex]))]
+                let formula = String(source[latex])
+                if !formula.isEmpty { result.append(.inlineMath(formula)) }
             }
         }
+        return result
+    }
+
+    private static func appendMarkdown(_ string: String, to pieces: inout [Piece]) {
+        guard !string.isEmpty else { return }
+        if case .flow(var runs) = pieces.last {
+            if case .markdown(let existing) = runs.last {
+                runs[runs.count - 1] = .markdown(existing + string)
+            } else {
+                runs.append(.markdown(string))
+            }
+            pieces[pieces.count - 1] = .flow(runs)
+        } else {
+            pieces.append(.flow([.markdown(string)]))
+        }
+    }
+
+    private static func appendKey(_ name: String, to pieces: inout [Piece]) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        if case .flow(var runs) = pieces.last {
+            runs.append(.key(trimmed))
+            pieces[pieces.count - 1] = .flow(runs)
+        } else {
+            pieces.append(.flow([.key(trimmed)]))
+        }
+    }
+
+    private static func coalesced(_ pieces: [Piece]) -> [Piece] {
+        var result: [Piece] = []
+        for piece in pieces {
+            switch piece {
+            case .flow(let runs):
+                for run in runs {
+                    switch run {
+                    case .markdown(let string): appendMarkdown(string, to: &result)
+                    case .key(let name): appendKey(name, to: &result)
+                    }
+                }
+            case .inlineMath:
+                result.append(piece)
+            }
+        }
+        return result
     }
 
     private static func plain(_ inlines: [MarkdownInline], source: String) -> String {
         inlines.map { inline -> String in
             switch inline {
-            case .text(let range), .code(_, let range, _), .math(_, let range, _):
+            case .text(let range), .code(_, let range, _), .math(_, let range, _),
+                 .kbd(_, let range, _):
                 return String(source[range])
             case .strong(_, let content, _), .emphasis(_, let content, _):
                 return plain(content, source: source)

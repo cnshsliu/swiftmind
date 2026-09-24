@@ -10,6 +10,135 @@ public struct MarkdownDocument: Equatable, Sendable {
     public static func parse(_ source: String) -> MarkdownDocument {
         MarkdownParser.parse(source)
     }
+
+    /// Display label for one sibling in a list run. `nextOrdered` is 0 at the
+    /// start of a run; the first ordered item sets it, and each following
+    /// ordered item increments it. A bullet or a non-list resets the run.
+    public static func listMarker(
+        for block: MarkdownBlock,
+        source: String,
+        nextOrdered: inout Int
+    ) -> String? {
+        guard case .listItem(let ordered, let checked, _) = block.kind else {
+            nextOrdered = 0
+            return nil
+        }
+        if let checked {
+            nextOrdered = 0
+            return checked ? "☑" : "☐"
+        }
+        if ordered {
+            if nextOrdered == 0 {
+                let digits = source[block.marker].prefix(while: \.isNumber)
+                nextOrdered = Int(digits) ?? 1
+            } else {
+                nextOrdered += 1
+            }
+            return "\(nextOrdered)."
+        }
+        nextOrdered = 0
+        return "•"
+    }
+
+    /// Rewrite each contiguous numbered run so the markers count upward from
+    /// the first item. `1.` / `2.` / `2.` / `3.` becomes `1.` / `2.` / `3.` / `4.`.
+    /// `caret` is a UTF-16 offset and is shifted when a marker before it changes width.
+    public static func renumberOrderedLists(_ source: String, caret: Int) -> (String, Int) {
+        let ns = source as NSString
+        guard ns.length > 0 else { return (source, 0) }
+        var runs: [(indent: Int, next: Int)] = []
+        var output = ""
+        var written = 0
+        var newCaret = min(max(caret, 0), ns.length)
+        var placedCaret = false
+        var index = 0
+        while index < ns.length {
+            let full = ns.lineRange(for: NSRange(location: index, length: 0))
+            let raw = ns.substring(with: full)
+            let newlineLength = raw.hasSuffix("\r\n") ? 2 : (raw.hasSuffix("\n") || raw.hasSuffix("\r") ? 1 : 0)
+            let content = String(raw.dropLast(newlineLength))
+            let ending = String(raw.suffix(newlineLength))
+            let rebuilt = renumberedLine(content, runs: &runs)
+            let lineStart = full.location
+            let lineEnd = full.location + full.length
+            if !placedCaret, caret < lineEnd || (newlineLength == 0 && caret <= lineEnd) {
+                let relative = min(max(caret - lineStart, 0), (content as NSString).length)
+                newCaret = written + min(relative, (rebuilt as NSString).length)
+                if let old = orderedPrefix(content), let updated = orderedPrefix(rebuilt), relative >= old.markerEnd {
+                    let growth = updated.markerEnd - old.markerEnd
+                    newCaret = written + relative + growth
+                }
+                placedCaret = true
+            }
+            output += rebuilt + ending
+            written += (rebuilt as NSString).length + newlineLength
+            index = lineEnd
+        }
+        if !placedCaret {
+            newCaret = min(max(caret, 0) + (written - ns.length), written)
+        }
+        return (output, min(max(newCaret, 0), written))
+    }
+
+    private static func renumberedLine(_ content: String, runs: inout [(indent: Int, next: Int)]) -> String {
+        if content.trimmingCharacters(in: .whitespaces).isEmpty {
+            runs.removeAll()
+            return content
+        }
+        if let bullet = bulletIndent(content) {
+            runs.removeAll { $0.indent >= bullet }
+            return content
+        }
+        guard let item = orderedPrefix(content) else {
+            runs.removeAll()
+            return content
+        }
+        runs.removeAll { $0.indent > item.indent }
+        let number: Int
+        if let index = runs.lastIndex(where: { $0.indent == item.indent }) {
+            number = runs[index].next
+            runs[index].next += 1
+        } else {
+            number = item.number
+            runs.append((indent: item.indent, next: number + 1))
+        }
+        let marker = "\(number). "
+        if marker == item.marker { return content }
+        return String(repeating: " ", count: item.indent) + marker + item.rest
+    }
+
+    private static func bulletIndent(_ content: String) -> Int? {
+        var indent = 0
+        let chars = Array(content)
+        while indent < chars.count, chars[indent] == " " { indent += 1 }
+        guard indent < chars.count else { return nil }
+        let rest = String(chars[indent...])
+        if rest.hasPrefix("- ") || rest.hasPrefix("* ") || rest.hasPrefix("+ ") { return indent }
+        return nil
+    }
+
+    private static func orderedPrefix(_ content: String) -> (indent: Int, number: Int, marker: String, markerEnd: Int, rest: String)? {
+        var indent = 0
+        let chars = Array(content)
+        while indent < chars.count, chars[indent] == " " { indent += 1 }
+        var index = indent
+        var number = 0
+        var digits = 0
+        while index < chars.count, chars[index].isNumber {
+            number = number * 10 + Int(String(chars[index]))!
+            digits += 1
+            index += 1
+        }
+        guard digits > 0, index + 1 < chars.count, chars[index] == ".", chars[index + 1] == " " else { return nil }
+        let markerEnd = index + 2
+        return (
+            indent,
+            number,
+            String(chars[indent..<markerEnd]),
+            markerEnd,
+            String(chars[markerEnd...])
+        )
+    }
 }
 
 public struct MarkdownBlock: Equatable, Sendable {
@@ -59,6 +188,8 @@ public enum MarkdownInline: Equatable, Sendable {
         close: Range<String.Index>
     )
     case math(open: Range<String.Index>, latex: Range<String.Index>, close: Range<String.Index>)
+    /// `<kbd>⌘E</kbd>`. The label is the key name drawn on the cap.
+    case kbd(open: Range<String.Index>, label: Range<String.Index>, close: Range<String.Index>)
 }
 
 enum MarkdownParser {
@@ -87,6 +218,11 @@ enum MarkdownParser {
             }
             let lineEnd = end
             if end < source.endIndex { end = source.index(after: end) }
+            if let math = singleLineMathBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
+                blocks.append(math)
+                index = end
+                continue
+            }
             if let image = imageBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
                 blocks.append(image)
                 index = end
@@ -272,6 +408,27 @@ enum MarkdownParser {
         return nil
     }
 
+    /// `$$\frac{a}{b}$$` on one line. A line that is only `$$` stays the
+    /// multi-line opener handled by `mathBlock`.
+    static func singleLineMathBlock(
+        _ source: String,
+        start: String.Index,
+        lineEnd: String.Index,
+        blockEnd: String.Index
+    ) -> MarkdownBlock? {
+        let line = source[start..<lineEnd]
+        guard line.hasPrefix("$$"), line.hasSuffix("$$"), line.count > 4 else { return nil }
+        let openEnd = source.index(start, offsetBy: 2)
+        let closeStart = source.index(lineEnd, offsetBy: -2)
+        guard openEnd < closeStart else { return nil }
+        return MarkdownBlock(
+            kind: .mathBlock,
+            source: start..<blockEnd,
+            marker: start..<openEnd,
+            inlines: [.text(openEnd..<closeStart)]
+        )
+    }
+
     static func imageBlock(
         _ source: String,
         start: String.Index,
@@ -325,6 +482,13 @@ enum MarkdownParser {
                 flushText(to: index)
                 output.append(.code(open: found.open, content: found.content, close: found.close))
                 index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            if source[index] == "<", let kbd = keyboardTag(source, from: index, limit: range.upperBound) {
+                flushText(to: index)
+                output.append(kbd.inline)
+                index = kbd.end
                 textStart = index
                 continue
             }
@@ -392,6 +556,30 @@ enum MarkdownParser {
             cursor = source.index(after: cursor)
         }
         return nil
+    }
+
+    /// `<kbd>name</kbd>` on one line. The label is plain text, so a `<` inside
+    /// it stays literal instead of swallowing the rest of the paragraph.
+    static func keyboardTag(
+        _ source: String,
+        from index: String.Index,
+        limit: String.Index
+    ) -> (inline: MarkdownInline, end: String.Index)? {
+        let openTag = "<kbd>"
+        let closeTag = "</kbd>"
+        guard source[index..<limit].hasPrefix(openTag) else { return nil }
+        let contentStart = source.index(index, offsetBy: openTag.count)
+        guard contentStart < limit,
+              let close = source[contentStart..<limit].range(of: closeTag) else { return nil }
+        let label = contentStart..<close.lowerBound
+        guard !label.isEmpty,
+              !source[label].contains("\n"),
+              !source[label].contains("<"),
+              !source[label].trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return (
+            inline: .kbd(open: index..<contentStart, label: label, close: close),
+            end: close.upperBound
+        )
     }
 
     static func closedSpan(
