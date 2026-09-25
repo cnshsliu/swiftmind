@@ -2,23 +2,27 @@ import XCTest
 @testable import SwiftMindCore
 
 final class MapGraphDoctorTests: XCTestCase {
-    func testOrphanAndBacklink() throws {
+    func testLinkedNodesAndLonelyLeafAreNotOrphans() throws {
         var map = MindMap.makeEmpty(title: "T")
         let bus = CommandBus()
         let a = NodeID(rawValue: "n_a")
         let b = NodeID(rawValue: "n_b")
-        let c = NodeID(rawValue: "n_orphan")
+        let c = NodeID(rawValue: "n_lonely_leaf")
         try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: a, text: "A", side: .right), on: &map)
         try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: b, text: "B", side: .left), on: &map)
         try bus.execute(InsertChildCommand(parentID: map.root.id, newNodeID: c, text: "Lonely", side: .right), on: &map)
         try bus.execute(SetLinksCommand(nodeID: a, links: [.node(b)]), on: &map)
 
+        // Orphan = unreachable from the root, NOT "leaf without links".
+        // Every node lives under the single root tree, so a well-formed
+        // map has no orphans — a lonely leaf is simply a leaf.
         let graph = MapGraph.analyze(map)
-        XCTAssertTrue(graph.orphans.contains(c))
-        XCTAssertFalse(graph.orphans.contains(a))
-        XCTAssertFalse(graph.orphans.contains(b))
+        XCTAssertTrue(graph.orphans.isEmpty)
+        XCTAssertFalse(FilterEvaluator.matches(map.node(id: c)!, rule: .orphan, graph: graph))
         XCTAssertEqual(graph.backlinks(to: b), [a])
-        XCTAssertTrue(FilterEvaluator.matches(map.node(id: c)!, rule: .orphan, graph: graph))
+
+        let issues = MapDoctor.inspect(map)
+        XCTAssertFalse(issues.contains { $0.kind == .orphan })
     }
 
     func testDanglingLinkAndDoctor() throws {

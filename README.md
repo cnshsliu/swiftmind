@@ -68,7 +68,7 @@ The Debug dev build is a separate "canary" app (bundle id `app.swiftmind.mac.dev
 - **Icons/tags** from a small built-in catalog; shown on the canvas
 - **Search** (⌘F): sidebar field matches node **titles** and **notes**; select a hit to jump
 - **Capture** (⇧⌘I): add a thought to `Inbox.swiftmind.html` in the default library without switching maps; CLI: `swiftmind capture <file> --text "…"`
-- **Orphans / dangling links**: filter `orphan` or `dangling`; status strip marks counts that need you; ⌘K lists `Doctor:` issues; CLI `swiftmind doctor <file>`
+- **Health checks**: `orphan` flags only nodes unreachable from the root (normally none); `dangling` flags dead node-links; status strip marks counts that need you; ⌘K lists `Doctor:` issues; CLI `swiftmind doctor <file>`
 - **Backlinks**: inspector **Linked from** lists nodes that link here
 - **Per-map zoom** is restored on reopen (stored as `preferences.swiftmind.html` in Application Support, not in the document)
 - **Pin / unpin** (⇧⌘P or toolbar): pin freezes layout position; Option+drag moves a pin; unpin restores auto layout

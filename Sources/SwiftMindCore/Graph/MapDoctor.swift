@@ -54,7 +54,7 @@ public enum MapDoctor {
                 issues.append(MapHealthIssue(
                     kind: .orphan,
                     nodeID: node.id,
-                    message: "Orphan: nothing links here and it links nowhere"
+                    message: "Orphan: unreachable from the root"
                 ))
             }
             if let value = engine.result(for: node.id, in: map), case .error(let message) = value {

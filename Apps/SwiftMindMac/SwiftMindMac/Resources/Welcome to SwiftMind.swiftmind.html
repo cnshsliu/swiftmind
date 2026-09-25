@@ -341,8 +341,8 @@ A map is a plain `.swiftmind.html` file — nested lists a browser can already r
             <div class="node-note" hidden="hidden">Canvas and outline, notes with Markdown and a LaTeX subset, live formulas that are *derived* (never stored, never executed as code). Power stays in the file format, not a hidden database.</div>
           </li>
           <li data-node-id="n_help_why_orphan" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
-            <span class="node-title">This node is an orphan — filter `orphan` to find leaves nothing points at</span>
-            <div class="node-note" hidden="hidden">An **orphan** has no children, no links out, and nobody links in. Filter `orphan` (highlight) to see them. `swiftmind doctor` lists the same class of issues.</div>
+            <span class="node-title">Doctor: `orphan` flags only nodes broken away from the root</span>
+            <div class="node-note" hidden="hidden">An **orphan** is a node unreachable from the root. Every node lives in the root&apos;s tree, so a healthy map has none — ordinary leaves are *not* orphans. `swiftmind doctor` also reports empty titles, dangling links, and stale bookmarks.</div>
           </li>
           <li data-node-id="n_help_why_dangle" data-side="auto" data-folded="false" data-font-size="14" data-bold="false" data-text-color="#000000" data-fill-color="">
             <span class="node-title">This node has a dangling node-link — filter `dangling`</span>
