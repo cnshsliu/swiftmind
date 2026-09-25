@@ -79,6 +79,15 @@ struct SwiftMindMacApp: App {
                 }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(appModel.isBrainMode || appModel.currentMapURL == nil)
+
+                // Guideline 4 (App Review, 2026-09-25): the File menu had no
+                // Close item at all. Closing the last window quits the app
+                // (see AppDelegate.applicationShouldTerminateAfterLastWindowClosed),
+                // and relaunch reopens the last map.
+                Button("Close") {
+                    NSApp.keyWindow?.performClose(nil)
+                }
+                .keyboardShortcut("w", modifiers: .command)
             }
 
             CommandGroup(replacing: .undoRedo) {

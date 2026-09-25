@@ -13,6 +13,11 @@ struct ContentView: View {
                     appModel.openMap(at: url)
                 }
             }
+            // Quit-on-last-window-close (AppDelegate) flushes the debounced
+            // autosave so the final edit survives a fast ⌘W.
+            .onReceive(NotificationCenter.default.publisher(for: .swiftMindSaveCurrentMap)) { _ in
+                appModel.saveCurrentMap()
+            }
     }
 }
 

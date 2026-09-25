@@ -29,6 +29,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Guideline 4 (App Review, 2026-09-25): closing the main window used to
+    /// leave the app running with no menu item to reopen it. SwiftMind is a
+    /// single-window document shell, so the sanctioned behavior is to save
+    /// and quit when the last window closes — relaunching (Dock) reopens the
+    /// last map via `AppModel.bootstrap()`.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    /// Last safety net before quitting on window close: flush the current
+    /// map. Autosave is debounced, so a fast ⌘W could otherwise lose the
+    /// final edit.
+    func applicationWillTerminate(_ notification: Notification) {
+        NotificationCenter.default.post(name: .swiftMindSaveCurrentMap, object: nil)
+    }
+
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let name = (filename as NSString).lastPathComponent
         if Self.ignoredDocumentNames.contains(name) {
@@ -51,4 +67,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension Notification.Name {
     static let swiftMindOpenMapURL = Notification.Name("swiftmind.openMapURL")
+    static let swiftMindSaveCurrentMap = Notification.Name("swiftmind.saveCurrentMap")
 }

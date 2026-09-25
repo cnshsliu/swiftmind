@@ -70,6 +70,26 @@ final class SwiftMindMacUITests: XCTestCase {
 
     // MARK: - Tests
 
+    /// Guideline 4 fix (App Review, submission 52afb95c): closing the main
+    /// window left the app running with no menu item to reopen it. The
+    /// sanctioned single-window behavior is to quit when the last window
+    /// closes — Dock relaunch reopens the last map.
+    func testClosingLastWindowQuitsApp() throws {
+        XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 8))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        // File > Close (⌘W) must exist — its absence was the review rejection.
+        let closeItem = app.menuBars.menuBarItems["File"].menuItems["Close"]
+        XCTAssertTrue(closeItem.exists, "File menu must offer Close (⌘W)")
+        app.typeKey("w", modifierFlags: .command)
+        // No window/frame queries after this point: the app is terminating.
+        let terminated = NSPredicate { app, _ in
+            (app as? XCUIApplication)?.state == .notRunning
+        }
+        expectation(for: terminated, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        XCTAssertEqual(app.state, .notRunning)
+    }
+
     func testLaunchHasWindow() throws {
         XCTAssertGreaterThan(app.windows.count, 0, "App should show at least one window")
     }
