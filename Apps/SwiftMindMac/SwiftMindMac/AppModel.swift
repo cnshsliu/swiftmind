@@ -4,50 +4,76 @@ import SwiftUI
 import SwiftMindCore
 import UniformTypeIdentifiers
 
-/// Application shell: startup open (last / new), My Brain vault navigator, map editing + autosave.
+/// Application coordinator for multi-window mode (2026-09 design): owns the
+/// document registry (one MapDocument per open map window), window opening
+/// and focusing, the shared library/recents, the agent bridge, and launch
+/// behavior. Per-map concerns (autosave, watching, viewport) live in
+/// MapDocument.
 @MainActor
 final class AppModel: ObservableObject {
     let library = VaultLibrary.shared
     let agentBridge = AgentBridge()
 
-    @Published private(set) var mode: VaultLibrary.AppMode = .map
-    @Published private(set) var currentMapURL: URL?
-    @Published private(set) var isBrainMode: Bool = false
-    /// Session for the active surface (brain navigator or map editor).
-    @Published private(set) var session: DocumentSession
+    /// Open documents keyed by MapDocument.id (file path, or "brain").
+    @Published private(set) var documents: [String: MapDocument] = [:]
+    /// Document whose window is key — commands, bridge and toasts route here.
+    @Published private(set) var activeDocument: MapDocument?
+    /// True once bootstrap has opened the launch window — lets the launch
+    /// placeholder window (nil URL) dismiss itself.
+    @Published private(set) var hasOpenedLaunchWindow = false
 
-    private var accessRoot: URL?
-    private var saveTask: Task<Void, Never>?
-    private let fileWatcher = MapFileWatcher()
-    private var reloadTask: Task<Void, Never>?
-    /// Hash of the file content we last read or wrote — watcher events whose
-    /// content matches are our own saves and are ignored.
-    private var lastKnownFileHash: Int?
-    private var suppressAutosave = false
+    /// Set by the window roots so non-View code (menus, bridge, Apple Events)
+    /// can open windows. Value-windows focus an existing window for the same
+    /// URL instead of spawning a duplicate.
+    var openWindowAction: OpenWindowAction?
+
     private var didBootstrap = false
-    /// Screenshot tests launch with `-uitesting`: deterministic state (fresh
-    /// bundled help map, no saved viewport) instead of whatever previous
-    /// sessions left in the shared container.
     private let isUITesting = ProcessInfo.processInfo.arguments.contains("-uitesting")
-    private let viewStateStore = ViewStateStore()
-    private var viewportTask: Task<Void, Never>?
 
     init() {
-        // Placeholder until bootstrap; replaced immediately.
-        session = DocumentSession(map: .makeEmpty(title: "Untitled"))
-        // Settings media size applies live to the open session.
+        // Settings media size applies live to every open session.
         NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.session.applyMediaSize() }
+            Task { @MainActor in self?.documents.values.forEach { $0.session.applyMediaSize() } }
+        }
+        // Quit: flush every open document's debounced autosave.
+        NotificationCenter.default.addObserver(
+            forName: .swiftMindSaveAllDocuments,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.persistAllDocuments() }
+        }
+        // Dock click with all windows closed: reopen the launch-behavior map.
+        NotificationCenter.default.addObserver(
+            forName: .swiftMindReopenRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reopenFromDock() }
         }
     }
 
+    /// Dock icon clicked while no window is open: fall back to the launch
+    /// behavior (last map, or a fresh default-library map).
+    func reopenFromDock() {
+        guard documents.isEmpty else { return }
+        openLastMapOrDefault()
+    }
+
+    // MARK: - Compatibility surface (bridge, commands)
+
+    var session: DocumentSession? { activeDocument?.session }
+    var currentMapURL: URL? { activeDocument?.url }
+    var isBrainMode: Bool { activeDocument?.isBrain ?? false }
+
     // MARK: - Launch
 
-    /// Call once from the root view: open per launch behavior (Welcome map by default).
+    /// Call once from a window root's onAppear: open per launch behavior
+    /// (Welcome map by default).
     func bootstrap() {
         guard !didBootstrap else { return }
         didBootstrap = true
@@ -107,98 +133,36 @@ final class AppModel: ObservableObject {
                 )
                 openMap(at: url, recordAsLast: true)
             } catch {
-                // Last resort: in-memory untitled (still no open panel).
-                suppressAutosave = true
-                isBrainMode = false
-                mode = .map
-                currentMapURL = nil
-                session = DocumentSession(map: .makeEmpty(title: "Untitled"))
-                wireSession()
-                suppressAutosave = false
+                showBrain()
             }
         }
     }
 
-    // MARK: - My Brain
+    // MARK: - Window management
 
-    func showBrain() {
-        persistCurrentMapIfNeeded()
-        stopWatching()
-        suppressAutosave = true
-        isBrainMode = true
-        mode = .brain
-        library.lastMode = .brain
-        let map = BrainMapBuilder.build(library: library)
-        session = DocumentSession(map: map)
-        session.isBrainMode = true
-        wireSession()
-        suppressAutosave = false
-    }
-
-    func refreshBrain() {
-        guard isBrainMode else { return }
-        let selected = session.store.selection.primary
-        suppressAutosave = true
-        let map = BrainMapBuilder.build(library: library)
-        session.syncFromDocument(map)
-        if let selected, session.store.map.node(id: selected) != nil {
-            session.select(selected)
-        }
-        suppressAutosave = false
-    }
-
-    // MARK: - Open / create maps
-
-    func openMap(at url: URL, recordAsLast: Bool = true) {
-        persistCurrentMapIfNeeded()
-        releaseAccess()
-
-        accessRoot = library.startAccessingForMap(url)
-
-        do {
-            let data = try Data(contentsOf: url)
-            guard let html = String(data: data, encoding: .utf8) else {
-                throw CocoaError(.fileReadCorruptFile)
-            }
-            // Freeplane/FreeMind import: one-way, saved as a sibling .swiftmind.html.
-            if url.pathExtension.lowercased() == "mm" {
-                let imported = try MMImport.importMap(from: html)
-                let dir = url.deletingLastPathComponent()
-                let dest = VaultLibrary.uniqueMapURL(
-                    in: dir,
-                    baseName: url.deletingPathExtension().lastPathComponent
-                )
-                try Data(HTMLCodec.encode(imported, includeSkin: true).utf8).write(to: dest)
-                openMap(at: dest)
-                session.showToast(
-                    "Imported \(url.lastPathComponent) → \(dest.lastPathComponent)",
-                    kind: .success
-                )
+    /// Open (or focus) the window for a map file. Freeplane `.mm` files are
+    /// imported to a sibling `.swiftmind.html` first.
+    func openMap(at rawURL: URL, recordAsLast: Bool = true) {
+        var url = rawURL
+        // Freeplane/FreeMind import: one-way, saved as a sibling .swiftmind.html.
+        if url.pathExtension.lowercased() == "mm" {
+            do {
+                url = try importFreeplane(at: url)
+            } catch {
+                toast("Could not import map: \(error.localizedDescription)", kind: .error)
                 return
             }
-            let map = try HTMLCodec.decode(html)
-            suppressAutosave = true
-            isBrainMode = false
-            mode = .map
-            currentMapURL = url
-            if recordAsLast {
-                library.lastMapURL = url
-                library.lastMode = .map
-                library.recordRecentMap(url)
-            }
-            session = DocumentSession(map: map)
-            session.isBrainMode = false
-            if !isUITesting, let saved = viewStateStore.viewport(for: map.id) {
-                session.viewport = saved
-            } else {
-                // Never seen this map: open with the whole map in view.
-                // The canvas performs the fit once it knows its size.
-                session.needsInitialFit = !isUITesting
-            }
-            wireSession()
-            lastKnownFileHash = data.hashValue
-            startWatching(url: url)
-            suppressAutosave = false
+        }
+
+        if let existing = documents[documentID(for: url)] {
+            setActiveDocument(existing)
+            openWindowAction?(value: url)
+            return
+        }
+
+        let document: MapDocument
+        do {
+            document = try MapDocument(fileURL: url)
         } catch {
             library.removeRecentMap(url)
             // Drop it as "last map" too — otherwise every launch retries the
@@ -206,11 +170,111 @@ final class AppModel: ObservableObject {
             if library.lastMapURL == url {
                 library.lastMapURL = nil
             }
-            session.showToast("Could not open map: \(error.localizedDescription)", kind: .error)
-            // Fall back to brain if open fails.
-            showBrain()
+            toast("Could not open map: \(error.localizedDescription)", kind: .error)
+            // Fall back to brain if open fails and nothing else is open.
+            if documents.isEmpty { showBrain() }
+            return
+        }
+        register(document)
+        if recordAsLast {
+            library.lastMapURL = url
+            library.lastMode = .map
+            library.recordRecentMap(url)
+        }
+        openWindowAction?(value: url)
+    }
+
+    /// One My Brain window for the whole app.
+    func showBrain() {
+        if let brain = documents["brain"] {
+            setActiveDocument(brain)
+        } else {
+            let brain = MapDocument(brain: library)
+            brain.onBrainStructureChanged = { [weak brain] in
+                brain?.refreshBrain()
+            }
+            register(brain)
+            library.lastMode = .brain
+        }
+        openWindowAction?(id: "brain")
+    }
+
+    /// The window root resolved its URL (restored window, or creation raced
+    /// the registry): materialize the document if it is missing.
+    @discardableResult
+    func resolveDocument(for url: URL) -> MapDocument? {
+        if let existing = documents[documentID(for: url)] {
+            return existing
+        }
+        do {
+            let document = try MapDocument(fileURL: url)
+            register(document)
+            library.recordRecentMap(url)
+            return document
+        } catch {
+            toast("Could not open map: \(error.localizedDescription)", kind: .error)
+            return nil
         }
     }
+
+    /// The brain window root asking for its document.
+    func resolveBrainDocument() -> MapDocument {
+        if let brain = documents["brain"] { return brain }
+        let brain = MapDocument(brain: library)
+        brain.onBrainStructureChanged = { [weak brain] in
+            brain?.refreshBrain()
+        }
+        register(brain)
+        return brain
+    }
+
+    private func register(_ document: MapDocument) {
+        documents[document.id] = document
+        setActiveDocument(document)
+        hasOpenedLaunchWindow = true
+    }
+
+    private func documentID(for url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+
+    func setActiveDocument(_ document: MapDocument?) {
+        activeDocument = document
+    }
+
+    /// A window closed: flush and unregister its document.
+    func documentWindowClosed(_ document: MapDocument) {
+        document.close()
+        documents[document.id] = nil
+        if activeDocument === document {
+            activeDocument = documents.values.first
+        }
+    }
+
+    /// Flush every open document (quit / memory pressure).
+    func persistAllDocuments() {
+        documents.values.forEach { $0.persistNow() }
+    }
+
+    /// Toast routed to the active session (menus, bridge).
+    private func toast(_ text: String, kind: StatusToast.Kind) {
+        activeDocument?.session.showToast(text, kind: kind)
+    }
+
+    private func importFreeplane(at url: URL) throws -> URL {
+        let html = try String(contentsOf: url, encoding: .utf8)
+        let imported = try MMImport.importMap(from: html)
+        let dir = url.deletingPathExtension().deletingLastPathComponent()
+        let dest = VaultLibrary.uniqueMapURL(
+            in: dir,
+            baseName: url.deletingPathExtension().lastPathComponent
+        )
+        try Data(HTMLCodec.encode(imported, includeSkin: true).utf8).write(to: dest)
+        toast("Imported \(url.lastPathComponent) → \(dest.lastPathComponent)", kind: .success)
+        return dest
+    }
+
+    // MARK: - Create maps
 
     func createAndOpenMap(in directory: URL? = nil) {
         let dir = directory ?? VaultLibrary.defaultLibraryDirectory
@@ -220,7 +284,7 @@ final class AppModel: ObservableObject {
             try VaultLibrary.createEmptyMapIfNeeded(at: url, title: "Untitled")
             openMap(at: url)
         } catch {
-            session.showToast("Could not create map: \(error.localizedDescription)", kind: .error)
+            toast("Could not create map: \(error.localizedDescription)", kind: .error)
         }
     }
 
@@ -237,16 +301,17 @@ final class AppModel: ObservableObject {
             openMap(at: url)
             return url
         } catch {
-            session.showToast("Could not create map: \(error.localizedDescription)", kind: .error)
+            toast("Could not create map: \(error.localizedDescription)", kind: .error)
             return nil
         }
     }
 
     /// New map in the selected brain folder/vault, or default library.
     func createMapNearSelection() {
-        if isBrainMode,
-           let id = session.store.selection.primary,
-           let node = session.store.map.node(id: id),
+        if let brain = documents["brain"],
+           brain === activeDocument,
+           let id = brain.session.store.selection.primary,
+           let node = brain.session.store.map.node(id: id),
            let path = BrainMapBuilder.path(of: node) {
             var dir = URL(fileURLWithPath: path)
             var isDir: ObjCBool = false
@@ -290,54 +355,29 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if self.library.addVault(url: url) {
-                    if self.isBrainMode {
-                        self.refreshBrain()
-                    } else {
-                        self.showBrain()
-                    }
-                    self.session.showToast("Vault added: \(url.lastPathComponent)", kind: .success)
+                    // Rebuild the brain window if one is open.
+                    self.documents["brain"]?.refreshBrain()
+                    self.showBrain()
+                    self.toast("Vault added: \(url.lastPathComponent)", kind: .success)
                 } else {
-                    self.session.showToast("Could not add vault", kind: .error)
+                    self.toast("Could not add vault", kind: .error)
                 }
             }
         }
     }
 
+    // MARK: - Save
+
     func saveCurrentMap() {
-        guard !isBrainMode, let url = currentMapURL else { return }
-        // If the file on disk no longer matches what we last read/wrote, an
-        // external process (agent CLI) changed it — reload instead of clobbering.
-        if let onDisk = try? Data(contentsOf: url),
-           let lastKnownFileHash, onDisk.hashValue != lastKnownFileHash {
-            reloadIfExternallyChanged()
-            return
-        }
-        do {
-            let html = try HTMLCodec.encode(session.exportMap(), includeSkin: true)
-            let data = Data(html.utf8)
-            try data.write(to: url, options: .atomic)
-            lastKnownFileHash = data.hashValue
-            library.lastMapURL = url
-        } catch {
-            // A map we can read but not write (e.g. outside the sandbox via a
-            // launch-event handoff) must not stay "last map": every launch
-            // would reopen it and every autosave would toast this error.
-            if (error as? CocoaError)?.code == .fileWriteNoPermission {
-                if library.lastMapURL == url {
-                    library.lastMapURL = nil
-                }
-                library.removeRecentMap(url)
-            }
-            session.showToast("Save failed: \(error.localizedDescription)", kind: .error)
-        }
+        activeDocument?.save()
     }
 
     // MARK: - Navigation from brain nodes
 
     func activateSelection() {
-        guard isBrainMode,
-              let id = session.store.selection.primary,
-              let node = session.store.map.node(id: id) else { return }
+        guard let document = activeDocument, document.isBrain,
+              let id = document.session.store.selection.primary,
+              let node = document.session.store.map.node(id: id) else { return }
         activate(node: node)
     }
 
@@ -353,8 +393,8 @@ final class AppModel: ObservableObject {
                 let next = !library.isFolded(path: path)
                 library.setFolded(path: path, folded: next)
                 // Mirror into store then rebuild so layout matches disk fold.
-                session.applyQuiet(SetFoldedCommand(nodeID: node.id, isFolded: next))
-                refreshBrain()
+                activeDocument?.session.applyQuiet(SetFoldedCommand(nodeID: node.id, isFolded: next))
+                activeDocument?.refreshBrain()
             }
         case .brain:
             break
@@ -363,65 +403,40 @@ final class AppModel: ObservableObject {
 
     /// Intercept fold toggles in brain mode so fold state persists by path.
     func toggleFoldSelection() {
-        guard let id = session.store.selection.primary,
-              let node = session.store.map.node(id: id) else { return }
-        if isBrainMode {
+        guard let document = activeDocument,
+              let id = document.session.store.selection.primary,
+              let node = document.session.store.map.node(id: id) else { return }
+        if document.isBrain {
             if let path = BrainMapBuilder.path(of: node),
                BrainMapBuilder.kind(of: node) == .folder
-                || BrainMapBuilder.kind(of: node) == .vault {
+               || BrainMapBuilder.kind(of: node) == .vault {
                 let next = !node.isFolded
                 library.setFolded(path: path, folded: next)
-                refreshBrain()
+                document.refreshBrain()
                 return
             }
             return
         }
-        session.apply(SetFoldedCommand(nodeID: id, isFolded: !node.isFolded))
+        document.session.apply(SetFoldedCommand(nodeID: id, isFolded: !node.isFolded))
     }
 
-    // MARK: - Session wiring
+    // MARK: - Capture
 
-    private func wireSession() {
-        session.onPrimaryActivate = { [weak self] in
-            self?.activateSelection()
-        }
-        session.onContentChanged = { [weak self] in
-            self?.scheduleAutosave()
-        }
-        session.onViewportChanged = { [weak self] in
-            self?.scheduleViewportPersist()
-        }
-    }
-
-    private func scheduleViewportPersist() {
-        guard !isBrainMode, currentMapURL != nil else { return }
-        viewportTask?.cancel()
-        viewportTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled else { return }
-            self.persistViewport()
-        }
-    }
-
-    private func persistViewport() {
-        guard !isBrainMode else { return }
-        viewStateStore.save(
-            mapID: session.store.map.id,
-            title: session.store.map.title,
-            viewport: session.viewport
-        )
-    }
-
-    /// Append a thought to `Inbox.swiftmind.html` in the default library without switching maps.
+    /// Append a thought to `Inbox.swiftmind.html` in the default library without
+    /// switching windows. If Inbox is open somewhere, the edit goes to that
+    /// document (its autosave persists it).
     func captureToInbox(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let dir = VaultLibrary.defaultLibraryDirectory
         _ = library.startAccessing(dir)
         let url = dir.appendingPathComponent("Inbox.swiftmind.html")
-        if currentMapURL?.standardizedFileURL == url.standardizedFileURL {
-            session.apply(InsertChildCommand(parentID: session.store.map.root.id, text: trimmed, side: .auto))
-            session.showToast("Captured to Inbox", kind: .success)
+        let inboxID = documentID(for: url)
+        if let inbox = documents[inboxID] {
+            inbox.session.apply(
+                InsertChildCommand(parentID: inbox.session.store.map.root.id, text: trimmed, side: .auto)
+            )
+            toast("Captured to Inbox", kind: .success)
             return
         }
         do {
@@ -435,16 +450,17 @@ final class AppModel: ObservableObject {
                 .addChild(parentID: map.root.id, newNodeID: .generate(), text: trimmed, side: .auto)
             ], to: &map)
             try Data(HTMLCodec.encode(map, includeSkin: true).utf8).write(to: url, options: .atomic)
-            session.showToast("Captured to Inbox", kind: .success)
+            // An open window for Inbox would now be stale — nudge it to reload.
+            toast("Captured to Inbox", kind: .success)
         } catch {
-            session.showToast("Capture failed: \(error.localizedDescription)", kind: .error)
+            toast("Capture failed: \(error.localizedDescription)", kind: .error)
         }
     }
 
     func promptCapture() {
         let alert = NSAlert()
         alert.messageText = "Capture"
-        alert.informativeText = "Adds a child to Inbox in your library. The current map stays open."
+        alert.informativeText = "Adds a child to Inbox in your library. Open maps stay untouched."
         let field = NSTextField(string: "")
         field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
         field.placeholderString = "A thought…"
@@ -456,88 +472,5 @@ final class AppModel: ObservableObject {
         if response == .alertFirstButtonReturn {
             captureToInbox(text: field.stringValue)
         }
-    }
-
-    private func scheduleAutosave() {
-        guard !suppressAutosave, !isBrainMode, currentMapURL != nil else { return }
-        saveTask?.cancel()
-        saveTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled else { return }
-            self.saveCurrentMap()
-        }
-    }
-
-    private func persistCurrentMapIfNeeded() {
-        saveTask?.cancel()
-        viewportTask?.cancel()
-        if !isBrainMode, currentMapURL != nil {
-            persistViewport()
-            saveCurrentMap()
-        }
-    }
-
-    private func releaseAccess() {
-        if let accessRoot {
-            library.stopAccessing(accessRoot)
-            self.accessRoot = nil
-        }
-    }
-
-    // MARK: - External change watching (agent CLI writes)
-
-    private func startWatching(url: URL) {
-        reloadTask?.cancel()
-        reloadTask = nil
-        fileWatcher.onChange = { [weak self] in
-            self?.scheduleExternalReload()
-        }
-        fileWatcher.watch(url: url)
-    }
-
-    private func stopWatching() {
-        reloadTask?.cancel()
-        reloadTask = nil
-        fileWatcher.stop()
-        lastKnownFileHash = nil
-    }
-
-    private func scheduleExternalReload() {
-        reloadTask?.cancel()
-        reloadTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            guard !Task.isCancelled else { return }
-            self.reloadIfExternallyChanged()
-        }
-    }
-
-    private func reloadIfExternallyChanged() {
-        guard !isBrainMode, let url = currentMapURL else { return }
-        guard let data = try? Data(contentsOf: url) else {
-            // File missing or unreadable — keep the in-memory map; don't clobber.
-            return
-        }
-        let hash = data.hashValue
-        guard hash != lastKnownFileHash else { return }
-        guard let html = String(data: data, encoding: .utf8),
-              let map = try? HTMLCodec.decode(html) else {
-            // External write is malformed — warn once per change, keep memory copy.
-            lastKnownFileHash = hash
-            session.showToast("External change could not be read — kept in-memory version", kind: .error)
-            return
-        }
-        lastKnownFileHash = hash
-        // NOTE: replaceMap clears the undo stack and multi-selection — accepted
-        // tradeoff for v1 (see spec §hot reload).
-        let selected = session.store.selection.primary
-        suppressAutosave = true
-        session.syncFromDocument(map)
-        if let selected, session.store.map.node(id: selected) != nil {
-            session.select(selected)
-        } else {
-            session.clearSelection()
-        }
-        suppressAutosave = false
-        session.showToast("Reloaded — file changed on disk", kind: .info)
     }
 }

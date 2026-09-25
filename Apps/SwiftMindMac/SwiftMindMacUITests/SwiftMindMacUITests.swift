@@ -70,24 +70,31 @@ final class SwiftMindMacUITests: XCTestCase {
 
     // MARK: - Tests
 
-    /// Guideline 4 fix (App Review, submission 52afb95c): closing the main
-    /// window left the app running with no menu item to reopen it. The
-    /// sanctioned single-window behavior is to quit when the last window
-    /// closes — Dock relaunch reopens the last map.
-    func testClosingLastWindowQuitsApp() throws {
+    /// Multi-window behavior (2026-09 design, replaces the withdrawn
+    /// quit-on-close fix): closing the last window leaves the app running
+    /// Word-style, and File > New Map reopens a window — that menu path is
+    /// what App Review guideline 4 requires. NOT YET RUN (deferred).
+    func testClosingLastWindowLeavesAppRunningAndNewMapReopens() throws {
         XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 8))
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         // File > Close (⌘W) must exist — its absence was the review rejection.
         let closeItem = app.menuBars.menuBarItems["File"].menuItems["Close"]
         XCTAssertTrue(closeItem.exists, "File menu must offer Close (⌘W)")
         app.typeKey("w", modifierFlags: .command)
-        // No window/frame queries after this point: the app is terminating.
-        let terminated = NSPredicate { app, _ in
-            (app as? XCUIApplication)?.state == .notRunning
+
+        // App stays running with zero windows…
+        let windowsGone = NSPredicate { app, _ in
+            guard let app = app as? XCUIApplication else { return false }
+            return app.state == .runningForeground && app.windows.count == 0
         }
-        expectation(for: terminated, evaluatedWith: app)
+        expectation(for: windowsGone, evaluatedWith: app)
         waitForExpectations(timeout: 8)
-        XCTAssertEqual(app.state, .notRunning)
+        XCTAssertEqual(app.state, .runningForeground, "closing the last window must not quit the app")
+
+        // …and the menu can open one again.
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(element("mapCanvas").waitForExistence(timeout: 8),
+                      "File > New Map must reopen a window after all windows were closed")
     }
 
     func testLaunchHasWindow() throws {

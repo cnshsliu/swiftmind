@@ -252,7 +252,10 @@ final class AgentBridge {
         guard let appModel else {
             throw BridgeFailure(code: "no_session", message: "app is shutting down")
         }
-        let session = appModel.session
+        // Multi-window: the key window's document is the bridge target.
+        guard let session = appModel.session else {
+            throw BridgeFailure(code: "no_session", message: "no map window is open")
+        }
         switch method {
         case "read":
             return AgentProtocol.mapJSON(

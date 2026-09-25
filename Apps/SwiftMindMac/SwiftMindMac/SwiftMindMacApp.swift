@@ -24,12 +24,12 @@ struct SwiftMindMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView(appModel: appModel)
+        // One value-window per open map file (multi-window mode). The launch
+        // window arrives with a nil URL, bootstrap opens the launch-behavior
+        // map, and the placeholder closes itself.
+        WindowGroup(for: URL.self) { $url in
+            MapWindowRoot(appModel: appModel, url: url)
                 .environmentObject(appModel)
-                .onAppear {
-                    appModel.bootstrap()
-                }
         }
         .windowToolbarStyle(.unified)
         .commands {
@@ -115,6 +115,13 @@ struct SwiftMindMacApp: App {
             SettingsView()
                 .environmentObject(appModel)
         }
+
+        // The single My Brain vault-navigator window.
+        Window("My Brain", id: "brain") {
+            BrainWindowRoot(appModel: appModel)
+                .environmentObject(appModel)
+        }
+        .windowToolbarStyle(.unified)
     }
 }
 

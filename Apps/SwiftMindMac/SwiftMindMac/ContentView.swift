@@ -1,30 +1,78 @@
 import SwiftUI
 import SwiftMindCore
 
-struct ContentView: View {
+/// Root of a value-window (one per open map file). The launch window arrives
+/// with `nil` — it adopts the launch-behavior map via bootstrap and closes
+/// itself once a real window exists.
+struct MapWindowRoot: View {
     @ObservedObject var appModel: AppModel
+    let url: URL?
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var document: MapDocument?
 
     var body: some View {
-        // Recreate when session instance swaps (brain ↔ map).
-        SessionWorkspace(appModel: appModel, session: appModel.session)
-            .id(ObjectIdentifier(appModel.session))
-            .onReceive(NotificationCenter.default.publisher(for: .swiftMindOpenMapURL)) { note in
-                if let url = note.object as? URL {
-                    appModel.openMap(at: url)
-                }
+        Group {
+            if let document {
+                SessionWorkspace(appModel: appModel, document: document)
+            } else {
+                ProgressView()
+                    .frame(minWidth: 780, minHeight: 480)
             }
-            // Quit-on-last-window-close (AppDelegate) flushes the debounced
-            // autosave so the final edit survives a fast ⌘W.
-            .onReceive(NotificationCenter.default.publisher(for: .swiftMindSaveCurrentMap)) { _ in
-                appModel.saveCurrentMap()
+        }
+        .onAppear {
+            appModel.openWindowAction = openWindow
+            appModel.bootstrap()
+            if let url {
+                document = appModel.resolveDocument(for: url)
+                if let document { appModel.setActiveDocument(document) }
+            } else if appModel.hasOpenedLaunchWindow {
+                // A real window already exists (this one raced bootstrap).
+                dismissWindow()
             }
+        }
+        .onChange(of: appModel.hasOpenedLaunchWindow) { _, opened in
+            // Launch placeholder: once bootstrap opened the real window, go away.
+            if url == nil, opened { dismissWindow() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindOpenMapURL)) { note in
+            if let url = note.object as? URL {
+                appModel.openMap(at: url)
+            }
+        }
     }
 }
 
-/// Bound to a concrete `DocumentSession` for the lifetime of that session object.
+/// Root of the single My Brain window.
+struct BrainWindowRoot: View {
+    @ObservedObject var appModel: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var document: MapDocument?
+
+    var body: some View {
+        Group {
+            if let document {
+                SessionWorkspace(appModel: appModel, document: document)
+            } else {
+                ProgressView()
+                    .frame(minWidth: 780, minHeight: 480)
+            }
+        }
+        .onAppear {
+            appModel.openWindowAction = openWindow
+            appModel.bootstrap()
+            document = appModel.resolveBrainDocument()
+            appModel.setActiveDocument(document)
+        }
+    }
+}
+
+/// Bound to one open document (a map file or the brain navigator) for the
+/// lifetime of its window.
 private struct SessionWorkspace: View {
     @ObservedObject var appModel: AppModel
-    @ObservedObject var session: DocumentSession
+    @ObservedObject var document: MapDocument
+    @ObservedObject private var session: DocumentSession
 
     @State private var inspectorPresented = true
     @State private var searchQuery = ""
@@ -34,10 +82,11 @@ private struct SessionWorkspace: View {
     @FocusState private var searchFocused: Bool
     @FocusState private var mapTitleFocused: Bool
 
-    init(appModel: AppModel, session: DocumentSession) {
+    init(appModel: AppModel, document: MapDocument) {
         self.appModel = appModel
-        self.session = session
-        _mapTitleDraft = State(initialValue: session.store.map.title)
+        self.document = document
+        self.session = document.session
+        _mapTitleDraft = State(initialValue: document.session.store.map.title)
     }
 
     private var nodeCount: Int {
@@ -60,8 +109,8 @@ private struct SessionWorkspace: View {
     }
 
     private var windowTitle: String {
-        if session.isBrainMode { return "My Brain" }
-        if let url = appModel.currentMapURL {
+        if document.isBrain { return "My Brain" }
+        if let url = document.url {
             var name = url.lastPathComponent
             if name.hasSuffix(".swiftmind.html") {
                 name = String(name.dropLast(".swiftmind.html".count))
@@ -166,6 +215,15 @@ private struct SessionWorkspace: View {
         .focusedSceneValue(\.documentSession, session)
         .focusedSceneValue(\.presentCommandPalette, $palettePresented)
         .focusedSceneValue(\.appModel, appModel)
+        .background(
+            // Multi-window routing: this window becoming key makes its
+            // document the active one (menus, bridge, toasts); closing it
+            // flushes and unregisters the document.
+            WindowLifecycleReporter(
+                onBecameKey: { appModel.setActiveDocument(document) },
+                onWillClose: { appModel.documentWindowClosed(document) }
+            )
+        )
         .modifier(MapSearchableModifier(
             enabled: !session.isBrainMode,
             query: $searchQuery,
@@ -215,7 +273,7 @@ private struct SessionWorkspace: View {
                         .onChange(of: mapTitleFocused) { _, focused in
                             if !focused { commitMapTitle() }
                         }
-                    if let url = appModel.currentMapURL {
+                    if let url = document.url {
                         Text(url.path.replacingOccurrences(
                             of: FileManager.default.homeDirectoryForCurrentUser.path,
                             with: "~"
@@ -474,6 +532,58 @@ private struct MapSearchableModifier: ViewModifier {
                 }
         } else {
             content
+        }
+    }
+}
+
+/// Reports its window's key/close events so AppModel can route "active
+/// document" per window. NSView-based because SwiftUI has no per-window
+/// key notification.
+private struct WindowLifecycleReporter: NSViewRepresentable {
+    let onBecameKey: () -> Void
+    let onWillClose: () -> Void
+
+    func makeNSView(context: Context) -> ReporterView {
+        let view = ReporterView()
+        view.onBecameKey = onBecameKey
+        view.onWillClose = onWillClose
+        return view
+    }
+
+    func updateNSView(_ view: ReporterView, context: Context) {
+        view.onBecameKey = onBecameKey
+        view.onWillClose = onWillClose
+    }
+
+    final class ReporterView: NSView {
+        var onBecameKey: (() -> Void)?
+        var onWillClose: (() -> Void)?
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers = []
+            guard let window else { return }
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.didBecomeKeyNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in self?.onBecameKey?() }
+                }
+            )
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.willCloseNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in self?.onWillClose?() }
+                }
+            )
         }
     }
 }

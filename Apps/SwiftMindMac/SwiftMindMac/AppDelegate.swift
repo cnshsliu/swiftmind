@@ -23,26 +23,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            // Ensure at least one window (SwiftUI WindowGroup will create on demand).
-            return true
+            // All windows closed but the app is still running (Word-style
+            // multi-window): Dock click reopens the last map / My Brain.
+            NotificationCenter.default.post(name: .swiftMindReopenRequested, object: nil)
         }
         return true
     }
 
-    /// Guideline 4 (App Review, 2026-09-25): closing the main window used to
-    /// leave the app running with no menu item to reopen it. SwiftMind is a
-    /// single-window document shell, so the sanctioned behavior is to save
-    /// and quit when the last window closes — relaunching (Dock) reopens the
-    /// last map via `AppModel.bootstrap()`.
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
-    }
+    /// Multi-window mode: closing the last window leaves the app running —
+    /// File > New Map / Open / Dock click all reopen windows, which is what
+    /// App Review's guideline-4 note asks for. No quit-on-last-close.
 
-    /// Last safety net before quitting on window close: flush the current
-    /// map. Autosave is debounced, so a fast ⌘W could otherwise lose the
-    /// final edit.
+    /// Flush every open document before quitting (autosave is debounced, so
+    /// a fast quit could otherwise lose the last edit).
     func applicationWillTerminate(_ notification: Notification) {
-        NotificationCenter.default.post(name: .swiftMindSaveCurrentMap, object: nil)
+        NotificationCenter.default.post(name: .swiftMindSaveAllDocuments, object: nil)
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
@@ -67,5 +62,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension Notification.Name {
     static let swiftMindOpenMapURL = Notification.Name("swiftmind.openMapURL")
-    static let swiftMindSaveCurrentMap = Notification.Name("swiftmind.saveCurrentMap")
+    static let swiftMindSaveAllDocuments = Notification.Name("swiftmind.saveAllDocuments")
+    static let swiftMindReopenRequested = Notification.Name("swiftmind.reopenRequested")
 }
