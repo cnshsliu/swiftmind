@@ -182,6 +182,8 @@ struct MarkdownEditorView: NSViewRepresentable {
         /// the text view must not apply a second edit.
         func insertTyped(_ text: String) {
             guard let textView else { return }
+            // Never act on a stale session baseline — flush pending typing.
+            ingestTextViewEdits()
             let selected = textView.selectedRange()
             session.setSelection(selected.location..<(selected.location + selected.length))
             session.insert(text)
@@ -193,6 +195,8 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         func perform(_ command: MarkdownSourceTextView.Command) {
             guard let textView else { return }
+            // Never act on a stale session baseline — flush pending typing.
+            ingestTextViewEdits()
             let selected = textView.selectedRange()
             session.setSelection(selected.location..<(selected.location + selected.length))
             switch command {
@@ -289,6 +293,17 @@ struct MarkdownEditorView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard !isProgrammaticUpdate,
                   let textView = notification.object as? MarkdownSourceTextView else { return }
+            ingestTextViewEdits()
+        }
+
+        /// Pull any edits sitting in the text view into the session. Split
+        /// out of textDidChange so command/insert handlers can run it FIRST —
+        /// under fast (synthesized) typing, a Return command can otherwise
+        /// act on a session baseline that misses the last few characters,
+        /// and the belated textDidChange then splices against a stale
+        /// display, moving and duplicating lines.
+        func ingestTextViewEdits() {
+            guard let textView, !isProgrammaticUpdate else { return }
             let edited = textView.string
             // Setting `textView.string` posts textDidChange again after this
             // method returns. That second call sees no change; applying it
