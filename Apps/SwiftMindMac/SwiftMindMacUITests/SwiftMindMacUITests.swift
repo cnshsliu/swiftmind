@@ -989,7 +989,16 @@ final class SwiftMindMacUITests: XCTestCase {
         let card = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH 'noteCard-'"))
             .firstMatch
-        if card.waitForExistence(timeout: 3) { card.click() }
+        if card.waitForExistence(timeout: 3) {
+            // The card can extend past the window bottom (window size varies
+            // between the launch-adopted and value windows) — click its
+            // visible top region instead of the center.
+            if card.isHittable {
+                card.click()
+            } else {
+                card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).click()
+            }
+        }
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         app.typeKey(.init("e"), modifierFlags: [])
         if element("noteEditor").waitForExistence(timeout: 3) {

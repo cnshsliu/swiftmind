@@ -325,15 +325,9 @@ struct MapCanvasView: View {
                 toggleNoteExpansion()
                 return .handled
             }
-            // Sketch (D): convert the selected node into a drawing node, or
-            // open/close the in-place editor when it already is one.
-            .onKeyPress(.init("d")) {
-                guard modifiersAreBare() else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil,
-                      !session.isBrainMode else { return .ignored }
-                toggleSketchMode()
-                return .handled
-            }
+            // Sketch (D) is handled by the AppKit key monitor (see
+            // installKeyMonitor) — SwiftUI focus is unreliable right after
+            // the sketch editor closes.
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
@@ -470,6 +464,11 @@ struct MapCanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindRenameNode)) { note in
             handleRenameNotification(note)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasSketchToggle)) { _ in
+            guard editingNodeID == nil, noteEditorNodeID == nil,
+                  !session.isBrainMode else { return }
+            toggleSketchMode()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasDelete)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return }
             deleteSelectionIfAllowed()
@@ -504,6 +503,8 @@ struct MapCanvasView: View {
     private func installKeyMonitor() {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [session] event in
+            // One monitor per window — only the key window's canvas eats keys.
+            guard SketchEventGuard.activeSession === session else { return event }
             // ⌘Return commits & closes the open note editor — posted as a
             // notification because this monitor holds a stale View copy, and
             // placed before the text-editing guard because the editor's
@@ -520,6 +521,16 @@ struct MapCanvasView: View {
             // Don't steal keys from real text editing (inspector, outline, map field).
             if let fr = event.window?.firstResponder, fr is NSTextView || fr is NSTextField {
                 return event
+            }
+            let bare = event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
+            // 2 = d — toggle the sketch editor. Routed through the monitor
+            // (not .onKeyPress) because SwiftUI focus can be lost after the
+            // editor closes; the AppKit path is reliable.
+            if event.keyCode == 2, bare {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .swiftMindCanvasSketchToggle, object: nil)
+                }
+                return nil
             }
             // 36 = Return, 76 = keypad Enter
             if event.keyCode == 36 || event.keyCode == 76 {
@@ -2218,6 +2229,7 @@ extension Notification.Name {
 private extension Notification.Name {
     static let swiftMindCanvasReturn = Notification.Name("swiftMind.canvas.return")
     static let swiftMindCanvasDelete = Notification.Name("swiftMind.canvas.delete")
+    static let swiftMindCanvasSketchToggle = Notification.Name("swiftMind.canvas.sketchToggle")
     static let swiftMindCanvasCommitNoteEditor = Notification.Name("swiftMind.canvas.commitNoteEditor")
 }
 

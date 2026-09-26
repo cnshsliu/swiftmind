@@ -2,8 +2,9 @@ import SwiftUI
 import SwiftMindCore
 
 /// Root of a value-window (one per open map file). The launch window arrives
-/// with `nil` — it adopts the launch-behavior map via bootstrap and closes
-/// itself once a real window exists.
+/// with `nil` — bootstrap resolves the launch surface INTO this window (the
+/// launch map is adopted in place); only a brain launch opens its own window,
+/// in which case this placeholder dismisses itself.
 struct MapWindowRoot: View {
     @ObservedObject var appModel: AppModel
     let url: URL?
@@ -13,11 +14,17 @@ struct MapWindowRoot: View {
 
     var body: some View {
         Group {
-            if let document {
-                SessionWorkspace(appModel: appModel, document: document)
+            if let url {
+                if let document {
+                    SessionWorkspace(appModel: appModel, document: document)
+                } else {
+                    placeholder
+                }
+            } else if let launch = appModel.launchDocument {
+                // Launch adoption: this window becomes the launch map's window.
+                SessionWorkspace(appModel: appModel, document: launch)
             } else {
-                ProgressView()
-                    .frame(minWidth: 780, minHeight: 480)
+                placeholder
             }
         }
         .onAppear {
@@ -26,20 +33,26 @@ struct MapWindowRoot: View {
             if let url {
                 document = appModel.resolveDocument(for: url)
                 if let document { appModel.setActiveDocument(document) }
-            } else if appModel.hasOpenedLaunchWindow {
-                // A real window already exists (this one raced bootstrap).
+            } else if appModel.hasOpenedLaunchWindow, appModel.launchDocument == nil {
+                // Bootstrap opened the brain window instead — go away.
                 dismissWindow()
             }
         }
         .onChange(of: appModel.hasOpenedLaunchWindow) { _, opened in
-            // Launch placeholder: once bootstrap opened the real window, go away.
-            if url == nil, opened { dismissWindow() }
+            if url == nil, opened, appModel.launchDocument == nil {
+                dismissWindow()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindOpenMapURL)) { note in
             if let url = note.object as? URL {
                 appModel.openMap(at: url)
             }
         }
+    }
+
+    private var placeholder: some View {
+        ProgressView()
+            .frame(minWidth: 780, minHeight: 480)
     }
 }
 

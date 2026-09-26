@@ -13,6 +13,11 @@ enum SketchEventGuard {
     /// True while the in-place sketch editor owns input.
     static var editorIsActive = false
 
+    /// Session of the key window's document (set by AppModel). Key-down
+    /// monitors are installed per window — only the active session's
+    /// monitor may eat keys; background windows' monitors pass through.
+    static weak var activeSession: DocumentSession?
+
     static func isWithinEditor(_ view: NSView) -> Bool {
         var current: NSView? = view
         while let candidate = current {

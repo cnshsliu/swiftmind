@@ -18,8 +18,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var documents: [String: MapDocument] = [:]
     /// Document whose window is key — commands, bridge and toasts route here.
     @Published private(set) var activeDocument: MapDocument?
-    /// True once bootstrap has opened the launch window — lets the launch
-    /// placeholder window (nil URL) dismiss itself.
+    /// The launch document adopted in place by the nil-URL launch window
+    /// (bootstrap fills it; no second window is opened for the launch map).
+    /// Cleared once a value window takes the document over.
+    @Published private(set) var launchDocument: MapDocument?
+    /// True once bootstrap resolved its launch surface — lets a launch
+    /// placeholder dismiss itself when the surface is NOT an adopted map
+    /// (i.e. the brain window opened instead).
     @Published private(set) var hasOpenedLaunchWindow = false
 
     /// Set by the window roots so non-View code (menus, bridge, Apple Events)
@@ -72,8 +77,9 @@ final class AppModel: ObservableObject {
 
     // MARK: - Launch
 
-    /// Call once from a window root's onAppear: open per launch behavior
-    /// (Welcome map by default).
+    /// Call once from a window root's onAppear: resolve the launch surface.
+    /// Map launches are ADOPTED by the nil-URL launch window (no second
+    /// window); only the brain launch opens its own window.
     func bootstrap() {
         guard !didBootstrap else { return }
         didBootstrap = true
@@ -88,7 +94,7 @@ final class AppModel: ObservableObject {
             do {
                 // Same root title as a fresh map — tests assert on "Central Idea".
                 try VaultLibrary.createEmptyMapIfNeeded(at: url, title: "Central Idea")
-                openMap(at: url, recordAsLast: false)
+                adoptLaunchMap(at: url, recordAsLast: false)
             } catch {
                 showBrain()
             }
@@ -98,7 +104,14 @@ final class AppModel: ObservableObject {
 
         switch LaunchBehavior.current {
         case .help:
-            openHelpMap(fresh: isUITesting)
+            let installed = isUITesting
+                ? HelpMapInstaller.reinstall()
+                : HelpMapInstaller.installIfNeeded()
+            if let url = installed, FileManager.default.fileExists(atPath: url.path) {
+                adoptLaunchMap(at: url)
+            } else {
+                openLastMapOrDefault()
+            }
         case .brain:
             showBrain()
         case .last:
@@ -106,6 +119,29 @@ final class AppModel: ObservableObject {
         }
 
         agentBridge.start(appModel: self)
+    }
+
+    /// Launch path: make `url` the launch window's document (no window opened).
+    private func adoptLaunchMap(at url: URL, recordAsLast: Bool = true) {
+        do {
+            let document = try MapDocument(fileURL: url)
+            documents[document.id] = document
+            launchDocument = document
+            setActiveDocument(document)
+            hasOpenedLaunchWindow = true
+            if recordAsLast {
+                library.lastMapURL = url
+                library.lastMode = .map
+                library.recordRecentMap(url)
+            }
+        } catch {
+            if library.lastMapURL == url { library.lastMapURL = nil }
+            library.removeRecentMap(url)
+            activeDocument?.session.showToast(
+                "Could not open map: \(error.localizedDescription)", kind: .error
+            )
+            if documents.isEmpty { showBrain() }
+        }
     }
 
     /// Open the bundled Welcome map (help + live demo) in the default library.
@@ -120,18 +156,19 @@ final class AppModel: ObservableObject {
     }
 
     /// Prefer last map when valid; else create/open default library map.
+    /// Launch-only: the result is adopted by the launch window.
     private func openLastMapOrDefault() {
         if let last = library.lastMapURL,
            FileManager.default.fileExists(atPath: last.path),
            VaultLibrary.isMindMapFile(last) {
-            openMap(at: last, recordAsLast: true)
+            adoptLaunchMap(at: last, recordAsLast: true)
         } else {
             do {
                 let url = try VaultLibrary.createEmptyMapIfNeeded(
                     at: VaultLibrary.defaultNewMapURL,
                     title: "Untitled"
                 )
-                openMap(at: url, recordAsLast: true)
+                adoptLaunchMap(at: url, recordAsLast: true)
             } catch {
                 showBrain()
             }
@@ -156,7 +193,10 @@ final class AppModel: ObservableObject {
 
         if let existing = documents[documentID(for: url)] {
             setActiveDocument(existing)
-            openWindowAction?(value: url)
+            // The launch-adopted map is already on screen in its window.
+            if existing !== launchDocument {
+                openWindowAction?(value: url)
+            }
             return
         }
 
@@ -200,10 +240,13 @@ final class AppModel: ObservableObject {
     }
 
     /// The window root resolved its URL (restored window, or creation raced
-    /// the registry): materialize the document if it is missing.
+    /// the registry): materialize the document if it is missing. A value
+    /// window taking over the launch-adopted document ends the adoption.
     @discardableResult
     func resolveDocument(for url: URL) -> MapDocument? {
-        if let existing = documents[documentID(for: url)] {
+        let id = documentID(for: url)
+        if let existing = documents[id] {
+            if existing === launchDocument { launchDocument = nil }
             return existing
         }
         do {
@@ -240,6 +283,9 @@ final class AppModel: ObservableObject {
 
     func setActiveDocument(_ document: MapDocument?) {
         activeDocument = document
+        // Key-down monitors (installed per window) gate on this so only the
+        // key window's canvas eats keys in multi-window mode.
+        SketchEventGuard.activeSession = document?.session
     }
 
     /// A window closed: flush and unregister its document.
