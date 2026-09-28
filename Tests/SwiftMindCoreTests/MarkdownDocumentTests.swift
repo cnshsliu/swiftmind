@@ -221,7 +221,6 @@ final class MarkdownDocumentTests: XCTestCase {
         }
         XCTAssertEqual(String(source[latex]), "x")
     }
-}
 
     // MARK: - 1.2 inline additions
 
@@ -264,3 +263,49 @@ final class MarkdownDocumentTests: XCTestCase {
             return XCTFail("expected divider: \(doc.blocks[0])")
         }
     }
+
+    // MARK: - Tables (1.2)
+
+    func testTableParsesAsOneBlock() {
+        let src = "a | b\n--- | ---\n1 | 2\n3 | 4"
+        let doc = MarkdownDocument.parse(src)
+        XCTAssertEqual(doc.blocks.count, 1, "\(doc.blocks)")
+        guard case .table = doc.blocks[0].kind else {
+            return XCTFail("expected table: \(doc.blocks[0])")
+        }
+        let cells = MarkdownDocument.tableCells(in: doc.blocks[0], source: src)
+        XCTAssertEqual(cells, [["a", "b"], ["1", "2"], ["3", "4"]], "\(cells)")
+    }
+
+    func testTableLeadingPipeAndAlignmentRow() {
+        let src = "| left | right |\n| :--- | ---: |\n| x | y |"
+        let doc = MarkdownDocument.parse(src)
+        guard case .table = doc.blocks[0].kind else {
+            return XCTFail("expected table: \(doc.blocks[0])")
+        }
+        let cells = MarkdownDocument.tableCells(in: doc.blocks[0], source: src)
+        XCTAssertEqual(cells, [["left", "right"], ["x", "y"]], "\(cells)")
+    }
+
+    func testTableStopsAtNonPipeLine() {
+        let src = "h | k\n--- | ---\n1 | 2\n\nplain"
+        let doc = MarkdownDocument.parse(src)
+        XCTAssertEqual(doc.blocks.count, 2)
+        guard case .table = doc.blocks[0].kind else { return XCTFail("expected table first") }
+        guard case .paragraph = doc.blocks[1].kind else { return XCTFail("expected paragraph after") }
+    }
+
+    func testLineWithoutPipesIsNotTable() {
+        let doc = MarkdownDocument.parse("plain text\nmore text")
+        guard case .paragraph = doc.blocks[0].kind else { return XCTFail("not a table") }
+    }
+
+    func testTableAfterParagraphRequiresSeparator() {
+        // A pipe line NOT followed by a separator stays a paragraph.
+        let doc = MarkdownDocument.parse("a | b\nno separator here")
+        XCTAssertEqual(doc.blocks.count, 2, "two plain paragraph lines, no table")
+        for block in doc.blocks {
+            guard case .paragraph = block.kind else { return XCTFail("expected paragraph: \(block.kind)") }
+        }
+    }
+}

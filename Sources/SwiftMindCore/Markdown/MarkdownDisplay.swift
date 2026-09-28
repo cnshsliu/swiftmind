@@ -178,7 +178,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
             switch block.kind {
             case .heading:
                 return .block(block.marker)
-            case .image, .codeFence, .mathBlock:
+            case .image, .codeFence, .mathBlock, .table:
                 return .block(block.source)
             case .quote:
                 return .block(block.marker)
@@ -346,6 +346,10 @@ public struct MarkdownDisplay: Equatable, Sendable {
                     appendLineBreak(block, source: source, into: &text, map: &map)
                 }
             }
+        case .table:
+            // Raw pipes while editing (like a code fence); the styled view
+            // renders the grid.
+            appendSource(block.source, source: source, into: &text, map: &map)
         case .divider:
             // The rule renders as a hairline in the styled view; the editing
             // projection keeps the raw `---` line so the caret can edit it.
@@ -444,7 +448,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
 
     private static func showsRawWhenMarkerRevealed(_ block: MarkdownBlock) -> Bool {
         switch block.kind {
-        case .image, .codeFence, .mathBlock, .divider:
+        case .image, .codeFence, .mathBlock, .divider, .table:
             return true
         case .heading, .paragraph, .listItem, .quote:
             return false

@@ -22,6 +22,7 @@ struct MarkdownTextView: View {
         case quote([Piece])
         case code(String)
         case blockMath(String)
+        case table([[String]])
         case divider
         case image(alt: String, urlString: String)
     }
@@ -83,6 +84,8 @@ struct MarkdownTextView: View {
         case .blockMath(let latex):
             LaTeXMathView(latex: latex, fontSize: fontSize, block: true)
                 .frame(maxWidth: .infinity, alignment: .center)
+        case .table(let rows):
+            tableView(rows)
         case .divider:
             Rectangle()
                 .fill(Color.secondary.opacity(0.35))
@@ -91,6 +94,30 @@ struct MarkdownTextView: View {
         case .image(let alt, let urlString):
             MarkdownImageView(alt: alt, urlString: urlString, maxHeight: maxImageHeight)
         }
+    }
+
+    /// Simple grid: header row emphasized, hairline rules between rows.
+    /// Column widths share available width equally (v1).
+    private func tableView(_ rows: [[String]]) -> some View {
+        let columnCount = rows.map(\.count).max() ?? 1
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(0..<columnCount, id: \.self) { column in
+                        Text(column < row.count ? row[column] : "")
+                            .font(.system(size: fontSize * 0.95,
+                                          weight: rowIndex == 0 ? .semibold : .regular))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                    }
+                }
+                Rectangle()
+                    .fill(Color.secondary.opacity(rowIndex == 0 ? 0.45 : 0.2))
+                    .frame(height: 1)
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.secondary.opacity(0.25)))
     }
 
     private func headerMetricsSize(_ level: Int) -> CGFloat {
@@ -221,6 +248,9 @@ struct MarkdownTextView: View {
                 case .divider:
                     nextOrdered = 0
                     result.append(.divider)
+                case .table:
+                    nextOrdered = 0
+                    result.append(.table(MarkdownDocument.tableCells(in: block, source: markdown)))
                 case .mathBlock:
                     nextOrdered = 0
                     let latex = block.inlines.compactMap { inline -> String? in

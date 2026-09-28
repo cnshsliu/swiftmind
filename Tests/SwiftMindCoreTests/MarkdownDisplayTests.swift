@@ -341,7 +341,6 @@ final class MarkdownDisplayTests: XCTestCase {
         XCTAssertEqual(MarkdownDisplay.setHeading("## title2", level: 3), "### title2")
         XCTAssertEqual(MarkdownDisplay.setHeading("title2", level: 3), "### title2")
     }
-}
 
     // MARK: - 1.2 additions
 
@@ -378,3 +377,4 @@ final class MarkdownDisplayTests: XCTestCase {
         let splice = display.splicing(source: "a ~~bb~~ c", displayReplacement: "X", displayUTF16: 2..<4)
         XCTAssertEqual(splice, "a X c", splice)
     }
+}

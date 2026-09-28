@@ -174,6 +174,9 @@ public enum MarkdownBlockKind: Equatable, Sendable {
     case mathBlock
     /// `---` / `***` on its own line; renders as a hairline rule.
     case divider
+    /// GFM pipe table: header line + `---` separator + body lines. Cells
+    /// parse via `tableCells(in:source:)`; the editing projection shows raw.
+    case table
     case image(alt: Range<String.Index>, url: Range<String.Index>)
 }
 
@@ -199,7 +202,68 @@ public enum MarkdownInline: Equatable, Sendable {
 }
 
 enum MarkdownParser {
-    /// `---` / `***` / `___` (3+, own line, spaces allowed around).
+    /// GFM table: a line containing `|`, followed by a separator line whose
+    /// cells are only `-`/`:`/spaces, then body lines containing `|`.
+    /// Consumes consecutive pipe lines; stops at a pipe-less line.
+    static func tableBlock(
+        _ source: String, from start: String.Index
+    ) -> (MarkdownBlock, String.Index)? {
+        func lineRange(_ from: String.Index) -> (content: Range<String.Index>, next: String.Index) {
+            var end = from
+            while end < source.endIndex, source[end] != "\n" { end = source.index(after: end) }
+            let next = end < source.endIndex ? source.index(after: end) : end
+            return (from..<end, next)
+        }
+        let first = lineRange(start)
+        let firstLine = String(source[first.content])
+        guard firstLine.contains("|"), !isDividerLine(source, start: first.content.lowerBound, lineEnd: first.content.upperBound) else { return nil }
+        let second = lineRange(first.next)
+        let secondLine = String(source[second.content])
+        guard isTableSeparator(secondLine) else { return nil }
+
+        var last = second.next
+        while last < source.endIndex {
+            let line = lineRange(last)
+            let text = String(source[line.content])
+            guard text.contains("|"), !text.isEmpty else { break }
+            last = line.next
+        }
+        // Trim a trailing newline that belongs to the following block's gap:
+        // block.source is [start, last); the final line's own newline is
+        // included when the table has body lines.
+        return (
+            MarkdownBlock(
+                kind: .table,
+                source: start..<last,
+                marker: start..<start,
+                inlines: []
+            ),
+            last
+        )
+    }
+
+    /// `| --- | :---: |` — every split cell is dashes/colons/spaces, ≥1 cell.
+    static func isTableSeparator(_ line: String) -> Bool {
+        let cells = Self.splitTableRow(line)
+        guard !cells.isEmpty else { return false }
+        return cells.allSatisfy { cell in
+            let trimmed = cell.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return false }
+            let body = trimmed.dropFirst(trimmed.hasPrefix(":") ? 1 : 0)
+                .dropLast(trimmed.hasSuffix(":") && trimmed.count > 1 ? 1 : 0)
+            return !body.isEmpty && body.allSatisfy { $0 == "-" }
+        }
+    }
+
+    /// Split `| a | b |` into ["a", "b"] (edge pipes optional, escapes kept).
+    public static func splitTableRow(_ line: String) -> [String] {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("|") { trimmed = String(trimmed.dropFirst()) }
+        if trimmed.hasSuffix("|") { trimmed = String(trimmed.dropLast()) }
+        return trimmed.split(separator: "|", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
     static func isDividerLine(
         _ source: String, start: String.Index, lineEnd: String.Index
     ) -> Bool {
@@ -266,6 +330,11 @@ enum MarkdownParser {
             if let quote = quoteBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
                 blocks.append(quote)
                 index = end
+                continue
+            }
+            if let (tableBlock, next) = tableBlock(source, from: index) {
+                blocks.append(tableBlock)
+                index = next
                 continue
             }
             if isDividerLine(source, start: start, lineEnd: lineEnd) {
@@ -733,4 +802,37 @@ enum MarkdownParser {
         while end < source.endIndex, source[end] != "\n" { end = source.index(after: end) }
         return end
     }
+}
+
+extension MarkdownDocument {
+    /// Cell contents of a table block: row 0 is the header; the separator
+    /// row is skipped. Cells are plain strings (inline markdown inside
+    /// cells renders as plain text — v1 tables keep it simple).
+    public static func tableCells(in block: MarkdownBlock, source: String) -> [[String]] {
+        guard case .table = block.kind else { return [] }
+        var result: [[String]] = []
+        var isFirst = true
+        var skipSeparator = false
+        var lineStart = block.source.lowerBound
+        while lineStart < block.source.upperBound {
+            var end = lineStart
+            while end < source.endIndex, source[end] != "\n" { end = source.index(after: end) }
+            let line = String(source[lineStart..<end])
+            if !line.isEmpty {
+                if isFirst {
+                    result.append(MarkdownParser.splitTableRow(line))
+                    isFirst = false
+                    skipSeparator = true
+                } else if skipSeparator {
+                    skipSeparator = false
+                } else {
+                    result.append(MarkdownParser.splitTableRow(line))
+                }
+            }
+            if end >= source.endIndex { break }
+            lineStart = source.index(after: end)
+        }
+        return result
+    }
+
 }

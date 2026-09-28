@@ -897,6 +897,11 @@ enum MarkdownDisplayStyler {
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
             ])
+        case .table:
+            // Raw pipe text while editing — monospaced keeps columns aligned.
+            add(block.source, source: source, map: map, storage: storage, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            ])
         case .heading(let level):
             let size = headingSizes[min(max(level, 1), headingSizes.count) - 1]
             add(block.source, source: source, map: map, storage: storage, attributes: [
