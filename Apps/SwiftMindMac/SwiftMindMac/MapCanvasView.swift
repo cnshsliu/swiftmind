@@ -109,6 +109,8 @@ struct MapCanvasView: View {
     @State private var sketchIsDirty = false
     @State private var sketchTool: SketchTool = .pen
     @State private var sketchInkColor: NSColor = .black
+    /// Pen/shape stroke width (content points), shared with the editor.
+    @State private var sketchInkWidth: CGFloat = 3
     /// Board the editing overlay currently shows (grows as strokes near edges).
     @State private var sketchEditorSize: CGSize = CGSize(width: 800, height: 600)
 
@@ -1855,6 +1857,7 @@ struct MapCanvasView: View {
             drawingData: $sketchDraft,
             tool: $sketchTool,
             inkColor: $sketchInkColor,
+            inkWidth: $sketchInkWidth,
             onStrokeChange: { scheduleSketchCommit() },
             onDone: { closeSketchEditor() }
         )
