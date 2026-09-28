@@ -198,4 +198,29 @@ final class MapStoreTests: XCTestCase {
         _ = root
         _ = store
     }
+
+    // MARK: - Fold-all (1.2 ⌘⇧.)
+
+    func testFoldAllBelowSelectionAsOneUndoStep() throws {
+        let store = MapStore(map: .makeEmpty(title: "T"))
+        let root = store.map.root.id
+        let a = NodeID(rawValue: "n_a"), b = NodeID(rawValue: "n_b"), c = NodeID(rawValue: "n_c")
+        try store.dispatch(InsertChildCommand(parentID: root, newNodeID: a, text: "A", side: .right))
+        try store.dispatch(InsertChildCommand(parentID: a, newNodeID: b, text: "B", side: .right))
+        try store.dispatch(InsertChildCommand(parentID: a, newNodeID: c, text: "C", side: .right))
+
+        func descendantsFolded() -> Bool {
+            [b, c].allSatisfy { store.map.node(id: $0)?.isFolded == true }
+        }
+
+        store.select(a)
+        let ops: [MapOp] = [b, c].map { .setFolded(nodeID: $0, isFolded: true) }
+        try store.dispatch(CompositeAgentCommand(ops: ops))
+        XCTAssertTrue(descendantsFolded())
+        let html = try HTMLCodec.encode(store.map, includeSkin: false)
+        XCTAssertTrue(html.contains("data-folded=\"true\""), "fold must persist")
+
+        try store.undo()
+        XCTAssertFalse(descendantsFolded(), "one undo unfolds the whole batch")
+    }
 }

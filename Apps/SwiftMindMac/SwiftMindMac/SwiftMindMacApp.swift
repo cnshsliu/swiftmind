@@ -236,6 +236,30 @@ private struct SessionClipboardCommands: View {
     }
 }
 
+/// Model-side fold-all: fold every descendant of the primary selection
+/// (a leaf selection folds the branch above it). One undo step.
+@MainActor
+private func foldAll(session: DocumentSession?) {
+    guard let session, !session.isBrainMode,
+          let id = session.store.selection.primary,
+          let node = session.store.map.node(id: id) else { return }
+    let target = node.children.isEmpty
+        ? session.store.map.parentID(of: id).flatMap { session.store.map.node(id: $0) }
+        : node
+    guard let target, !target.children.isEmpty else { return }
+    var descendants: [NodeID] = []
+    func collect(_ node: Node) {
+        for child in node.children {
+            descendants.append(child.id)
+            collect(child)
+        }
+    }
+    collect(target)
+    let foldTo = !descendants.allSatisfy { session.store.map.node(id: $0)?.isFolded == true }
+    let ops: [MapOp] = descendants.map { .setFolded(nodeID: $0, isFolded: foldTo) }
+    session.apply(CompositeAgentCommand(ops: ops))
+}
+
 private struct SessionNodeCommands: View {
     @FocusedValue(\.documentSession) private var session
     @FocusedValue(\.appModel) private var appModel
@@ -273,6 +297,12 @@ private struct SessionNodeCommands: View {
         }
         .keyboardShortcut(.return, modifiers: .command)
         .disabled(!(session?.isBrainMode ?? false))
+
+        Button("Fold All Below") {
+            foldAll(session: session)
+        }
+        .keyboardShortcut(".", modifiers: [.command, .shift])
+        .disabled(session == nil || (session?.isBrainMode ?? false))
 
         Button("Toggle Fold") {
             if let appModel, session?.isBrainMode == true {

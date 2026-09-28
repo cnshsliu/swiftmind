@@ -435,6 +435,9 @@ struct MapCanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindRenameNode)) { note in
             handleRenameNotification(note)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasFoldAll)) { _ in
+            _ = toggleFoldAll()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasSketchToggle)) { _ in
             guard editingNodeID == nil, noteEditorNodeID == nil,
                   !session.isBrainMode else { return }
@@ -494,6 +497,14 @@ struct MapCanvasView: View {
                 return event
             }
             let bare = event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
+            // 47 = period with ⌘⇧ — fold/unfold all below the selection.
+            if event.keyCode == 47,
+               event.modifierFlags.intersection([.command, .shift]) == [.command, .shift] {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .swiftMindCanvasFoldAll, object: nil)
+                }
+                return nil
+            }
             // 2 = d — toggle the sketch editor. Routed through the monitor
             // (not .onKeyPress) because SwiftUI focus can be lost after the
             // editor closes; the AppKit path is reliable.
@@ -1914,12 +1925,10 @@ struct MapCanvasView: View {
             return reorderSelected(delta: -1)
         case (.downArrow, .option):
             return reorderSelected(delta: 1)
-        case (KeyEquivalent("."), [.command, .shift]):
-            return toggleFoldAll()
+        // Return stays with the AppKit monitor path (rename the selection);
+        // only Tab adds outliner insertions here.
         case (.tab, []) where !editorOpen && !session.isBrainMode:
             return outlinerInsert(sibling: false)
-        case (.return, []) where !editorOpen && !session.isBrainMode:
-            return outlinerInsert(sibling: true)
         // Spatial navigation.
         case (.leftArrow, _):
             return navigateKey(.left)
@@ -1980,8 +1989,15 @@ struct MapCanvasView: View {
     /// when everything is already folded. One undo step.
     private func toggleFoldAll() -> KeyPress.Result {
         guard let id = session.store.selection.primary,
-              let node = session.store.map.node(id: id),
-              !node.children.isEmpty else {
+              let node = session.store.map.node(id: id) else {
+            NSSound.beep()
+            return .handled
+        }
+        // A leaf selection folds the branch above it — "fold this level".
+        let target = node.children.isEmpty
+            ? (session.store.map.parentID(of: id).flatMap { session.store.map.node(id: $0) })
+            : node
+        guard let target, !target.children.isEmpty else {
             NSSound.beep()
             return .handled
         }
@@ -1993,13 +2009,13 @@ struct MapCanvasView: View {
                 collect(child)
             }
         }
-        collect(node)
+        collect(target)
         let allFolded = descendants.allSatisfy { childID in
             session.store.map.node(id: childID)?.isFolded == true
         }
-        let target = !allFolded
+        let foldTo = !allFolded
         let ops: [MapOp] = descendants.map {
-            .setFolded(nodeID: $0, isFolded: target)
+            .setFolded(nodeID: $0, isFolded: foldTo)
         }
         session.apply(CompositeAgentCommand(ops: ops))
         _ = graph
@@ -2329,6 +2345,7 @@ private extension Notification.Name {
     static let swiftMindCanvasReturn = Notification.Name("swiftMind.canvas.return")
     static let swiftMindCanvasDelete = Notification.Name("swiftMind.canvas.delete")
     static let swiftMindCanvasSketchToggle = Notification.Name("swiftMind.canvas.sketchToggle")
+    static let swiftMindCanvasFoldAll = Notification.Name("swiftMind.canvas.foldAll")
     static let swiftMindCanvasCommitNoteEditor = Notification.Name("swiftMind.canvas.commitNoteEditor")
 }
 
