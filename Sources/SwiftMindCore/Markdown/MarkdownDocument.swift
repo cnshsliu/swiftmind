@@ -172,6 +172,8 @@ public enum MarkdownBlockKind: Equatable, Sendable {
     case quote
     case codeFence
     case mathBlock
+    /// `---` / `***` on its own line; renders as a hairline rule.
+    case divider
     case image(alt: Range<String.Index>, url: Range<String.Index>)
 }
 
@@ -188,11 +190,34 @@ public enum MarkdownInline: Equatable, Sendable {
         close: Range<String.Index>
     )
     case math(open: Range<String.Index>, latex: Range<String.Index>, close: Range<String.Index>)
+    /// `~~x~~`. Rendered struck through; markers hidden like strong/emphasis.
+    case strikethrough(open: Range<String.Index>, content: [MarkdownInline], close: Range<String.Index>)
+    /// `==x==`. Rendered with a highlight background; markers hidden.
+    case highlight(open: Range<String.Index>, content: [MarkdownInline], close: Range<String.Index>)
     /// `<kbd>⌘E</kbd>`. The label is the key name drawn on the cap.
     case kbd(open: Range<String.Index>, label: Range<String.Index>, close: Range<String.Index>)
 }
 
 enum MarkdownParser {
+    /// `---` / `***` / `___` (3+, own line, spaces allowed around).
+    static func isDividerLine(
+        _ source: String, start: String.Index, lineEnd: String.Index
+    ) -> Bool {
+        var i = start
+        while i < lineEnd, source[i] == " " { i = source.index(after: i) }
+        guard i < lineEnd else { return false }
+        let ch = source[i]
+        guard ch == "-" || ch == "*" || ch == "_" else { return false }
+        var count = 0
+        while i < lineEnd {
+            guard source[i] == ch else { break }
+            count += 1
+            i = source.index(after: i)
+        }
+        while i < lineEnd, source[i] == " " { i = source.index(after: i) }
+        return count >= 3 && i == lineEnd
+    }
+
     static func parse(_ source: String) -> MarkdownDocument {
         var blocks: [MarkdownBlock] = []
         var index = source.startIndex
@@ -240,6 +265,16 @@ enum MarkdownParser {
             }
             if let quote = quoteBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
                 blocks.append(quote)
+                index = end
+                continue
+            }
+            if isDividerLine(source, start: start, lineEnd: lineEnd) {
+                blocks.append(MarkdownBlock(
+                    kind: .divider,
+                    source: start..<end,
+                    marker: start..<start,
+                    inlines: []
+                ))
                 index = end
                 continue
             }
@@ -508,6 +543,30 @@ enum MarkdownParser {
                let found = wrapped(source, from: index, limit: range.upperBound, marker: "*") {
                 flushText(to: index)
                 output.append(.emphasis(
+                    open: found.open,
+                    content: parseInlines(source, in: found.content),
+                    close: found.close
+                ))
+                index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            if source[index] == "~",
+               let found = wrapped(source, from: index, limit: range.upperBound, marker: "~~") {
+                flushText(to: index)
+                output.append(.strikethrough(
+                    open: found.open,
+                    content: parseInlines(source, in: found.content),
+                    close: found.close
+                ))
+                index = found.close.upperBound
+                textStart = index
+                continue
+            }
+            if source[index] == "=",
+               let found = wrapped(source, from: index, limit: range.upperBound, marker: "==") {
+                flushText(to: index)
+                output.append(.highlight(
                     open: found.open,
                     content: parseInlines(source, in: found.content),
                     close: found.close

@@ -182,6 +182,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 return .block(block.source)
             case .quote:
                 return .block(block.marker)
+            case .divider:
+                return .block(block.source)
             case .listItem:
                 if index < block.marker.upperBound { return .block(block.marker) }
             case .paragraph:
@@ -209,7 +211,9 @@ public struct MarkdownDisplay: Equatable, Sendable {
             case .text(let range):
                 if range.contains(index) { return item }
             case .strong(let open, let content, let close),
-                 .emphasis(let open, let content, let close):
+                 .emphasis(let open, let content, let close),
+                 .strikethrough(let open, let content, let close),
+                 .highlight(let open, let content, let close):
                 if (open.lowerBound..<close.upperBound).contains(index) {
                     // The words are a `.text` child. The caret is on this span,
                     // so reveal these markers unless a nested span is tighter.
@@ -342,6 +346,17 @@ public struct MarkdownDisplay: Equatable, Sendable {
                     appendLineBreak(block, source: source, into: &text, map: &map)
                 }
             }
+        case .divider:
+            // The rule renders as a hairline in the styled view; the editing
+            // projection keeps the raw `---` line so the caret can edit it.
+            let lineEnd = block.source.upperBound > block.source.lowerBound
+                && source[block.source].hasSuffix("\n")
+                ? source.index(before: block.source.upperBound)
+                : block.source.upperBound
+            appendSource(block.source.lowerBound..<lineEnd, source: source, into: &text, map: &map)
+            if sourceContainsNewline(block, source: source) || anotherFollows {
+                appendLineBreak(block, source: source, into: &text, map: &map)
+            }
         case .heading, .paragraph, .listItem, .quote:
             if case .listItem = block.kind {
                 appendSource(
@@ -379,7 +394,9 @@ public struct MarkdownDisplay: Equatable, Sendable {
             case .text(let range):
                 appendSource(range, source: source, into: &text, map: &map)
             case .strong(let open, let content, let close),
-                 .emphasis(let open, let content, let close):
+                 .emphasis(let open, let content, let close),
+                 .strikethrough(let open, let content, let close),
+                 .highlight(let open, let content, let close):
                 if inlineRevealed(inline, reveal: reveal) {
                     appendSource(open, source: source, into: &text, map: &map)
                     appendInlines(content, source: source, reveal: reveal, into: &text, map: &map)
@@ -427,7 +444,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
 
     private static func showsRawWhenMarkerRevealed(_ block: MarkdownBlock) -> Bool {
         switch block.kind {
-        case .image, .codeFence, .mathBlock:
+        case .image, .codeFence, .mathBlock, .divider:
             return true
         case .heading, .paragraph, .listItem, .quote:
             return false
@@ -455,7 +472,9 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 case .text:
                     break
                 case .strong(let open, let content, let close),
-                     .emphasis(let open, let content, let close):
+                     .emphasis(let open, let content, let close),
+                     .strikethrough(let open, let content, let close),
+                     .highlight(let open, let content, let close):
                     cover(open: open, content: open.upperBound..<close.lowerBound, close: close)
                     walkInlines(content)
                 case .code(let open, let content, let close),
@@ -508,7 +527,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
         switch inline {
         case .text(let range):
             return range
-        case .strong(let open, _, let close), .emphasis(let open, _, let close):
+        case .strong(let open, _, let close), .emphasis(let open, _, let close),
+             .strikethrough(let open, _, let close), .highlight(let open, _, let close):
             return open.upperBound..<close.lowerBound
         case .code(_, let content, _), .kbd(_, let content, _):
             return content
@@ -560,7 +580,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
         switch inline {
         case .text(let range):
             return range.upperBound
-        case .strong(_, _, let close), .emphasis(_, _, let close), .math(_, _, let close):
+        case .strong(_, _, let close), .emphasis(_, _, let close), .math(_, _, let close),
+             .strikethrough(_, _, let close), .highlight(_, _, let close):
             return close.upperBound
         case .code(_, _, let close), .kbd(_, _, let close):
             return close.upperBound

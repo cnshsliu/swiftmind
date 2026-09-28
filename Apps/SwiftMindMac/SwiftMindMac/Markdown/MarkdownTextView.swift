@@ -22,6 +22,7 @@ struct MarkdownTextView: View {
         case quote([Piece])
         case code(String)
         case blockMath(String)
+        case divider
         case image(alt: String, urlString: String)
     }
 
@@ -34,6 +35,9 @@ struct MarkdownTextView: View {
     enum Run {
         case markdown(String)
         case key(String)
+        /// `==x==` — AttributedString markdown has no highlight; draw the
+        /// background ourselves.
+        case highlight(String)
     }
 
     var body: some View {
@@ -79,6 +83,11 @@ struct MarkdownTextView: View {
         case .blockMath(let latex):
             LaTeXMathView(latex: latex, fontSize: fontSize, block: true)
                 .frame(maxWidth: .infinity, alignment: .center)
+        case .divider:
+            Rectangle()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(height: 1)
+                .padding(.vertical, fontSize * 0.35)
         case .image(let alt, let urlString):
             MarkdownImageView(alt: alt, urlString: urlString, maxHeight: maxImageHeight)
         }
@@ -153,6 +162,10 @@ struct MarkdownTextView: View {
                 } else {
                     append(Text(source).font(font))
                 }
+            case .highlight(let text):
+                var attr = AttributedString(text)
+                attr.backgroundColor = Color.yellow.opacity(colorScheme == .dark ? 0.30 : 0.45)
+                append(Text(attr).font(font))
             case .key(let name):
                 let image = KeyCapChrome.image(label: name, fontSize: fontSize)
                 // The image's bottom sits on the baseline. Shift it down by
@@ -205,6 +218,9 @@ struct MarkdownTextView: View {
                         return String(markdown[range])
                     }.joined()
                     result.append(.code(body))
+                case .divider:
+                    nextOrdered = 0
+                    result.append(.divider)
                 case .mathBlock:
                     nextOrdered = 0
                     let latex = block.inlines.compactMap { inline -> String? in
@@ -235,6 +251,10 @@ struct MarkdownTextView: View {
                 appendMarkdown("**" + plain(content, source: source) + "**", to: &result)
             case .emphasis(_, let content, _):
                 appendMarkdown("*" + plain(content, source: source) + "*", to: &result)
+            case .strikethrough(_, let content, _):
+                appendMarkdown("~~" + plain(content, source: source) + "~~", to: &result)
+            case .highlight(_, let content, _):
+                appendHighlight(plain(content, source: source), to: &result)
             case .code(_, let content, _):
                 appendMarkdown("`" + String(source[content]) + "`", to: &result)
             case .link(_, let label, _, let url, _):
@@ -266,6 +286,16 @@ struct MarkdownTextView: View {
         }
     }
 
+    private static func appendHighlight(_ text: String, to pieces: inout [Piece]) {
+        guard !text.isEmpty else { return }
+        if case .flow(var runs) = pieces.last {
+            runs.append(.highlight(text))
+            pieces[pieces.count - 1] = .flow(runs)
+        } else {
+            pieces.append(.flow([.highlight(text)]))
+        }
+    }
+
     private static func appendKey(_ name: String, to pieces: inout [Piece]) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
@@ -286,6 +316,7 @@ struct MarkdownTextView: View {
                     switch run {
                     case .markdown(let string): appendMarkdown(string, to: &result)
                     case .key(let name): appendKey(name, to: &result)
+                    case .highlight(let text): appendHighlight(text, to: &result)
                     }
                 }
             case .inlineMath:
@@ -301,7 +332,8 @@ struct MarkdownTextView: View {
             case .text(let range), .code(_, let range, _), .math(_, let range, _),
                  .kbd(_, let range, _):
                 return String(source[range])
-            case .strong(_, let content, _), .emphasis(_, let content, _):
+            case .strong(_, let content, _), .emphasis(_, let content, _),
+                 .strikethrough(_, let content, _), .highlight(_, let content, _):
                 return plain(content, source: source)
             case .link(_, let label, _, _, _):
                 return plain(label, source: source)

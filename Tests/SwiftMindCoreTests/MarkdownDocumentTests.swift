@@ -222,3 +222,45 @@ final class MarkdownDocumentTests: XCTestCase {
         XCTAssertEqual(String(source[latex]), "x")
     }
 }
+
+    // MARK: - 1.2 inline additions
+
+    func testStrikethroughParses() {
+        let doc = MarkdownDocument.parse("done ~~and dusted~~ ok")
+        guard case .paragraph = doc.blocks[0].kind else { return XCTFail("expected paragraph") }
+        XCTAssertEqual(doc.blocks[0].inlines.count, 3)
+        guard case .strikethrough(_, let content, _) = doc.blocks[0].inlines[1],
+              content.count == 1,
+              case .text = content[0] else {
+            return XCTFail("missing strikethrough: \(doc.blocks[0].inlines)")
+        }
+    }
+
+    func testHighlightParses() {
+        let doc = MarkdownDocument.parse("see ==this part== now")
+        guard case .paragraph = doc.blocks[0].kind else { return XCTFail("expected paragraph") }
+        XCTAssertEqual(doc.blocks[0].inlines.count, 3)
+        guard case .highlight(_, let content, _) = doc.blocks[0].inlines[1],
+              content.count == 1,
+              case .text = content[0] else {
+            return XCTFail("missing highlight: \(doc.blocks[0].inlines)")
+        }
+    }
+
+    func testDividerParsesAsBlock() {
+        let doc = MarkdownDocument.parse("above\n---\nbelow")
+        XCTAssertEqual(doc.blocks.count, 3, "divider must be its own block")
+        guard case .divider = doc.blocks[1].kind else {
+            return XCTFail("expected divider: \(doc.blocks[1])")
+        }
+        guard case .paragraph = doc.blocks[0].kind, case .paragraph = doc.blocks[2].kind else {
+            return XCTFail("neighbors must stay paragraphs")
+        }
+    }
+
+    func testStarDividerParsesAsBlock() {
+        let doc = MarkdownDocument.parse("***")
+        guard case .divider = doc.blocks[0].kind else {
+            return XCTFail("expected divider: \(doc.blocks[0])")
+        }
+    }

@@ -342,3 +342,39 @@ final class MarkdownDisplayTests: XCTestCase {
         XCTAssertEqual(MarkdownDisplay.setHeading("title2", level: 3), "### title2")
     }
 }
+
+    // MARK: - 1.2 additions
+
+    func testStrikethroughMarkersHiddenAndRevealable() {
+        let hidden = MarkdownDisplay.project("done ~~and dusted~~ ok", reveal: .none)
+        XCTAssertEqual(hidden.text, "done and dusted ok", hidden.text)
+        let doc = MarkdownDocument.parse("done ~~and dusted~~ ok")
+        guard case .strikethrough(_, let content, _) = doc.blocks[0].inlines[1],
+              case .text(let range) = content[0] else {
+            return XCTFail("missing strikethrough")
+        }
+        let offset = hidden.sourceUTF16 == nil ? 0 : 0
+        _ = offset
+        let caretUTF16 = range.lowerBound.utf16Offset(in: "done ~~and dusted~~ ok")
+        let revealed = MarkdownDisplay.reveal(atUTF16: caretUTF16, in: "done ~~and dusted~~ ok")
+        let shown = MarkdownDisplay.project("done ~~and dusted~~ ok", reveal: revealed)
+        XCTAssertTrue(shown.text.contains("~~"), "reveal must show the markers: \(shown.text)")
+    }
+
+    func testHighlightMarkersHidden() {
+        let hidden = MarkdownDisplay.project("see ==this part== now", reveal: .none)
+        XCTAssertEqual(hidden.text, "see this part now", hidden.text)
+    }
+
+    func testDividerProjectsWithRawLine() {
+        let hidden = MarkdownDisplay.project("above\n---\nbelow", reveal: .none)
+        XCTAssertTrue(hidden.text.contains("---"), hidden.text)
+        XCTAssertEqual(hidden.text.components(separatedBy: "\n").count, 3, hidden.text)
+    }
+
+    func testStrikeWholeSpanDeleteIncludesMarkers() {
+        let display = MarkdownDisplay.project("a ~~bb~~ c", reveal: .none)
+        // display "a bb c": deleting "bb" must cover the source markers too
+        let splice = display.splicing(source: "a ~~bb~~ c", displayReplacement: "X", displayUTF16: 2..<4)
+        XCTAssertEqual(splice, "a X c", splice)
+    }

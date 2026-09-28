@@ -54,7 +54,8 @@ public struct MarkdownMeasure: Equatable, Sendable {
             case .text(let range), .code(_, let range, _), .math(_, let range, _),
                  .kbd(_, let range, _):
                 return String(source[range])
-            case .strong(_, let content, _), .emphasis(_, let content, _):
+            case .strong(_, let content, _), .emphasis(_, let content, _),
+                 .strikethrough(_, let content, _), .highlight(_, let content, _):
                 return plain(content, in: source)
             case .link(_, let label, _, _, _):
                 return plain(label, in: source)

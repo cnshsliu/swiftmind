@@ -71,6 +71,14 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         let coord = context.coordinator
         let toolbar = NSStackView(views: [
+            Self.toolbarButton("bold", id: "noteEditorBold", help: "Bold (⌘B)",
+                               target: coord, action: #selector(Coordinator.boldClicked)),
+            Self.toolbarButton("italic", id: "noteEditorItalic", help: "Italic (⌘I)",
+                               target: coord, action: #selector(Coordinator.italicClicked)),
+            Self.toolbarButton("strikethrough", id: "noteEditorStrike", help: "Strikethrough (⌘⇧X)",
+                               target: coord, action: #selector(Coordinator.strikeClicked)),
+            Self.toolbarButton("highlighter", id: "noteEditorHighlight", help: "Highlight (⌘⇧H)",
+                               target: coord, action: #selector(Coordinator.highlightClicked)),
             Self.toolbarButton("photo", id: "noteEditorInsertImage", help: "Insert image",
                                target: coord, action: #selector(Coordinator.insertImageClicked)),
             Self.toolbarButton("function", id: "noteEditorInsertMath", help: "Insert math",
@@ -271,6 +279,11 @@ struct MarkdownEditorView: NSViewRepresentable {
         @objc func insertImageClicked() {
             parent.onInsertImage()
         }
+
+        @objc func boldClicked() { textView?.onFormat?("**") }
+        @objc func italicClicked() { textView?.onFormat?("*") }
+        @objc func strikeClicked() { textView?.onFormat?("~~") }
+        @objc func highlightClicked() { textView?.onFormat?("==") }
 
         @objc func insertMathClicked() {
             textView?.applyInsertion(.math)
@@ -609,6 +622,10 @@ final class MarkdownSourceTextView: NSTextView {
             onFormat?("**")
         case 34 where mods == .command: // ⌘I
             onFormat?("*")
+        case 7 where mods == [.command, .shift]: // ⌘⇧X strikethrough
+            onFormat?("~~")
+        case 4 where mods == [.command, .shift]: // ⌘⇧H highlight
+            onFormat?("==")
         case 40 where mods == .command: // ⌘K
             onLink?()
         case 18 where mods == [.command, .option]: // ⌘⌥1
@@ -617,6 +634,12 @@ final class MarkdownSourceTextView: NSTextView {
             onHeading?(2)
         case 20 where mods == [.command, .option]: // ⌘⌥3
             onHeading?(3)
+        case 21 where mods == [.command, .option]: // ⌘⌥4
+            onHeading?(4)
+        case 23 where mods == [.command, .option]: // ⌘⌥5
+            onHeading?(5)
+        case 22 where mods == [.command, .option]: // ⌘⌥6
+            onHeading?(6)
         default:
             super.keyDown(with: event)
         }
@@ -869,6 +892,11 @@ enum MarkdownDisplayStyler {
         storage: NSTextStorage
     ) {
         switch block.kind {
+        case .divider:
+            add(block.source, source: source, map: map, storage: storage, attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            ])
         case .heading(let level):
             let size = headingSizes[min(max(level, 1), headingSizes.count) - 1]
             add(block.source, source: source, map: map, storage: storage, attributes: [
@@ -916,6 +944,19 @@ enum MarkdownDisplayStyler {
             case .emphasis(_, let content, _):
                 emphasize(span(content, source: source), source: source, map: map, storage: storage, trait: .italicFontMask)
                 style(inlines: content, source: source, map: map, storage: storage)
+            case .strikethrough(_, let content, _):
+                addAttributeIfMapped(
+                    .strikethroughStyle, value: NSUnderlineStyle.single.rawValue,
+                    span: span(content, source: source), source: source, map: map, storage: storage
+                )
+                style(inlines: content, source: source, map: map, storage: storage)
+            case .highlight(_, let content, _):
+                addAttributeIfMapped(
+                    .backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.35),
+                    span: span(content, source: source), source: source, map: map, storage: storage
+                )
+                style(inlines: content, source: source, map: map, storage: storage)
+                style(inlines: content, source: source, map: map, storage: storage)
             case .code(_, let content, _):
                 add(content, source: source, map: map, storage: storage, attributes: [
                     .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
@@ -950,7 +991,8 @@ enum MarkdownDisplayStyler {
             case .text(let text): range = text
             case .strong(let open, _, let close), .emphasis(let open, _, let close),
                  .code(let open, _, let close), .math(let open, _, let close),
-                 .kbd(let open, _, let close):
+                 .kbd(let open, _, let close),
+                 .strikethrough(let open, _, let close), .highlight(let open, _, let close):
                 range = open.lowerBound..<close.upperBound
             case .link(let open, _, _, _, let close):
                 range = open.lowerBound..<close.upperBound
@@ -991,6 +1033,35 @@ enum MarkdownDisplayStyler {
         }
         if let startIndex = runStart {
             apply(from: startIndex, to: map.count)
+        }
+    }
+
+    /// Apply a display attribute over a mapped source range (runs of the
+    /// display that map inside the span). Highlight/strikethrough styling.
+    private static func addAttributeIfMapped(
+        _ name: NSAttributedString.Key,
+        value: Any,
+        span range: Range<String.Index>,
+        source: String,
+        map: [Int],
+        storage: NSTextStorage
+    ) {
+        guard !range.isEmpty,
+              let start = utf16(range.lowerBound, in: source),
+              let end = utf16(range.upperBound, in: source),
+              start < end else { return }
+        var runStart: Int?
+        for index in 0..<map.count {
+            let inside = map[index] >= start && map[index] < end
+            if inside {
+                if runStart == nil { runStart = index }
+            } else if let startIndex = runStart {
+                storage.addAttribute(name, value: value, range: NSRange(location: startIndex, length: index - startIndex))
+                runStart = nil
+            }
+        }
+        if let startIndex = runStart, map.count > startIndex {
+            storage.addAttribute(name, value: value, range: NSRange(location: startIndex, length: map.count - startIndex))
         }
     }
 
