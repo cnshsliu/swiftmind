@@ -1,6 +1,6 @@
 # SwiftMind
 
-<a href="https://apps.apple.com/app/swiftmind-mind-maps/id6809184117?mt=12"><img src="https://developer.apple.com/app-store/marketing/guidelines/images/badge-download-on-the-mac-app-store.svg" alt="Download on the Mac App Store" height="40"></a>
+<a href="https://apps.apple.com/app/id6809184117"><img src="docs/appstore/marketing/badge-mac-app-store-black.svg" alt="Download on the Mac App Store" height="40"></a>
 
 Native **macOS** mind mapping in pure Swift. Documents are plain HTML files with the extension **`.swiftmind.html`**: the app reads and writes the map model as nested lists, and the same file opens as a **read-only hierarchy** in any browser (Safari, Chrome, etc.) without SwiftMind installed.
 
