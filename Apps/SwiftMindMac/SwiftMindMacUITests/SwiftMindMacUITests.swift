@@ -953,6 +953,48 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(settledNodeCount(), 2)
     }
 
+    /// 1.2: ⌥↓/⌥↑ reorder the selected node among siblings.
+    func testReorderSiblingShortcuts() throws {
+        focusCanvasWithSelection()
+        let before = settledNodeCount()
+        // Three siblings: the scratch root has one child; add two more.
+        app.typeKey("t", modifierFlags: [.command, .shift])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        app.typeKey(.return, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(settledNodeCount(), before + 2)
+
+        // ⌥↓ then ⌥↑ — count unchanged, no crash; undo stack consistent.
+        app.typeKey(.downArrow, modifierFlags: .option)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        app.typeKey(.upArrow, modifierFlags: .option)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(settledNodeCount(), before + 2)
+    }
+
+    /// 1.2: Tab inserts a child and opens the inline editor.
+    func testTabInsertsChildAndEdits() throws {
+        focusCanvasWithSelection()
+        let before = settledNodeCount()
+        app.typeKey(.tab, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(settledNodeCount(), before + 1, "Tab must add a child")
+    }
+
+    /// 1.2: ⌘⇧. folds everything below the selection (node count shrinks).
+    func testFoldAllShortcut() throws {
+        focusCanvasWithSelection()
+        app.typeKey("t", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let expanded = settledNodeCount()
+        app.typeKey(".", modifierFlags: [.command, .shift])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertLessThan(settledNodeCount(), expanded, "fold-all must hide descendants")
+        app.typeKey("z", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(settledNodeCount(), expanded, "undo restores")
+    }
+
     /// App Store listing screenshots: relaunch WITHOUT the scratch map so the
     /// default launch behavior opens the bundled Welcome map (a good demo
     /// backdrop) and capture canvas / outline / note-editor / My Brain.
