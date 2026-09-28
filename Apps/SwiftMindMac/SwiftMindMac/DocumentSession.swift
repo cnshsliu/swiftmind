@@ -91,6 +91,11 @@ final class DocumentSession: ObservableObject {
         store.map
     }
 
+    func toggleSelection(_ id: NodeID) {
+        store.toggleSelection(id)
+        selectionRevision = store.selectionRevision
+    }
+
     func apply(_ command: any MapCommand) {
         do {
             try store.dispatch(command)

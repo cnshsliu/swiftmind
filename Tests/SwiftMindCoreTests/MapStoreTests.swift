@@ -159,4 +159,43 @@ final class MapStoreTests: XCTestCase {
         store.replaceMap(MindMap.makeEmpty(title: "fresh"))
         XCTAssertTrue(store.noteCardHeights.isEmpty)
     }
+
+    // MARK: - Sibling reorder (1.2 ⌥↑/⌥↓)
+
+    func testReorderSiblingUpAndDown() throws {
+        let store = MapStore(map: .makeEmpty(title: "T"))
+        let root = store.map.root.id
+        let a = NodeID(rawValue: "n_a"), b = NodeID(rawValue: "n_b"), c = NodeID(rawValue: "n_c")
+        try store.dispatch(InsertChildCommand(parentID: root, newNodeID: a, text: "A", side: .right))
+        try store.dispatch(InsertChildCommand(parentID: root, newNodeID: b, text: "B", side: .right))
+        try store.dispatch(InsertChildCommand(parentID: root, newNodeID: c, text: "C", side: .right))
+
+        func order() -> [String] {
+            store.map.root.children.map(\.text)
+        }
+
+        // B up (index 1 → 0)
+        try store.dispatch(MoveNodeCommand(nodeID: b, newParentID: root, index: 0))
+        XCTAssertEqual(order(), ["B", "A", "C"])
+
+        // C down (index 2 → 2 stays at end)
+        try store.dispatch(MoveNodeCommand(nodeID: c, newParentID: root, index: 2))
+        XCTAssertEqual(order(), ["B", "A", "C"])
+
+        // Undo twice → original
+        try store.undo()
+        try store.undo()
+        XCTAssertEqual(order(), ["A", "B", "C"])
+    }
+
+    func testReorderHelperMovesByOne() {
+        let store = MapStore(map: .makeEmpty(title: "T"))
+        let root = NodeID(rawValue: "r")
+        XCTAssertEqual(MapStore.reorderTarget(current: 0, delta: -1, count: 3), 0, "first cannot move up")
+        XCTAssertEqual(MapStore.reorderTarget(current: 1, delta: -1, count: 3), 0)
+        XCTAssertEqual(MapStore.reorderTarget(current: 1, delta: 1, count: 3), 2)
+        XCTAssertEqual(MapStore.reorderTarget(current: 2, delta: 1, count: 3), 2, "last cannot move down")
+        _ = root
+        _ = store
+    }
 }

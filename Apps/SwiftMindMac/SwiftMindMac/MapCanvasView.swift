@@ -292,44 +292,13 @@ struct MapCanvasView: View {
             // Spatial navigation: arrows + hjkl. h/l move relative to the
             // branch side (left branch: h = outward to children, l = parent;
             // right branch reversed), j/k = next/previous sibling.
-            .onKeyPress(.leftArrow) { navigateKey(.left) }
-            .onKeyPress(.rightArrow) { navigateKey(.right) }
-            .onKeyPress(.downArrow) { navigateKey(.down) }
-            .onKeyPress(.upArrow) { navigateKey(.up) }
-            .onKeyPress(.init("h")) { plainLetterKey { navigateKey(.left) } }
-            .onKeyPress(.init("l")) { plainLetterKey { navigateKey(.right) } }
-            .onKeyPress(.init("j")) { plainLetterKey { navigateKey(.down) } }
-            .onKeyPress(.init("k")) { plainLetterKey { navigateKey(.up) } }
-            // Follow mode: bare `f` only. ⌘F is search (must not be stolen).
-            .onKeyPress(.init("f")) {
-                guard modifiersAreBare() else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
-                toggleFollowMode()
-                return .handled
+            // All bare/modified key shortcuts in ONE handler — the body is
+            // too large for a chain of typed .onKeyPress overloads to
+            // type-check in reasonable time. Sketch (D) stays in the AppKit
+            // key monitor (focus is unreliable right after the editor closes).
+            .onKeyPress { press in
+                canvasKeyPress(press)
             }
-            // Note editor (E) and note card expansion (X) for the primary node.
-            // Brain pseudo-nodes must not get CompositeAgentCommand mutations.
-            // Both are blocked while any editor (title or note) owns the
-            // keyboard — otherwise typing "e" inside the note editor would
-            // close it.
-            .onKeyPress(.init("e")) {
-                let mods = NSEvent.modifierFlags.intersection([.command, .shift, .option])
-                guard mods.isEmpty else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil,
-                      !session.isBrainMode else { return .ignored }
-                toggleNoteEditor()
-                return .handled
-            }
-            .onKeyPress(.init("x")) {
-                guard modifiersAreBare() else { return .ignored }
-                guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil,
-                      !session.isBrainMode else { return .ignored }
-                toggleNoteExpansion()
-                return .handled
-            }
-            // Sketch (D) is handled by the AppKit key monitor (see
-            // installKeyMonitor) — SwiftUI focus is unreliable right after
-            // the sketch editor closes.
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasStageFill(for: colorScheme))
@@ -1934,6 +1903,129 @@ struct MapCanvasView: View {
 
     /// Return / context-menu Rename: the plain title field. Sketch nodes have
     /// no inline title editor — "editing" them means drawing.
+    /// Single key dispatcher for the canvas (see body for why).
+    private func canvasKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        let mods = press.modifiers.intersection([.command, .shift, .option, .control])
+        // Editors own the keyboard for letters.
+        let editorOpen = editingNodeID != nil || noteEditorNodeID != nil || drawingNodeID != nil
+        switch (press.key, mods) {
+        // 1.2: ⌥↑/⌥↓ reorder, ⌘⇧. fold-all, Tab/Enter outliner insert.
+        case (.upArrow, .option):
+            return reorderSelected(delta: -1)
+        case (.downArrow, .option):
+            return reorderSelected(delta: 1)
+        case (KeyEquivalent("."), [.command, .shift]):
+            return toggleFoldAll()
+        case (.tab, []) where !editorOpen && !session.isBrainMode:
+            return outlinerInsert(sibling: false)
+        case (.return, []) where !editorOpen && !session.isBrainMode:
+            return outlinerInsert(sibling: true)
+        // Spatial navigation.
+        case (.leftArrow, _):
+            return navigateKey(.left)
+        case (.rightArrow, _):
+            return navigateKey(.right)
+        case (.downArrow, _):
+            return navigateKey(.down)
+        case (.upArrow, _):
+            return navigateKey(.up)
+        default:
+            break
+        }
+        guard mods.isEmpty, !editorOpen else { return .ignored }
+        switch press.characters.first {
+        case "h": return navigateKey(.left)
+        case "l": return navigateKey(.right)
+        case "j": return navigateKey(.down)
+        case "k": return navigateKey(.up)
+        case "f":
+            toggleFollowMode()
+            return .handled
+        case "e" where !session.isBrainMode:
+            toggleNoteEditor()
+            return .handled
+        case "x" where !session.isBrainMode:
+            toggleNoteExpansion()
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+
+    // MARK: - 1.2 shortcuts: reorder, fold-all, outliner insert
+
+    /// ⌥↑/⌥↓: move the selected node one slot among its siblings.
+    private func reorderSelected(delta: Int) -> KeyPress.Result {
+        guard let id = session.store.selection.primary,
+              id != session.store.map.root.id,
+              let parentID = session.store.map.parentID(of: id),
+              let parent = session.store.map.node(id: parentID),
+              let current = parent.children.firstIndex(where: { $0.id == id })
+        else {
+            NSSound.beep()
+            return .handled
+        }
+        let target = MapStore.reorderTarget(
+            current: current, delta: delta, count: parent.children.count
+        )
+        guard target != current else {
+            NSSound.beep()
+            return .handled
+        }
+        session.apply(MoveNodeCommand(nodeID: id, newParentID: parentID, index: target))
+        return .handled
+    }
+
+    /// ⌘⇧.: fold every descendant below the selected node, or unfold all
+    /// when everything is already folded. One undo step.
+    private func toggleFoldAll() -> KeyPress.Result {
+        guard let id = session.store.selection.primary,
+              let node = session.store.map.node(id: id),
+              !node.children.isEmpty else {
+            NSSound.beep()
+            return .handled
+        }
+        let graph = MapGraph.analyze(session.store.map)
+        var descendants: [NodeID] = []
+        func collect(_ node: Node) {
+            for child in node.children {
+                descendants.append(child.id)
+                collect(child)
+            }
+        }
+        collect(node)
+        let allFolded = descendants.allSatisfy { childID in
+            session.store.map.node(id: childID)?.isFolded == true
+        }
+        let target = !allFolded
+        let ops: [MapOp] = descendants.map {
+            .setFolded(nodeID: $0, isFolded: target)
+        }
+        session.apply(CompositeAgentCommand(ops: ops))
+        _ = graph
+        return .handled
+    }
+
+    /// Tab inserts a child of the selection; Enter inserts a sibling.
+    /// Any open inline edit commits first; the new node starts editing.
+    private func outlinerInsert(sibling: Bool) -> KeyPress.Result {
+        guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil,
+              !session.isBrainMode else { return .ignored }
+        guard let primary = session.store.selection.primary else {
+            NSSound.beep()
+            return .handled
+        }
+        let root = session.store.map.root
+        let newID = NodeID.generate()
+        if sibling, primary != root.id {
+            session.apply(InsertSiblingCommand(siblingID: primary, newNodeID: newID, text: ""))
+        } else {
+            session.apply(InsertChildCommand(parentID: primary, newNodeID: newID, text: ""))
+        }
+        beginTitleEdit(nodeID: newID, snapshot: session.store.snapshot())
+        return .handled
+    }
+
     private func beginTitleEdit(nodeID: NodeID, snapshot: MapSnapshot) {
         guard snapshot.nodes.contains(where: { $0.id == nodeID }) else { return }
         if let node = session.store.map.node(id: nodeID), node.sketch != nil {
@@ -2144,7 +2236,11 @@ struct MapCanvasView: View {
                     commitEdit()
                 }
                 if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
-                    session.select(id)
+                    if NSEvent.modifierFlags.contains(.shift) {
+                        session.toggleSelection(id)
+                    } else {
+                        session.select(id)
+                    }
                     canvasFocused = true
                 } else {
                     // Click empty canvas: clear focus, still take keyboard focus.

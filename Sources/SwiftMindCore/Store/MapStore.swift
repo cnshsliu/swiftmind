@@ -63,6 +63,19 @@ public final class MapStore {
         selectionRevision &+= 1
     }
 
+    /// ⇧click: toggle membership; the id becomes primary when added.
+    public func toggleSelection(_ id: NodeID) {
+        if selection.selectedIDs.contains(id) {
+            selection.selectedIDs.remove(id)
+            if selection.primary == id {
+                selection.primary = selection.selectedIDs.first
+            }
+        } else {
+            selection.select(id, additive: true)
+        }
+        selectionRevision &+= 1
+    }
+
     public func clearSelection() {
         selection.clear()
         selectionRevision &+= 1
@@ -184,5 +197,13 @@ public final class MapStore {
     private func invalidateGeometry() {
         cachedGeometry = nil
         cachedForContentRevision = .max
+    }
+}
+
+extension MapStore {
+    /// Target sibling index for a one-slot reorder (⌥↑/⌥↓), clamped so the
+    /// first cannot move up and the last cannot move down.
+    public static func reorderTarget(current: Int, delta: Int, count: Int) -> Int {
+        min(max(current + delta, 0), max(count - 1, 0))
     }
 }
