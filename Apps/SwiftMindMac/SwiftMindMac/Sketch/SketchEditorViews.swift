@@ -165,7 +165,7 @@ struct SketchEditorView: View {
                     ShapePreview(
                         tool: tool,
                         start: drag.start,
-                        end: drag.current,
+                        end: shiftConstrainedEnd(of: drag),
                         color: Color(nsColor: inkColor),
                         width: inkWidth * fitScale
                     )
@@ -254,6 +254,18 @@ struct SketchEditorView: View {
     }
 
     private enum DragPhase { case changed, ended }
+
+    /// Shape-drag end with the Shift constraint applied (square/circle takes
+    /// the larger drag extent). DragGesture values carry no modifier flags,
+    /// so Shift is read from the live NSEvent state — preview and commit both
+    /// route through here, so what the user sees is what gets committed.
+    private func shiftConstrainedEnd(of drag: (start: CGPoint, current: CGPoint)) -> CGPoint {
+        ShapeGeometry.constrainedEnd(
+            from: drag.start,
+            to: drag.current,
+            shift: NSEvent.modifierFlags.contains(.shift)
+        )
+    }
 
     private func handleDrag(_ location: CGPoint, phase: DragPhase) {
         if tool.isShape {
@@ -359,11 +371,14 @@ struct SketchEditorView: View {
     }
 
     /// Commit the shape drag as one PKStroke in content coordinates.
+    /// Rect/ellipse commit DENSE samples of the exact geometry (see
+    /// ShapeGeometry) — PKStrokePath splines through sparse points deform
+    /// corners into rounding and ellipses into their chords.
     private func commitShapeStroke() {
         defer { shapeDrag = nil }
         guard let drag = shapeDrag else { return }
         let a = contentPoint(drag.start)
-        let b = contentPoint(drag.current)
+        let b = contentPoint(shiftConstrainedEnd(of: drag))
         guard hypot(b.x - a.x, b.y - a.y) > 3 else { return }
         pushUndo()
         let now = Date().timeIntervalSinceReferenceDate
@@ -377,18 +392,9 @@ struct SketchEditorView: View {
         case .line, .arrow:
             pts = [point(a), point(b)]
         case .rect:
-            let c = CGPoint(x: a.x, y: b.y), d = CGPoint(x: b.x, y: a.y)
-            pts = [point(a), point(d), point(b), point(c), point(a)]
+            pts = ShapeGeometry.rectPoints(from: a, to: b).map(point)
         case .ellipse:
-            let mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
-            let rx = abs(b.x - a.x) / 2, ry = abs(b.y - a.y) / 2
-            // 8 control points around the ellipse (PKStrokePath interpolates).
-            var ring: [PKStrokePoint] = []
-            for i in 0...8 {
-                let t = CGFloat(i) / 8 * 2 * .pi
-                ring.append(point(CGPoint(x: mx + rx * cos(t), y: my + ry * sin(t))))
-            }
-            pts = ring
+            pts = ShapeGeometry.ellipsePoints(from: a, to: b).map(point)
         default:
             pts = [point(a), point(b)]
         }
@@ -588,7 +594,8 @@ struct SketchEditorView: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(tool == candidate ? Color.accentColor : Color.secondary)
-                .accessibilityIdentifier(candidate == .pen ? "sketchToolPen" : "sketchToolEraser")
+                .accessibilityIdentifier("sketchTool" + candidate.rawValue.prefix(1).uppercased()
+                                         + candidate.rawValue.dropFirst())
             }
 
             Divider().frame(height: 14)

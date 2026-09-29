@@ -1255,6 +1255,113 @@ extension SwiftMindMacUITests {
         XCTAssertEqual(nodeCount(), before, "Re-editing a sketch must not create a child")
     }
 
+    /// 1.2 shapes: rect/ellipse commit DENSE samples of the exact geometry —
+    /// PKStrokePath splines through sparse points (corners / a 9-point ring)
+    /// deform into rounded blobs. Draw each shape, decode the persisted
+    /// PKDrawing, and assert every interpolated point sits within 1.5pt of the
+    /// stroke's own bounding-box perimeter. Shift (perfect square/circle) can't
+    /// be held through a synthesized drag — that constraint is covered by
+    /// ShapeGeometryTests.
+    func testSketchShapesCommitTrueGeometry() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+
+        func drawShape(_ toolID: String, _ from: CGVector, _ to: CGVector) {
+            app.typeKey(.init("d"), modifierFlags: [])
+            XCTAssertTrue(editor.waitForExistence(timeout: 3), "sketch editor should open")
+            let button = element(toolID)
+            XCTAssertTrue(button.waitForExistence(timeout: 2), "\(toolID) toolbar button")
+            button.click()
+            let start = editor.coordinate(withNormalizedOffset: from)
+            let end = editor.coordinate(withNormalizedOffset: to)
+            start.press(forDuration: 0.05, thenDragTo: end)
+            RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
+            app.typeKey(.escape, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            XCTAssertFalse(editor.exists)
+        }
+
+        drawShape("sketchToolRect", CGVector(dx: 0.25, dy: 0.55), CGVector(dx: 0.6, dy: 0.85))
+        drawShape("sketchToolEllipse", CGVector(dx: 0.4, dy: 0.55), CGVector(dx: 0.7, dy: 0.85))
+
+        // Decode every committed sketch payload; at least one stroke per shape
+        // must hug its own bbox perimeter (a spline through sparse points
+        // bulges/sags many points off it).
+        RunLoop.current.run(until: Date().addingTimeInterval(2.5)) // autosave debounce
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
+
+        func denseStrokes(_ minPoints: Int) -> [[CGPoint]] {
+            guard !matches.isEmpty else { return [] }
+            var found: [[CGPoint]] = []
+            for match in matches {
+                guard let data = Data(base64Encoded: String(match.output.1)),
+                      let drawing = try? PKDrawing(data: data) else { continue }
+                for stroke in drawing.strokes {
+                    let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4))
+                        .map(\.location)
+                    if pts.count >= minPoints { found.append(pts) }
+                }
+            }
+            return found
+        }
+
+        // Rect stroke: every spline sample within 1.5pt of the stroke's own
+        // bbox perimeter (a spline through bare corners bulges far off it).
+        let rectLike = denseStrokes(100).filter { pts in
+            let xs = pts.map(\.x), ys = pts.map(\.y)
+            let box = CGRect(
+                x: (xs.min() ?? 0), y: (ys.min() ?? 0),
+                width: (xs.max() ?? 0) - (xs.min() ?? 0),
+                height: (ys.max() ?? 0) - (ys.min() ?? 0)
+            )
+            return pts.allSatisfy { Self.distance(from: $0, toPerimeterOf: box) <= 1.5 }
+        }
+        XCTAssertFalse(rectLike.isEmpty,
+                       "the rect tool must commit a stroke on the true rectangle")
+
+        // Ellipse stroke: every spline sample ON the ellipse fitted to its own
+        // bbox (normalized radius² within 5% of 1 — sub-pt spline deviation).
+        let ellipseLike = denseStrokes(60).filter { pts in
+            let xs = pts.map(\.x), ys = pts.map(\.y)
+            guard let minX = xs.min(), let maxX = xs.max(),
+                  let minY = ys.min(), let maxY = ys.max(),
+                  maxX - minX > 10, maxY - minY > 10 else { return false }
+            let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+            let rx = (maxX - minX) / 2, ry = (maxY - minY) / 2
+            return pts.allSatisfy { p in
+                let term = pow((p.x - cx) / rx, 2) + pow((p.y - cy) / ry, 2)
+                return abs(term - 1) <= 0.05
+            }
+        }
+        XCTAssertFalse(ellipseLike.isEmpty,
+                       "the ellipse tool must commit a dense, undeformed ring")
+    }
+
+    /// Min distance from a point to a rect's boundary (nearest edge distance
+    /// if inside, nearest edge segment if outside).
+    static func distance(from p: CGPoint, toPerimeterOf r: CGRect) -> CGFloat {
+        if r.contains(p) {
+            return min(p.x - r.minX, r.maxX - p.x, p.y - r.minY, r.maxY - p.y)
+        }
+        let corners = [
+            CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+            CGPoint(x: r.maxX, y: r.maxY), CGPoint(x: r.minX, y: r.maxY),
+            CGPoint(x: r.minX, y: r.minY),
+        ]
+        var best = CGFloat.greatestFiniteMagnitude
+        for (a, b) in zip(corners, corners.dropFirst()) {
+            let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+            let ap = CGPoint(x: p.x - a.x, y: p.y - a.y)
+            let t = min(max((ap.x * ab.x + ap.y * ab.y) / (ab.x * ab.x + ab.y * ab.y), 0), 1)
+            let closest = CGPoint(x: a.x + ab.x * t, y: a.y + ab.y * t)
+            best = min(best, hypot(p.x - closest.x, p.y - closest.y))
+        }
+        return best
+    }
+
     /// Regression: strokes from EVERY editing session must survive commit.
     /// macOS PencilKit corrupts composed PKStroke transforms on encode —
     /// the old re-center-on-open path scattered earlier strokes, so the
