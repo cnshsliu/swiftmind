@@ -109,7 +109,9 @@ public final class MapStore {
                 }
             }
         }
-        noteCardHeights = [:]
+        if Self.commandInvalidatesMeasuredHeights(command) {
+            noteCardHeights = [:]
+        }
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
@@ -134,19 +136,39 @@ public final class MapStore {
     }
 
     public func undo() throws {
+        let command = bus.peekUndo()
         try bus.undo(on: &map)
-        noteCardHeights = [:]
+        if Self.commandInvalidatesMeasuredHeights(command) {
+            noteCardHeights = [:]
+        }
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
     }
 
     public func redo() throws {
+        let command = bus.peekRedo()
         try bus.redo(on: &map)
-        noteCardHeights = [:]
+        if Self.commandInvalidatesMeasuredHeights(command) {
+            noteCardHeights = [:]
+        }
         invalidateGeometry()
         contentRevision &+= 1
         selectionRevision &+= 1
+    }
+
+    /// Measured note-card heights only depend on note content (and the set
+    /// of nodes carrying notes). Structure-only commands — reorder, fold,
+    /// insert, move, style — keep the cache so expanded cards do not flash
+    /// back to the AST estimate and re-measure on every relayout.
+    static func commandInvalidatesMeasuredHeights(_ command: (any MapCommand)?) -> Bool {
+        switch command {
+        case is SetNoteCommand, is SetSketchCommand, is DeleteNodesCommand,
+             is SetNoteExpandedCommand, is CompositeAgentCommand:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Close the coalescing group with this key (e.g. when the note editor

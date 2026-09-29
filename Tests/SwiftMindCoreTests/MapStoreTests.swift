@@ -223,4 +223,30 @@ final class MapStoreTests: XCTestCase {
         try store.undo()
         XCTAssertFalse(descendantsFolded(), "one undo unfolds the whole batch")
     }
+
+    // MARK: - Measured card heights survive structure-only commands (1.2 fix)
+
+    func testReorderKeepsMeasuredNoteHeights() throws {
+        let store = MapStore(map: .makeEmpty(title: "T"))
+        let root = store.map.root.id
+        let a = NodeID(rawValue: "n_a"), b = NodeID(rawValue: "n_b")
+        try store.dispatch(InsertChildCommand(parentID: root, newNodeID: a, text: "A", side: .right))
+        try store.dispatch(InsertChildCommand(parentID: root, newNodeID: b, text: "B", side: .right))
+        try store.dispatch(SetNoteExpandedCommand(nodeID: a, isNoteExpanded: true))
+
+        store.updateMeasuredNoteHeight(200, for: a)
+        XCTAssertEqual(store.noteCardHeights[a], 200)
+
+        // Pure structure: reorder must not drop the measured height.
+        try store.dispatch(MoveNodeCommand(nodeID: b, newParentID: root, index: 0))
+        XCTAssertEqual(store.noteCardHeights[a], 200, "reorder must keep measured heights")
+
+        // Fold is structure-only too.
+        try store.dispatch(SetFoldedCommand(nodeID: a, isFolded: true))
+        XCTAssertEqual(store.noteCardHeights[a], 200, "fold must keep measured heights")
+
+        // Note content change must invalidate.
+        try store.dispatch(SetNoteCommand(nodeID: a, noteMarkdown: "changed"))
+        XCTAssertNil(store.noteCardHeights[a], "note edit must invalidate the measured height")
+    }
 }

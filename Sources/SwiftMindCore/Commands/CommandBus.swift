@@ -15,6 +15,11 @@ public final class CommandBus: @unchecked Sendable {
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
 
+    /// Next command undo/redo would act on (nil when the stacks are empty).
+    /// MapStore uses the type to decide whether measured note heights die.
+    public func peekUndo() -> (any MapCommand)? { undoStack.last }
+    public func peekRedo() -> (any MapCommand)? { redoStack.last }
+
     public func execute(_ command: any MapCommand, on map: inout MindMap) throws {
         try command.execute(on: &map)
         if let key = command.coalescingKey,
