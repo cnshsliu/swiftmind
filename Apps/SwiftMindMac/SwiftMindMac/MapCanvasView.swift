@@ -1794,7 +1794,7 @@ struct MapCanvasView: View {
         sketchCommitTask?.cancel()
         sketchCommitTask = nil
         if committing {
-            commitSketchDraft()
+            commitSketchDraft(force: true)
         }
         drawingNodeID = nil
         sketchIsDirty = false
@@ -1823,8 +1823,12 @@ struct MapCanvasView: View {
     /// command batch. No content → placeholder board. A draft that fails to
     /// decode is NOT treated as empty — wiping real content on a transient
     /// decode failure is unrecoverable, so we keep the last commit.
-    private func commitSketchDraft(keepFrame: Bool = false) {
-        guard sketchIsDirty,
+    private func commitSketchDraft(keepFrame: Bool = false, force: Bool = false) {
+        // `force` is the close path: a debounced (frame-pinned) commit may
+        // have already cleared the dirty flag while the node still carries
+        // the PINNED board size — the final trim must always run so the
+        // persisted width/height matches the content.
+        guard force || sketchIsDirty,
               let id = drawingNodeID,
               session.store.map.node(id: id) != nil else { return }
         let padding = LayoutConfig().sketchTrimPadding

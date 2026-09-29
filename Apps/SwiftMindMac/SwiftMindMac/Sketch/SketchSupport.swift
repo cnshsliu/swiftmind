@@ -31,26 +31,60 @@ enum SketchSupport {
         if let hit = cache.object(forKey: key) { return hit }
         guard let drawing = try? PKDrawing(data: data) else { return nil }
         let boardRect = CGRect(origin: .zero, size: boardSize)
+
+        // Frame the FULL content (strokes ∪ texts). The model's boardSize can
+        // lag the data mid-session (frames are pinned while the editor is open
+        // so the map doesn't relayout under it), and rendering the stale
+        // (0,0,w,h) region cropped the thumbnail to a corner of the drawing.
+        var region = drawing.bounds
+        if drawing.strokes.isEmpty || region.isNull || region.isEmpty || region.isInfinite {
+            region = .null
+        }
+        for text in texts {
+            region = region.union(CGRect(
+                x: text.x, y: text.y, width: text.width, height: text.height
+            ))
+        }
+        if region.isNull || region.isEmpty || region.isInfinite {
+            region = boardRect
+        } else {
+            region = region.insetBy(dx: -2, dy: -2) // don't shave stroke edges
+        }
+
         // Aqua-forced: under Dark appearance PKDrawing.image() inverts black
         // and white inks for legibility — thumbnails must show literal colors.
         var rendered: NSImage?
         if let aqua = NSAppearance(named: .aqua) {
             aqua.performAsCurrentDrawingAppearance {
-                rendered = drawing.image(from: boardRect, scale: bucket)
+                rendered = drawing.image(from: region, scale: bucket)
             }
         }
-        let rasterized = rendered ?? drawing.image(from: boardRect, scale: bucket)
-        guard !texts.isEmpty else {
-            cache.setObject(rasterized, forKey: key)
-            return rasterized
-        }
-        // Compose text over the rasterized strokes in a flipped context
-        // (content coordinates are y-down).
+        let rasterized = rendered ?? drawing.image(from: region, scale: bucket)
+
+        // Aspect-fit the content region into the board frame, centered. With
+        // the frame matching the trimmed content (post-close steady state)
+        // the fit is ~1:1 and this is a no-op visually.
+        let fit = min(boardSize.width / max(region.width, 1),
+                      boardSize.height / max(region.height, 1))
+        let dest = CGRect(
+            x: (boardSize.width - region.width * fit) / 2,
+            y: (boardSize.height - region.height * fit) / 2,
+            width: region.width * fit,
+            height: region.height * fit
+        )
         let composed = NSImage(size: boardSize)
         composed.lockFocusFlipped(true)
-        rasterized.draw(in: boardRect)
-        for element in texts {
-            SketchTextSupport.draw(element, in: boardRect)
+        rasterized.draw(in: dest)
+        if !texts.isEmpty {
+            let cg = NSGraphicsContext.current?.cgContext
+            cg?.saveGState()
+            cg?.translateBy(x: dest.minX, y: dest.minY)
+            cg?.scaleBy(x: fit, y: fit)
+            cg?.translateBy(x: -region.minX, y: -region.minY)
+            for element in texts {
+                SketchTextSupport.draw(element, in: region)
+            }
+            cg?.restoreGState()
         }
         composed.unlockFocus()
         cache.setObject(composed, forKey: key)
