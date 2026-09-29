@@ -1874,10 +1874,13 @@ struct MapCanvasView: View {
         sketchIsDirty = false
     }
 
+    /// Near-full-coverage board: the editor is a modal creative surface, so it
+    /// claims the whole map area minus a thin floating margin — maximum room
+    /// to draw, far fewer edge auto-pans.
     private var initialSketchEditorSize: CGSize {
         CGSize(
-            width: min(max(canvasSize.width * 0.7, 480), max(320, canvasSize.width - 32)),
-            height: min(max(canvasSize.height * 0.7, 360), max(240, canvasSize.height - 32))
+            width: max(320, canvasSize.width - 48),
+            height: max(240, canvasSize.height - 48)
         )
     }
 
@@ -1889,10 +1892,10 @@ struct MapCanvasView: View {
     @ViewBuilder
     private func sketchEditorOverlay(for visual: NodeVisual, viewSize: CGSize) -> some View {
         let frame = viewFrame(for: visual.frame, viewSize: viewSize)
-        let editorW = min(sketchEditorSize.width, max(320, viewSize.width - 32))
-        let editorH = min(sketchEditorSize.height, max(240, viewSize.height - 64))
-        let centerX = min(max(frame.midX, editorW / 2 + 16), viewSize.width - editorW / 2 - 16)
-        let centerY = min(max(frame.midY, editorH / 2 + 16), viewSize.height - editorH / 2 - 16)
+        let editorW = min(sketchEditorSize.width, max(320, viewSize.width - 48))
+        let editorH = min(sketchEditorSize.height, max(240, viewSize.height - 48))
+        let centerX = min(max(frame.midX, editorW / 2 + 24), viewSize.width - editorW / 2 - 24)
+        let centerY = min(max(frame.midY, editorH / 2 + 24), viewSize.height - editorH / 2 - 24)
 
         SketchEditorView(
             drawingData: $sketchDraft,
