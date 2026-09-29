@@ -10,6 +10,8 @@ public enum MapOp: Equatable, Sendable {
     case setSketch(nodeID: NodeID, data: Data?, width: Double?, height: Double?)
     /// Sketch-board text elements (text boxes / sticky notes); nil removes all.
     case setSketchTexts(nodeID: NodeID, texts: [SketchText]?)
+    /// Sketch-board shape elements (PPT-style); nil removes all.
+    case setSketchShapes(nodeID: NodeID, shapes: [SketchShape]?)
     /// Empty value removes the attribute.
     case setAttribute(nodeID: NodeID, name: String, value: String)
     /// nil or empty formula clears it.
@@ -30,6 +32,7 @@ public enum MapOp: Equatable, Sendable {
         case .setNote: return "set-note"
         case .setSketch: return "set-sketch"
         case .setSketchTexts: return "set-sketch-texts"
+        case .setSketchShapes: return "set-sketch-shapes"
         case .setAttribute: return "set-attr"
         case .setFormula: return "set-formula"
         case .setFolded(_, let folded): return folded ? "fold" : "unfold"
@@ -91,6 +94,7 @@ extension MapOp {
         case .addChild(_, let newNodeID, _, _): return [newNodeID]
         case .addSibling(_, let newNodeID, _): return [newNodeID]
         case .setText(let id, _), .setNote(let id, _), .setSketch(let id, _, _, _), .setSketchTexts(let id, _),
+             .setSketchShapes(let id, _),
              .setAttribute(let id, _, _), .setFormula(let id, _), .setFolded(let id, _), .setNoteExpanded(let id, _),
              .setPin(let id, _), .setLinks(let id, _):
             return [id]
@@ -115,6 +119,8 @@ extension MapOp {
             return SetSketchCommand(nodeID: nodeID, sketch: data, width: width, height: height)
         case let .setSketchTexts(nodeID, texts):
             return SetSketchTextsCommand(nodeID: nodeID, texts: texts)
+        case let .setSketchShapes(nodeID, shapes):
+            return SetSketchShapesCommand(nodeID: nodeID, shapes: shapes)
         case let .setAttribute(nodeID, name, value):
             if value.isEmpty {
                 guard let node = map.node(id: nodeID) else {
@@ -145,7 +151,7 @@ extension MapOp {
 
 extension MapOp: Codable {
     private enum CodingKeys: String, CodingKey {
-        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index, links, data, w, h, texts
+        case op, parent, sibling, id, ids, text, side, markdown, name, value, formula, x, y, to, index, links, data, w, h, texts, shapes
     }
 
     private enum WireError: Error, CustomStringConvertible, LocalizedError {
@@ -232,6 +238,11 @@ extension MapOp: Codable {
                 nodeID: try nodeID(.id),
                 texts: try c.decodeIfPresent([SketchText].self, forKey: .texts)
             )
+        case "set-sketch-shapes":
+            self = .setSketchShapes(
+                nodeID: try nodeID(.id),
+                shapes: try c.decodeIfPresent([SketchShape].self, forKey: .shapes)
+            )
         case "set-attr":
             self = .setAttribute(
                 nodeID: try nodeID(.id),
@@ -312,6 +323,9 @@ extension MapOp: Codable {
         case let .setSketchTexts(nodeID, texts):
             try c.encode(nodeID.rawValue, forKey: .id)
             try c.encodeIfPresent(texts, forKey: .texts)
+        case let .setSketchShapes(nodeID, shapes):
+            try c.encode(nodeID.rawValue, forKey: .id)
+            try c.encodeIfPresent(shapes, forKey: .shapes)
         case let .setAttribute(nodeID, name, value):
             try c.encode(nodeID.rawValue, forKey: .id)
             try c.encode(name, forKey: .name)

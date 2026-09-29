@@ -108,7 +108,7 @@ public enum ShapeGeometry {
     }
 
     /// The sketch board's shape vocabulary (the app's SketchTool maps onto it).
-    public enum ShapeKind: Equatable, Sendable {
+    public enum ShapeKind: String, Equatable, Sendable {
         case line, arrow, rect, roundedRect, ellipse, triangle, diamond, star, bubble
     }
 

@@ -502,6 +502,7 @@ struct SketchNotePreview: View {
             nodeID: node.id,
             data: data,
             texts: node.sketchTexts ?? [],
+            shapes: node.sketchShapes ?? [],
             boardSize: size,
             scale: 2
         )

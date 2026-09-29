@@ -111,6 +111,9 @@ struct MapCanvasView: View {
     @State private var sketchTextsDraft: [SketchText] = []
     /// Model baseline for the texts — external-change detection like above.
     @State private var lastCommittedSketchTexts: [SketchText] = []
+    /// Shape elements draft (PPT-style), content coordinates.
+    @State private var sketchShapesDraft: [SketchShape] = []
+    @State private var lastCommittedSketchShapes: [SketchShape] = []
     @State private var sketchCommitTask: Task<Void, Never>?
     /// True once the user drew/erased since open/last commit — close without
     /// edits must not push a redundant SetSketchCommand.
@@ -389,6 +392,10 @@ struct MapCanvasView: View {
                     if (node.sketchTexts ?? []) != lastCommittedSketchTexts {
                         sketchTextsDraft = node.sketchTexts ?? []
                         lastCommittedSketchTexts = sketchTextsDraft
+                    }
+                    if (node.sketchShapes ?? []) != lastCommittedSketchShapes {
+                        sketchShapesDraft = node.sketchShapes ?? []
+                        lastCommittedSketchShapes = sketchShapesDraft
                     }
                 } else {
                     // Node vanished — close without committing.
@@ -1143,6 +1150,7 @@ struct MapCanvasView: View {
                        nodeID: node.id,
                        data: data,
                        texts: model.sketchTexts ?? [],
+                       shapes: model.sketchShapes ?? [],
                        boardSize: CGSize(width: contentW, height: contentH),
                        scale: scale
                    ) {
@@ -1736,6 +1744,7 @@ struct MapCanvasView: View {
 
     private func nodeHasSketchContent(_ node: Node) -> Bool {
         if let texts = node.sketchTexts, !texts.isEmpty { return true }
+        if let shapes = node.sketchShapes, !shapes.isEmpty { return true }
         guard let sketch = node.sketch else { return false }
         return sketch != SketchSupport.emptyDrawingData()
     }
@@ -1775,6 +1784,8 @@ struct MapCanvasView: View {
         }
         sketchTextsDraft = node.sketchTexts ?? []
         lastCommittedSketchTexts = sketchTextsDraft
+        sketchShapesDraft = node.sketchShapes ?? []
+        lastCommittedSketchShapes = sketchShapesDraft
         sketchIsDirty = false
         drawingNodeID = nodeID
         SketchEventGuard.editorIsActive = true
@@ -1832,7 +1843,9 @@ struct MapCanvasView: View {
               let id = drawingNodeID,
               session.store.map.node(id: id) != nil else { return }
         let padding = LayoutConfig().sketchTrimPadding
-        if let trimmed = SketchSupport.trim(sketchDraft, texts: sketchTextsDraft, padding: padding) {
+        if let trimmed = SketchSupport.trim(
+            sketchDraft, texts: sketchTextsDraft, shapes: sketchShapesDraft, padding: padding
+        ) {
             // Mid-session (keepFrame): pin the board size to the model's
             // current value — the stroke payload is still trimmed/normalized,
             // but the node frame (and thus the map layout) must not move
@@ -1858,10 +1871,15 @@ struct MapCanvasView: View {
             if modelTexts != (lastCommittedSketchTexts.isEmpty ? nil : lastCommittedSketchTexts) {
                 ops.append(.setSketchTexts(nodeID: id, texts: modelTexts))
             }
+            let modelShapes = trimmed.shapes.isEmpty ? nil : trimmed.shapes
+            if modelShapes != (lastCommittedSketchShapes.isEmpty ? nil : lastCommittedSketchShapes) {
+                ops.append(.setSketchShapes(nodeID: id, shapes: modelShapes))
+            }
             guard !ops.isEmpty else { return }
             session.applyQuiet(CompositeAgentCommand(ops: ops))
             lastCommittedSketch = trimmed.data
             lastCommittedSketchTexts = trimmed.texts
+            lastCommittedSketchShapes = trimmed.shapes
         } else {
             let decodesToNoStrokes = ((try? PKDrawing(data: sketchDraft))?.strokes.isEmpty) == true
             guard decodesToNoStrokes else { return }
@@ -1900,6 +1918,7 @@ struct MapCanvasView: View {
         SketchEditorView(
             drawingData: $sketchDraft,
             texts: $sketchTextsDraft,
+            shapes: $sketchShapesDraft,
             tool: $sketchTool,
             inkColor: $sketchInkColor,
             inkWidth: $sketchInkWidth,

@@ -14,6 +14,9 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     /// content coordinates. Optional so files written before texts existed
     /// decode unchanged.
     public var sketchTexts: [SketchText]?
+    /// Shape elements on the sketch board (PPT-style: geometry + fill +
+    /// centered label). Optional for the same decode-compat reason.
+    public var sketchShapes: [SketchShape]?
     public var links: [NodeLink]
     public var icons: [NodeIcon]
     public var attributes: [NodeAttribute]
@@ -37,6 +40,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         sketchWidth: Double? = nil,
         sketchHeight: Double? = nil,
         sketchTexts: [SketchText]? = nil,
+        sketchShapes: [SketchShape]? = nil,
         links: [NodeLink] = [],
         icons: [NodeIcon] = [],
         attributes: [NodeAttribute] = [],
@@ -56,6 +60,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.sketchWidth = sketchWidth
         self.sketchHeight = sketchHeight
         self.sketchTexts = sketchTexts
+        self.sketchShapes = sketchShapes
         self.links = links
         self.icons = icons
         self.attributes = attributes

@@ -1255,13 +1255,10 @@ extension SwiftMindMacUITests {
         XCTAssertEqual(nodeCount(), before, "Re-editing a sketch must not create a child")
     }
 
-    /// 1.2 shapes: rect/ellipse commit DENSE samples of the exact geometry —
-    /// PKStrokePath splines through sparse points (corners / a 9-point ring)
-    /// deform into rounded blobs. Draw each shape, decode the persisted
-    /// PKDrawing, and assert every interpolated point sits within 1.5pt of the
-    /// stroke's own bounding-box perimeter. Shift (perfect square/circle) can't
-    /// be held through a synthesized drag — that constraint is covered by
-    /// ShapeGeometryTests.
+    /// Shape tools commit MODEL elements (PPT-style): geometry + outline
+    /// styling persisted via node-sketch-shapes. Precision comes from
+    /// ShapeGeometry (core-tested); here assert the payload carries the
+    /// drawn shapes with sane frames.
     func testSketchShapesCommitTrueGeometry() throws {
         focusCanvasWithSelection()
         let editor = element("sketchEditor")
@@ -1280,67 +1277,82 @@ extension SwiftMindMacUITests {
             start.press(forDuration: 0.05, thenDragTo: end)
             RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
             app.typeKey(.escape, modifierFlags: [])
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-            XCTAssertFalse(editor.exists)
+            RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
         }
 
         drawShape("Rectangle", CGVector(dx: 0.25, dy: 0.55), CGVector(dx: 0.6, dy: 0.85))
         drawShape("Ellipse", CGVector(dx: 0.4, dy: 0.55), CGVector(dx: 0.7, dy: 0.85))
 
-        // Decode every committed sketch payload; at least one stroke per shape
-        // must hug its own bbox perimeter (a spline through sparse points
-        // bulges/sags many points off it).
-        RunLoop.current.run(until: Date().addingTimeInterval(2.5)) // autosave debounce
+        let shapes = try decodePersistedShapes()
+        let rect = shapes.first { $0["kind"] as? String == "rect" }
+        XCTAssertNotNil(rect, "the rect tool must persist a rect element")
+        let ellipse = shapes.first { $0["kind"] as? String == "ellipse" }
+        XCTAssertNotNil(ellipse, "the ellipse tool must persist an ellipse element")
+        for shape in [rect, ellipse].compactMap({ $0 }) {
+            XCTAssertGreaterThanOrEqual(shape["width"] as? Double ?? 0, 40)
+            XCTAssertGreaterThanOrEqual(shape["height"] as? Double ?? 0, 30)
+            XCTAssertNotNil(shape["strokeColor"])
+        }
+    }
+
+    /// Shape labels (PPT-style): text tool click on a shape edits its centered
+    /// label; commit persists text + font and grows the frame to fit.
+    func testSketchShapeLabelCommit() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        app.activate() // another app (browser) can steal focus mid-test
+        let menu = element("sketchShapesMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        menu.click()
+        let rectItem = app.menuItems["Rectangle"]
+        XCTAssertTrue(rectItem.waitForExistence(timeout: 3))
+        rectItem.click()
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.7))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        // Text tool click INSIDE the rect → label editor.
+        element("sketchToolText").click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.48, dy: 0.6)).click()
+        let labelEditor = element("sketchTextEditor")
+        XCTAssertTrue(labelEditor.waitForExistence(timeout: 3),
+                      "text tool on a shape should open the label editor")
+        app.typeText("start here")
+        element("sketchTextCommit").click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(labelEditor.exists)
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let shapes = try decodePersistedShapes()
+        let labeled = shapes.first {
+            ($0["text"] as? String)?.contains("start here") == true && $0["kind"] as? String == "rect"
+        }
+        XCTAssertNotNil(labeled, "the rect label must persist on the shape")
+        XCTAssertEqual(labeled?["fontFamily"] as? String, "Helvetica")
+        XCTAssertGreaterThanOrEqual(labeled?["fontSize"] as? Double ?? 0, 12)
+    }
+
+    /// Decode every persisted node-sketch-shapes payload on the scratch map.
+    func decodePersistedShapes() throws -> [[String: Any]] {
         let scratch = NSHomeDirectory()
             + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
         let html = try String(contentsOfFile: scratch, encoding: .utf8)
-        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
-
-        func denseStrokes(_ minPoints: Int) -> [[CGPoint]] {
-            guard !matches.isEmpty else { return [] }
-            var found: [[CGPoint]] = []
-            for match in matches {
-                guard let data = Data(base64Encoded: String(match.output.1)),
-                      let drawing = try? PKDrawing(data: data) else { continue }
-                for stroke in drawing.strokes {
-                    let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4))
-                        .map(\.location)
-                    if pts.count >= minPoints { found.append(pts) }
-                }
+        let matches = html.matches(of: #/<div class="node-sketch-shapes" hidden="hidden">([A-Za-z0-9+/=]+)<\/div>/#)
+        var all: [[String: Any]] = []
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                continue
             }
-            return found
+            all.append(contentsOf: json)
         }
-
-        // Rect stroke: every spline sample within 1.5pt of the stroke's own
-        // bbox perimeter (a spline through bare corners bulges far off it).
-        let rectLike = denseStrokes(100).filter { pts in
-            let xs = pts.map(\.x), ys = pts.map(\.y)
-            let box = CGRect(
-                x: (xs.min() ?? 0), y: (ys.min() ?? 0),
-                width: (xs.max() ?? 0) - (xs.min() ?? 0),
-                height: (ys.max() ?? 0) - (ys.min() ?? 0)
-            )
-            return pts.allSatisfy { Self.distance(from: $0, toPerimeterOf: box) <= 1.5 }
-        }
-        XCTAssertFalse(rectLike.isEmpty,
-                       "the rect tool must commit a stroke on the true rectangle")
-
-        // Ellipse stroke: every spline sample ON the ellipse fitted to its own
-        // bbox (normalized radius² within 5% of 1 — sub-pt spline deviation).
-        let ellipseLike = denseStrokes(60).filter { pts in
-            let xs = pts.map(\.x), ys = pts.map(\.y)
-            guard let minX = xs.min(), let maxX = xs.max(),
-                  let minY = ys.min(), let maxY = ys.max(),
-                  maxX - minX > 10, maxY - minY > 10 else { return false }
-            let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
-            let rx = (maxX - minX) / 2, ry = (maxY - minY) / 2
-            return pts.allSatisfy { p in
-                let term = pow((p.x - cx) / rx, 2) + pow((p.y - cy) / ry, 2)
-                return abs(term - 1) <= 0.05
-            }
-        }
-        XCTAssertFalse(ellipseLike.isEmpty,
-                       "the ellipse tool must commit a dense, undeformed ring")
+        return all
     }
 
     /// 1.2 Freeform parity: the marker commits PKInk(.marker) strokes.
@@ -1376,10 +1388,9 @@ extension SwiftMindMacUITests {
         XCTAssertTrue(markerFound, "the marker tool must commit a marker-ink stroke")
     }
 
-    /// Moving a committed shape with the select tool must not deform it:
-    /// the move used to resample the spline at 4pt and feed those points
-    /// back as control points, discarding the dense shape sampling. Draw a
-    /// star, move it, and assert the moved stroke still hugs a true star.
+    /// Moving a shape with the select tool keeps its geometry by
+    /// construction (model element — the frame translates, nothing resamples).
+    /// Assert the frame actually moved and the kind survives.
     func testSketchMoveKeepsShapeGeometry() throws {
         focusCanvasWithSelection()
         let editor = element("sketchEditor")
@@ -1398,54 +1409,43 @@ extension SwiftMindMacUITests {
         start.press(forDuration: 0.05, thenDragTo: end)
         RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
 
-        // Select the star (tap its top spike ≈ drag start), then drag it aside.
+        // Anchor element: trim normalizes the CONTENT UNION to the padding
+        // origin on every commit, so a single-element board would hide the
+        // move in absolute coordinates. The anchor at the far left pins the
+        // union origin, making the star's rightward move observable in x.
+        app.activate() // focus can be stolen between gestures
+        let menuAnchor = element("sketchShapesMenu")
+        XCTAssertTrue(menuAnchor.waitForExistence(timeout: 3))
+        menuAnchor.click()
+        let anchorItem = app.menuItems["Rectangle"]
+        XCTAssertTrue(anchorItem.waitForExistence(timeout: 3))
+        anchorItem.click()
+        let anchorStart = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+        let anchorEnd = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.26, dy: 0.56))
+        anchorStart.press(forDuration: 0.05, thenDragTo: anchorEnd)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        // Select the star (tap its center), then drag it aside. Re-activate:
+        // a browser window can steal focus mid-test and swallow the clicks.
+        app.activate()
         element("sketchToolSelect").click()
-        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52)).click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).click()
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        let from = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6))
-        let to = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.65))
+        let from = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        let to = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.68))
         from.press(forDuration: 0.05, thenDragTo: to)
         RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
 
-        let scratch = NSHomeDirectory()
-            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
-        let html = try String(contentsOfFile: scratch, encoding: .utf8)
-        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
-        var starFound = false
-        for match in matches {
-            guard let data = Data(base64Encoded: String(match.output.1)),
-                  let drawing = try? PKDrawing(data: data) else { continue }
-            for stroke in drawing.strokes {
-                let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map(\.location)
-                guard pts.count > 60 else { continue }
-                let xs = pts.map(\.x), ys = pts.map(\.y)
-                guard let minX = xs.min(), let maxX = xs.max(),
-                      let minY = ys.min(), let maxY = ys.max(),
-                      maxX - minX > 10, maxY - minY > 10 else { continue }
-                let rx = (maxX - minX) / (2 * cos(CGFloat.pi / 10))
-                let ry = (maxY - minY) / (1 + sin(CGFloat.pi * 0.3))
-                let cx = (minX + maxX) / 2, cy = minY + ry
-                var star: [CGPoint] = []
-                for i in 0..<10 {
-                    let angle = -CGFloat.pi / 2 + CGFloat(i) * .pi / 5
-                    let f: CGFloat = i.isMultiple(of: 2) ? 1 : 0.45
-                    star.append(CGPoint(x: cx + rx * f * cos(angle), y: cy + ry * f * sin(angle)))
-                }
-                func dist(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
-                    let abx = b.x - a.x, aby = b.y - a.y
-                    let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
-                    return hypot(p.x - a.x - abx * t, p.y - a.y - aby * t)
-                }
-                if pts.allSatisfy({ p in
-                    zip(star, star.dropFirst() + [star[0]]).map({ dist(p, $0.0, $0.1) }).min()! <= 1.5
-                }) {
-                    starFound = true
-                }
-            }
-        }
-        XCTAssertTrue(starFound, "a moved star must still be a true five-point star")
+        let shapes = try decodePersistedShapes()
+        let star = shapes.first { $0["kind"] as? String == "star" }
+        XCTAssertNotNil(star, "a star must persist")
+        // The star moved ~0.12 board-widths right of its draw position; with
+        // the anchor pinning the union origin, x must clearly exceed the
+        // anchor band (~pad 8 + anchor ~110pt).
+        let x = star?["x"] as? Double ?? 0
+        XCTAssertGreaterThan(x, 200, "the star's frame should have moved right (got \(x))")
     }
 
     /// Black ink must STAY black: PKDrawing.image() misreads grayscale
@@ -1486,8 +1486,8 @@ extension SwiftMindMacUITests {
         XCTAssertTrue(blackStrokeFound, "a black-ink stroke must persist as opaque sRGB black")
     }
 
-    /// 1.2 Freeform parity: shapes browser offers the new shapes and their
-    /// committed strokes hug the expected polylines (triangle / star).
+    /// 1.2 Freeform parity: the shapes browser offers the full library and
+    /// each pick persists a MODEL shape of the right kind.
     func testSketchShapesMenuLibrary() throws {
         focusCanvasWithSelection()
         let editor = element("sketchEditor")
@@ -1517,70 +1517,15 @@ extension SwiftMindMacUITests {
         pickShape("Rounded Rectangle")
         draw()
         app.typeKey(.escape, modifierFlags: [])
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
 
-        RunLoop.current.run(until: Date().addingTimeInterval(2.5)) // autosave
-        let scratch = NSHomeDirectory()
-            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
-        let html = try String(contentsOfFile: scratch, encoding: .utf8)
-        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
-        var triangleFound = false
-        var starFound = false
-        for match in matches {
-            guard let data = Data(base64Encoded: String(match.output.1)),
-                  let drawing = try? PKDrawing(data: data) else { continue }
-            for stroke in drawing.strokes {
-                let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map(\.location)
-                guard pts.count > 40 else { continue }
-                let xs = pts.map(\.x), ys = pts.map(\.y)
-                guard let minX = xs.min(), let maxX = xs.max(),
-                      let minY = ys.min(), let maxY = ys.max() else { continue }
-                func dist(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
-                    let abx = b.x - a.x, aby = b.y - a.y
-                    let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
-                    return hypot(p.x - a.x - abx * t, p.y - a.y - aby * t)
-                }
-                // Triangle: three vertices from the stroke's own bbox.
-                let tri = [
-                    CGPoint(x: (minX + maxX) / 2, y: minY),
-                    CGPoint(x: maxX, y: maxY),
-                    CGPoint(x: minX, y: maxY),
-                ]
-                if pts.allSatisfy({ p in
-                    zip(tri, tri.dropFirst() + [tri[0]]).map({ dist(p, $0.0, $0.1) }).min()! <= 1.5
-                }) {
-                    triangleFound = true
-                }
-                // Star: ten vertices recomputed with the production formulas.
-                let rx = (maxX - minX) / (2 * cos(CGFloat.pi / 10))
-                let ry = (maxY - minY) / (1 + sin(CGFloat.pi * 0.3))
-                let cx = (minX + maxX) / 2, cy = minY + ry
-                var star: [CGPoint] = []
-                for i in 0..<10 {
-                    let angle = -CGFloat.pi / 2 + CGFloat(i) * .pi / 5
-                    let f: CGFloat = i.isMultiple(of: 2) ? 1 : 0.45
-                    star.append(CGPoint(x: cx + rx * f * cos(angle), y: cy + ry * f * sin(angle)))
-                }
-                if pts.allSatisfy({ p in
-                    zip(star, star.dropFirst() + [star[0]]).map({ dist(p, $0.0, $0.1) }).min()! <= 1.5
-                }) {
-                    starFound = true
-                }
-            }
+        let shapes = try decodePersistedShapes()
+        for kind in ["triangle", "star", "roundedRect"] {
+            XCTAssertTrue(
+                shapes.contains { $0["kind"] as? String == kind },
+                "the shapes library must persist a \(kind) element"
+            )
         }
-        XCTAssertTrue(triangleFound, "the triangle tool must commit a true triangle")
-        XCTAssertTrue(starFound, "the star tool must commit a true five-point star")
-        // Rounded rect: exact geometry is guarded by ShapeGeometryTests
-        // (corner-quarter assertions); here just confirm a dense outline
-        // committed alongside the others.
-        var denseOutlines = 0
-        for match in matches {
-            guard let data = Data(base64Encoded: String(match.output.1)),
-                  let drawing = try? PKDrawing(data: data) else { continue }
-            denseOutlines += drawing.strokes.filter { $0.path.count > 100 }.count
-        }
-        XCTAssertGreaterThanOrEqual(denseOutlines, 3,
-                                    "all three library shapes must commit dense outlines")
     }
 
     /// 1.2 Freeform parity: text boxes and sticky notes commit to the model
@@ -1656,7 +1601,7 @@ extension SwiftMindMacUITests {
         element("sketchInk4").click()
 
         // Draw: if the ink pick had kicked the tool back to pen, this would
-        // commit a scribble instead of an ellipse ring.
+        // commit a scribble instead of a shape element.
         let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
         let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.85))
         start.press(forDuration: 0.05, thenDragTo: end)
@@ -1664,33 +1609,17 @@ extension SwiftMindMacUITests {
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
 
-        let scratch = NSHomeDirectory()
-            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
-        let html = try String(contentsOfFile: scratch, encoding: .utf8)
-        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
-        var ellipseFound = false
-        for match in matches {
-            guard let data = Data(base64Encoded: String(match.output.1)),
-                  let drawing = try? PKDrawing(data: data) else { continue }
-            for stroke in drawing.strokes {
-                let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map(\.location)
-                guard pts.count >= 60 else { continue }
-                let xs = pts.map(\.x), ys = pts.map(\.y)
-                guard let minX = xs.min(), let maxX = xs.max(),
-                      let minY = ys.min(), let maxY = ys.max(),
-                      maxX - minX > 10, maxY - minY > 10 else { continue }
-                let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
-                let rx = (maxX - minX) / 2, ry = (maxY - minY) / 2
-                if pts.allSatisfy({ p in
-                    let term = pow((p.x - cx) / rx, 2) + pow((p.y - cy) / ry, 2)
-                    return abs(term - 1) <= 0.05
-                }) {
-                    ellipseFound = true
-                }
-            }
+        let shapes = try decodePersistedShapes()
+        // systemRed resolves differently per appearance/process
+        // (#FF0000 light / #FF9230 dark) — assert the ink APPLIED (no longer
+        // the default black) on an ellipse element.
+        let ellipse = shapes.first {
+            $0["kind"] as? String == "ellipse"
+                && ($0["strokeColor"] as? String)?.uppercased() != "#000000"
         }
-        XCTAssertTrue(ellipseFound,
-                      "after an ink pick the ellipse tool must still draw ellipses")
+        XCTAssertNotNil(ellipse,
+                        "after a red-ink pick the ellipse tool must still draw a red ellipse")
+        XCTAssertGreaterThanOrEqual(ellipse?["width"] as? Double ?? 0, 40)
     }
 
     /// Min distance from a point to a rect's boundary (nearest edge distance

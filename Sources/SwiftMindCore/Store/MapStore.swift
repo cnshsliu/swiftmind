@@ -165,13 +165,15 @@ public final class MapStore {
         switch command {
         case is SetNoteCommand, is DeleteNodesCommand, is SetNoteExpandedCommand:
             return true
+        case is SetSketchShapesCommand:
+            return false // sketch-only, like SetSketch/SetSketchTexts below
         case let composite as CompositeAgentCommand:
             // Sketch-only batches (drawing/text edits) never touch note
             // content — clearing the cache on every stroke commit made all
             // markdown cards flash back to the AST estimate and re-measure.
             return composite.ops.contains { op in
                 switch op {
-                case .setSketch, .setSketchTexts: return false
+                case .setSketch, .setSketchTexts, .setSketchShapes: return false
                 default: return true
                 }
             }

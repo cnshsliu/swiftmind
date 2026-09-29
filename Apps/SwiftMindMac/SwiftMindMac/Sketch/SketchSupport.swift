@@ -23,11 +23,12 @@ enum SketchSupport {
         nodeID: NodeID,
         data: Data,
         texts: [SketchText],
+        shapes: [SketchShape] = [],
         boardSize: CGSize,
         scale: CGFloat
     ) -> NSImage? {
         let bucket = max(1, (scale * 2).rounded())
-        let key = "\(nodeID.rawValue)#\(data.hashValue)#\(texts.map(\.id).joined().hashValue)#\(texts.map(\.text).joined().hashValue)#\(Int(bucket))" as NSString
+        let key = "\(nodeID.rawValue)#\(data.hashValue)#\(texts.map(\.id).joined().hashValue)#\(texts.map(\.text).joined().hashValue)#\(shapes.count)#\(shapes.map { $0.text ?? "" }.joined().hashValue)#\(Int(bucket))" as NSString
         if let hit = cache.object(forKey: key) { return hit }
         guard let drawing = try? PKDrawing(data: data) else { return nil }
         let boardRect = CGRect(origin: .zero, size: boardSize)
@@ -43,6 +44,13 @@ enum SketchSupport {
         for text in texts {
             region = region.union(CGRect(
                 x: text.x, y: text.y, width: text.width, height: text.height
+            ))
+        }
+        for shape in shapes {
+            region = region.union(CGRect(
+                x: min(shape.x, shape.x + shape.width),
+                y: min(shape.y, shape.y + shape.height),
+                width: abs(shape.width), height: abs(shape.height)
             ))
         }
         if region.isNull || region.isEmpty || region.isInfinite {
@@ -75,12 +83,15 @@ enum SketchSupport {
         let composed = NSImage(size: boardSize)
         composed.lockFocusFlipped(true)
         rasterized.draw(in: dest)
-        if !texts.isEmpty {
+        if !shapes.isEmpty || !texts.isEmpty {
             let cg = NSGraphicsContext.current?.cgContext
             cg?.saveGState()
             cg?.translateBy(x: dest.minX, y: dest.minY)
             cg?.scaleBy(x: fit, y: fit)
             cg?.translateBy(x: -region.minX, y: -region.minY)
+            for shape in shapes {
+                Self.draw(shape)
+            }
             for element in texts {
                 SketchTextSupport.draw(element, in: region)
             }
@@ -91,6 +102,63 @@ enum SketchSupport {
         return composed
     }
 
+    /// Draw one shape element into the current (already transformed) graphics
+    /// context: outline via dense ShapeGeometry samples, optional fill,
+    /// arrowhead for .arrow, centered label via the shared text path.
+    private static func draw(_ shape: SketchShape) {
+        guard let kind = shape.shapeKind else { return }
+        let a = CGPoint(x: shape.x, y: shape.y)
+        let b = CGPoint(x: shape.x + shape.width, y: shape.y + shape.height)
+        var cgPath = CGMutablePath()
+        let samples = ShapeGeometry.points(for: kind, from: a, to: b)
+        guard let first = samples.first else { return }
+        cgPath.move(to: first, transform: .identity)
+        for sample in samples.dropFirst() {
+            cgPath.addLine(to: sample, transform: .identity)
+        }
+        if kind == .arrow {
+            let angle = atan2(b.y - a.y, b.x - a.x)
+            let head = max(CGFloat(10), CGFloat(shape.strokeWidth) * 4)
+            for sign in [CGFloat.pi * 0.82, -CGFloat.pi * 0.82] {
+                let tip = CGPoint(x: b.x + head * cos(angle + sign),
+                                  y: b.y + head * sin(angle + sign))
+                cgPath.move(to: b, transform: .identity)
+                cgPath.addLine(to: tip, transform: .identity)
+            }
+        }
+        if let fill = shape.fillColor {
+            let fillPath = NSBezierPath(cgPath: cgPath)
+            SketchTextSupport.hexColor(fill).setFill()
+            fillPath.fill()
+        }
+        SketchTextSupport.hexColor(shape.strokeColor).setStroke()
+        let line = NSBezierPath(cgPath: cgPath)
+        line.lineWidth = CGFloat(shape.strokeWidth)
+        line.lineCapStyle = .round
+        line.lineJoinStyle = .round
+        line.stroke()
+        if let label = shape.text, !label.isEmpty {
+            let box = CGRect(
+                x: min(shape.x, shape.x + shape.width),
+                y: min(shape.y, shape.y + shape.height),
+                width: abs(shape.width), height: abs(shape.height)
+            ).insetBy(dx: 8, dy: 6)
+            let attributed = SketchTextSupport.attributed(
+                text: label, family: shape.fontFamily,
+                size: CGFloat(shape.fontSize), color: shape.textColor
+            )
+            let bounds = attributed.boundingRect(
+                with: CGSize(width: max(box.width, 10), height: max(box.height, 10)),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]
+            )
+            let origin = CGPoint(
+                x: box.midX - bounds.midX,
+                y: box.midY - bounds.midY
+            )
+            attributed.draw(at: origin)
+        }
+    }
+
     /// Trim-to-content over strokes AND text elements: everything is
     /// translated so the union content sits at `padding` from the origin and
     /// the padded union size is returned. Returns nil when there is no
@@ -98,19 +166,27 @@ enum SketchSupport {
     static func trim(
         _ data: Data,
         texts: [SketchText],
+        shapes: [SketchShape] = [],
         padding: Double
-    ) -> (data: Data, texts: [SketchText], size: CGSize)? {
+    ) -> (data: Data, texts: [SketchText], shapes: [SketchShape], size: CGSize)? {
         let pad = CGFloat(padding)
         let drawing = try? PKDrawing(data: data)
         let strokeBounds = drawing?.bounds ?? .null
         let hasStrokes = drawing != nil && !strokeBounds.isNull
             && !strokeBounds.isEmpty && !strokeBounds.isInfinite
-        guard hasStrokes || !texts.isEmpty else { return nil }
+        guard hasStrokes || !texts.isEmpty || !shapes.isEmpty else { return nil }
 
         var union = CGRect.null
         if hasStrokes { union = strokeBounds }
         for text in texts {
             union = union.union(CGRect(x: text.x, y: text.y, width: text.width, height: text.height))
+        }
+        for shape in shapes {
+            union = union.union(CGRect(
+                x: min(shape.x, shape.x + shape.width),
+                y: min(shape.y, shape.y + shape.height),
+                width: abs(shape.width), height: abs(shape.height)
+            ))
         }
         let shift = CGAffineTransform(translationX: -union.minX + pad, y: -union.minY + pad)
         let trimmedData: Data
@@ -127,9 +203,17 @@ enum SketchSupport {
             moved.y = Double(origin.y)
             return moved
         }
+        let shiftedShapes = shapes.map { shape in
+            var moved = shape
+            let origin = CGPoint(x: shape.x, y: shape.y).applying(shift)
+            moved.x = Double(origin.x)
+            moved.y = Double(origin.y)
+            return moved
+        }
         return (
             trimmedData,
             shiftedTexts,
+            shiftedShapes,
             CGSize(width: union.width + pad * 2, height: union.height + pad * 2)
         )
     }

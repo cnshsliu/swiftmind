@@ -135,6 +135,8 @@ struct SketchEditorView: View {
     @Binding var drawingData: Data
     /// Text elements on the board (text boxes / sticky notes), content coords.
     @Binding var texts: [SketchText]
+    /// Shape elements on the board (PPT-style), content coords.
+    @Binding var shapes: [SketchShape]
     @Binding var tool: SketchTool
     @Binding var inkColor: NSColor
     /// Pen/shape stroke width in content points.
@@ -161,10 +163,12 @@ struct SketchEditorView: View {
     @State private var selectedIndices: Set<Int> = []
     /// Ids of selected text elements (select tool).
     @State private var selectedTextIDs: Set<String> = []
+    /// Ids of selected shape elements (select tool).
+    @State private var selectedShapeIDs: Set<String> = []
     /// Select-tool drag: nil = tap-pending, else (start, current) in content space.
     @State private var selectDrag: (start: CGPoint, current: CGPoint)?
-    @State private var undoStack: [(drawing: PKDrawing, texts: [SketchText])] = []
-    @State private var redoStack: [(drawing: PKDrawing, texts: [SketchText])] = []
+    @State private var undoStack: [(drawing: PKDrawing, texts: [SketchText], shapes: [SketchShape])] = []
+    @State private var redoStack: [(drawing: PKDrawing, texts: [SketchText], shapes: [SketchShape])] = []
 
     // MARK: Text tool state
 
@@ -183,6 +187,9 @@ struct SketchEditorView: View {
     @State private var textFontSize = SketchTextSupport.defaultFontSize
     /// Sticky background; nil = plain text box.
     @State private var textSticky: String? = nil
+    /// Shape whose LABEL is being edited (the same overlay UI, sticky hidden);
+    /// nil while editing a free text box.
+    @State private var labelShapeID: String? = nil
     /// Keyboard focus for the open text session's editor.
     @FocusState private var textEditorFocused: Bool
     /// Drag-start snapshot for the erase gesture (one undo step per erase drag).
@@ -250,7 +257,9 @@ struct SketchEditorView: View {
         redoStack.removeAll()
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
+        selectedShapeIDs.removeAll()
         textEditing = nil
+        labelShapeID = nil
         fitComputed = false
         computeFitIfNeeded()
     }
@@ -262,6 +271,11 @@ struct SketchEditorView: View {
             ZStack {
                 if fitComputed {
                     CommittedStrokesImage(drawing: drawing, rect: contentRect)
+                }
+                if fitComputed, !shapes.isEmpty {
+                    ForEach(shapes) { shape in
+                        shapeChrome(shape)
+                    }
                 }
                 if fitComputed, !texts.isEmpty {
                     ForEach(texts) { element in
@@ -287,7 +301,8 @@ struct SketchEditorView: View {
                         width: inkWidth * fitScale
                     )
                 }
-                if tool == .select, (!selectedIndices.isEmpty || !selectedTextIDs.isEmpty), fitComputed {
+                if tool == .select,
+                   (!selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty), fitComputed {
                     selectionChrome
                 }
                 // Marquee rect — only for a REAL marquee (drag on empty
@@ -346,6 +361,9 @@ struct SketchEditorView: View {
             bounds = bounds.union(CGRect(
                 x: text.x, y: text.y, width: text.width, height: text.height
             ))
+        }
+        for shape in shapes {
+            bounds = bounds.union(Self.contentFrame(of: shape))
         }
         if bounds.isNull || bounds.isEmpty || bounds.isInfinite {
             fitScale = 1
@@ -606,48 +624,32 @@ struct SketchEditorView: View {
         syncToModel()
     }
 
-    /// Commit the shape drag as one PKStroke in content coordinates.
-    /// Rect/ellipse commit DENSE samples of the exact geometry (see
-    /// ShapeGeometry) — PKStrokePath splines through sparse points deform
-    /// corners into rounding and ellipses into their chords.
+    /// Commit the shape drag as a MODEL element (PPT-style): geometry +
+    /// outline styling; label/fill come later via the text tool. Line/arrow
+    /// store the endpoint pair as the frame (possibly negative extents).
     private func commitShapeStroke() {
         defer { shapeDrag = nil }
-        guard let drag = shapeDrag else { return }
+        guard let drag = shapeDrag, let kind = tool.shapeKind else { return }
         let a = drag.start
         let b = shiftConstrainedEnd(of: drag)
-        guard hypot(b.x - a.x, b.y - a.y) > 3 else { return }
         pushUndo()
-        let now = Date().timeIntervalSinceReferenceDate
-        func point(_ p: CGPoint) -> PKStrokePoint {
-            PKStrokePoint(location: p, timeOffset: now,
-                          size: CGSize(width: inkWidth, height: inkWidth),
-                          opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
-        }
-        var pts: [PKStrokePoint]
-        if let kind = tool.shapeKind {
-            pts = ShapeGeometry.points(for: kind, from: a, to: b).map(point)
-        } else {
-            pts = [point(a), point(b)]
-        }
-        let path = PKStrokePath(controlPoints: pts, creationDate: Date())
-        drawing.strokes.append(PKStroke(ink: PKInk(.pen, color: inkColorForPencilKit), path: path))
-        // Arrowhead: two short strokes at the tip.
-        if tool == .arrow {
-            let angle = atan2(b.y - a.y, b.x - a.x)
-            let head: CGFloat = max(10, inkWidth * 4)
-            for sign in [CGFloat.pi * 0.82, -CGFloat.pi * 0.82] {
-                let tip = CGPoint(
-                    x: b.x + head * cos(angle + sign),
-                    y: b.y + head * sin(angle + sign)
-                )
-                let hp = [point(b), point(tip)]
-                drawing.strokes.append(PKStroke(
-                    ink: PKInk(.pen, color: inkColorForPencilKit),
-                    path: PKStrokePath(controlPoints: hp, creationDate: Date())
-                ))
-            }
-        }
+        let shape = SketchShape(
+            kind: SketchShape.Kind(rawValue: kind.rawValue)!,
+            x: Double(a.x), y: Double(a.y),
+            width: Double(b.x - a.x), height: Double(b.y - a.y),
+            strokeColor: SketchTextSupport.hex(from: inkColor),
+            strokeWidth: Double(inkWidth)
+        )
+        shapes.append(shape)
         syncToModel()
+    }
+
+    /// Shape frame in content coords (bounding box for line kinds too).
+    static func contentFrame(of shape: SketchShape) -> CGRect {
+        CGRect(
+            x: min(shape.x, shape.x + shape.width), y: min(shape.y, shape.y + shape.height),
+            width: abs(shape.width), height: abs(shape.height)
+        )
     }
 
     // MARK: - Text tool
@@ -656,10 +658,30 @@ struct SketchEditorView: View {
     /// one anchored there.
     private func beginTextEditing(at content: CGPoint) {
         SketchEventGuard.textEditingActive = true
+        // Clicking a SHAPE with the text tool edits its centered label.
+        if let index = shapes.lastIndex(where: { Self.shapeHit($0, contains: content) }) {
+            let shape = shapes[index]
+            labelShapeID = shape.id
+            let frame = Self.contentFrame(of: shape)
+            textEditing = TextEditingSession(
+                id: shape.id, isExisting: true,
+                x: Double(frame.minX), y: Double(frame.minY)
+            )
+            textDraft = shape.text ?? ""
+            textFontFamily = shape.fontFamily
+            textFontSize = CGFloat(shape.fontSize)
+            inkColor = SketchTextSupport.hexColor(shape.textColor)
+            textSticky = nil
+            selectedIndices.removeAll()
+            selectedTextIDs.removeAll()
+            selectedShapeIDs.removeAll()
+            return
+        }
         if let index = texts.lastIndex(where: {
             CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
                 .insetBy(dx: -4, dy: -4).contains(content)
         }) {
+            labelShapeID = nil
             let element = texts[index]
             textEditing = TextEditingSession(id: element.id, isExisting: true, x: element.x, y: element.y)
             textDraft = element.text
@@ -668,6 +690,7 @@ struct SketchEditorView: View {
             textSticky = element.background
             inkColor = SketchTextSupport.hexColor(element.color)
         } else {
+            labelShapeID = nil
             textEditing = TextEditingSession(
                 id: UUID().uuidString, isExisting: false,
                 x: Double(content.x), y: Double(content.y)
@@ -688,6 +711,34 @@ struct SketchEditorView: View {
         SketchEventGuard.textEditingActive = false
         let trimmed = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !discard, !trimmed.isEmpty else { return }
+
+        // Shape label: write text/font/color and grow the frame around the
+        // label (keeping the center) so long text never overflows the shape.
+        if let shapeID = labelShapeID,
+           let index = shapes.firstIndex(where: { $0.id == shapeID }) {
+            pushUndo()
+            let measured = SketchTextSupport.measuredSize(
+                text: textDraft, family: textFontFamily, size: textFontSize, sticky: false
+            )
+            var shape = shapes[index]
+            shape.text = textDraft
+            shape.fontFamily = textFontFamily
+            shape.fontSize = Double(textFontSize)
+            shape.textColor = SketchTextSupport.hex(from: inkColor)
+            let frame = Self.contentFrame(of: shape)
+            let newW = max(frame.width, measured.width + 16)
+            let newH = max(frame.height, measured.height + 12)
+            shape.x = Double(frame.midX - newW / 2)
+            shape.y = Double(frame.midY - newH / 2)
+            shape.width = Double(newW)
+            shape.height = Double(newH)
+            shapes[index] = shape
+            labelShapeID = nil
+            SketchTextSupport.noteFontUsed(textFontFamily)
+            syncToModel()
+            return
+        }
+        labelShapeID = nil
         pushUndo()
         let size = SketchTextSupport.measuredSize(
             text: textDraft, family: textFontFamily,
@@ -710,6 +761,47 @@ struct SketchEditorView: View {
         }
         SketchTextSupport.noteFontUsed(textFontFamily)
         syncToModel()
+    }
+
+    /// Committed shape element on the board: outline via the SAME dense
+    /// ShapeGeometry samples, optional fill, optional centered label.
+    @ViewBuilder
+    private func shapeChrome(_ shape: SketchShape) -> some View {
+        let frame = Self.contentFrame(of: shape)
+        let board = CGRect(
+            x: (frame.minX - contentRect.minX) * fitScale,
+            y: (frame.minY - contentRect.minY) * fitScale,
+            width: frame.width * fitScale,
+            height: frame.height * fitScale
+        )
+        ZStack {
+            ShapeElementPath(shape: shape, fitScale: fitScale)
+                .stroke(
+                    Color(nsColor: SketchTextSupport.hexColor(shape.strokeColor)),
+                    style: StrokeStyle(lineWidth: CGFloat(shape.strokeWidth) * fitScale,
+                                       lineCap: .round, lineJoin: .round)
+                )
+            if let fill = shape.fillColor {
+                ShapeElementPath(shape: shape, fitScale: fitScale)
+                    .fill(Color(nsColor: SketchTextSupport.hexColor(fill)))
+            }
+            if let label = shape.text, !label.isEmpty {
+                Text(label)
+                    .font(Font.custom(shape.fontFamily, size: CGFloat(shape.fontSize) * fitScale))
+                    .foregroundStyle(Color(nsColor: SketchTextSupport.hexColor(shape.textColor)))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 6 * fitScale)
+                    .minimumScaleFactor(0.5)
+            }
+            if selectedShapeIDs.contains(shape.id) {
+                Rectangle()
+                    .strokeBorder(Color.accentColor.opacity(0.9),
+                                  style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+            }
+        }
+        .frame(width: board.width, height: board.height, alignment: .topLeading)
+        .position(x: board.midX, y: board.midY)
+        .accessibilityIdentifier("sketchShape-\(shape.id)")
     }
 
     /// Committed text element on the board (scaled content → board).
@@ -895,8 +987,16 @@ struct SketchEditorView: View {
         }) {
             selectedTextIDs = [texts[index].id]
             selectedIndices = []
+            selectedShapeIDs = []
             return
         }
+        if let index = shapes.lastIndex(where: { Self.shapeHit($0, contains: content) }) {
+            selectedShapeIDs = [shapes[index].id]
+            selectedIndices = []
+            selectedTextIDs = []
+            return
+        }
+        selectedShapeIDs = []
         var best: (index: Int, dist: CGFloat)?
         for (index, stroke) in drawing.strokes.enumerated() {
             let b = Self.bounds(of: stroke)
@@ -910,12 +1010,33 @@ struct SketchEditorView: View {
         }
         selectedIndices = best.map { [$0.index] } ?? []
         selectedTextIDs = []
+        if selectedIndices.isEmpty { selectedShapeIDs = [] }
+    }
+
+    /// Hit test one shape: containment for bbox kinds, distance to the
+    /// endpoint segment for line/arrow.
+    static func shapeHit(_ shape: SketchShape, contains p: CGPoint) -> Bool {
+        guard let kind = shape.shapeKind else { return false }
+        if kind == .line || kind == .arrow {
+            let a = CGPoint(x: shape.x, y: shape.y)
+            let b = CGPoint(x: shape.x + shape.width, y: shape.y + shape.height)
+            let abx = b.x - a.x, aby = b.y - a.y
+            let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
+            let cx = a.x + abx * t, cy = a.y + aby * t
+            return hypot(p.x - cx, p.y - cy) <= max(8, shape.strokeWidth)
+        }
+        return contentFrame(of: shape).insetBy(dx: -2, dy: -2).contains(p)
     }
 
     /// True when a content point sits inside a selected stroke's or text's bounds.
     private func hitSelected(at content: CGPoint) -> Bool {
         if selectedTextIDs.contains(where: { id in
             texts.first(where: { $0.id == id }).map { Self.textFrame(of: $0).contains(content) } == true
+        }) {
+            return true
+        }
+        if selectedShapeIDs.contains(where: { id in
+            shapes.first(where: { $0.id == id }).map { Self.shapeHit($0, contains: content) } == true
         }) {
             return true
         }
@@ -941,12 +1062,15 @@ struct SketchEditorView: View {
         selectedTextIDs = Set(texts.filter {
             Self.textFrame(of: $0).insetBy(dx: -4, dy: -4).intersects(rect)
         }.map(\.id))
+        selectedShapeIDs = Set(shapes.filter {
+            Self.contentFrame(of: $0).insetBy(dx: -4, dy: -4).intersects(rect)
+        }.map(\.id))
     }
 
     /// Move the selected strokes AND texts by a content-space delta (no undo
     /// push — the caller pushes once at drag start).
     private func moveSelected(by delta: CGPoint) {
-        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty else { return }
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty else { return }
         if !selectedIndices.isEmpty {
             // Translate the ORIGINAL control points (same path trim uses) —
             // resampling through interpolatedPoints(by: .distance(4)) would
@@ -966,18 +1090,29 @@ struct SketchEditorView: View {
                 return moved
             }
         }
+        if !selectedShapeIDs.isEmpty {
+            shapes = shapes.map { shape in
+                guard selectedShapeIDs.contains(shape.id) else { return shape }
+                var moved = shape
+                moved.x += Double(delta.x)
+                moved.y += Double(delta.y)
+                return moved
+            }
+        }
     }
 
     /// Delete the selected strokes and texts (one undo step).
     private func deleteSelection() {
-        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty else { return }
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty else { return }
         pushUndo()
         drawing.strokes = drawing.strokes.enumerated()
             .filter { !selectedIndices.contains($0.offset) }
             .map(\.element)
         texts = texts.filter { !selectedTextIDs.contains($0.id) }
+        shapes = shapes.filter { !selectedShapeIDs.contains($0.id) }
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
+        selectedShapeIDs.removeAll()
         syncToModel()
     }
 
@@ -991,7 +1126,9 @@ struct SketchEditorView: View {
         }
         let textBoxes = texts.filter { selectedTextIDs.contains($0.id) }
             .map { Self.textFrame(of: $0) }
-        let boxes = strokeBoxes + textBoxes
+        let shapeBoxes = shapes.filter { selectedShapeIDs.contains($0.id) }
+            .map { Self.contentFrame(of: $0) }
+        let boxes = strokeBoxes + textBoxes + shapeBoxes
         if let union = boxes.dropFirst().reduce(boxes.first, { acc, next in
             acc.map { $0.union(next) } ?? next
         }) {
@@ -1029,7 +1166,7 @@ struct SketchEditorView: View {
     // MARK: Model sync / undo
 
     private func pushUndo() {
-        undoStack.append((drawing, texts))
+        undoStack.append((drawing, texts, shapes))
         if undoStack.count > 100 { undoStack.removeFirst() }
         redoStack.removeAll()
     }
@@ -1043,34 +1180,43 @@ struct SketchEditorView: View {
 
     private func undo() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append((drawing, texts))
+        redoStack.append((drawing, texts, shapes))
         drawing = previous.drawing
         texts = previous.texts
+        shapes = previous.shapes
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
+        selectedShapeIDs.removeAll()
         textEditing = nil
+        labelShapeID = nil
         syncToModel()
     }
 
     private func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append((drawing, texts))
+        undoStack.append((drawing, texts, shapes))
         drawing = next.drawing
         texts = next.texts
+        shapes = next.shapes
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
+        selectedShapeIDs.removeAll()
         textEditing = nil
+        labelShapeID = nil
         syncToModel()
     }
 
     private func clear() {
-        guard !drawing.strokes.isEmpty || !texts.isEmpty else { return }
+        guard !drawing.strokes.isEmpty || !texts.isEmpty || !shapes.isEmpty else { return }
         pushUndo()
         drawing = PKDrawing()
         texts = []
+        shapes = []
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
+        selectedShapeIDs.removeAll()
         textEditing = nil
+        labelShapeID = nil
         syncToModel()
     }
 
@@ -1326,6 +1472,43 @@ private struct ShapePreview: View {
                 EmptyView()
             }
         }
+    }
+}
+
+/// Outline path of a model shape in LOCAL (0-based, fitted) coordinates:
+/// dense ShapeGeometry samples for the bbox kinds, the endpoint pair for
+/// line/arrow (plus the arrowhead). Local origin = the shape's bounding-box
+/// top-left, so negative line extents stay inside the frame.
+struct ShapeElementPath: Shape {
+    let shape: SketchShape
+    var fitScale: CGFloat = 1
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard let kind = shape.shapeKind else { return path }
+        let minX = min(shape.x, shape.x + shape.width)
+        let minY = min(shape.y, shape.y + shape.height)
+        let a = CGPoint(x: CGFloat(shape.x - minX) * fitScale,
+                        y: CGFloat(shape.y - minY) * fitScale)
+        let b = CGPoint(x: a.x + CGFloat(shape.width) * fitScale,
+                        y: a.y + CGFloat(shape.height) * fitScale)
+        let samples = ShapeGeometry.points(for: kind, from: a, to: b)
+        guard let first = samples.first else { return path }
+        path.move(to: first)
+        for sample in samples.dropFirst() {
+            path.addLine(to: sample)
+        }
+        if kind == .arrow {
+            let angle = atan2(b.y - a.y, b.x - a.x)
+            let head = max(CGFloat(10), CGFloat(shape.strokeWidth) * 4)
+            for sign in [CGFloat.pi * 0.82, -CGFloat.pi * 0.82] {
+                let tip = CGPoint(x: b.x + head * cos(angle + sign),
+                                  y: b.y + head * sin(angle + sign))
+                path.move(to: b)
+                path.addLine(to: tip)
+            }
+        }
+        return path
     }
 }
 
