@@ -1272,6 +1272,7 @@ struct MapCanvasView: View {
         let mapWidth = CGFloat(visual.frame.width)
         let mapHeight = CGFloat(visual.frame.height)
         MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight)
+            .equatable()
             .padding(10)
             .offset(y: -scroll)
             .frame(width: mapWidth, height: mapHeight, alignment: .topLeading)

@@ -8,10 +8,16 @@ import SwiftMindCore
 /// function of the input — no cached @State: mutating state from `body`
 /// (even async) can land inside an AppKit layout pass and crash on an
 /// exclusivity violation.
-struct MarkdownTextView: View {
+struct MarkdownTextView: View, Equatable {
     let markdown: String
     var fontSize: CGFloat = 12
     var maxImageHeight: CGFloat = 200
+
+    static func == (lhs: MarkdownTextView, rhs: MarkdownTextView) -> Bool {
+        lhs.markdown == rhs.markdown
+            && lhs.fontSize == rhs.fontSize
+            && lhs.maxImageHeight == rhs.maxImageHeight
+    }
 
     @Environment(\.colorScheme) private var colorScheme
 
