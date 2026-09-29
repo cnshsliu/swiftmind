@@ -1404,6 +1404,8 @@ extension SwiftMindMacUITests {
         draw()
         pickShape("Star")
         draw()
+        pickShape("Rounded Rectangle")
+        draw()
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
@@ -1458,6 +1460,17 @@ extension SwiftMindMacUITests {
         }
         XCTAssertTrue(triangleFound, "the triangle tool must commit a true triangle")
         XCTAssertTrue(starFound, "the star tool must commit a true five-point star")
+        // Rounded rect: exact geometry is guarded by ShapeGeometryTests
+        // (corner-quarter assertions); here just confirm a dense outline
+        // committed alongside the others.
+        var denseOutlines = 0
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let drawing = try? PKDrawing(data: data) else { continue }
+            denseOutlines += drawing.strokes.filter { $0.path.count > 100 }.count
+        }
+        XCTAssertGreaterThanOrEqual(denseOutlines, 3,
+                                    "all three library shapes must commit dense outlines")
     }
 
     /// 1.2 Freeform parity: text boxes and sticky notes commit to the model

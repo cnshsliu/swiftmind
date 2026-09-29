@@ -1803,13 +1803,17 @@ struct MapCanvasView: View {
     }
 
     /// 1s debounce — each drawing burst is one undo step (note-editor parity).
+    /// Mid-session commits keep the node's frame PINNED: a growing board would
+    /// relayout the whole map under the editor every second (the visible
+    /// "jitter" on shape release — markdown cards shifting with the relayout).
+    /// The final trim on close applies the real size once.
     private func scheduleSketchCommit() {
         sketchIsDirty = true
         sketchCommitTask?.cancel()
         sketchCommitTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
-            commitSketchDraft()
+            commitSketchDraft(keepFrame: true)
             sketchCommitTask = nil
         }
     }
@@ -1819,19 +1823,31 @@ struct MapCanvasView: View {
     /// command batch. No content → placeholder board. A draft that fails to
     /// decode is NOT treated as empty — wiping real content on a transient
     /// decode failure is unrecoverable, so we keep the last commit.
-    private func commitSketchDraft() {
+    private func commitSketchDraft(keepFrame: Bool = false) {
         guard sketchIsDirty,
               let id = drawingNodeID,
               session.store.map.node(id: id) != nil else { return }
         let padding = LayoutConfig().sketchTrimPadding
         if let trimmed = SketchSupport.trim(sketchDraft, texts: sketchTextsDraft, padding: padding) {
+            // Mid-session (keepFrame): pin the board size to the model's
+            // current value — the stroke payload is still trimmed/normalized,
+            // but the node frame (and thus the map layout) must not move
+            // while the user is drawing.
+            let pinned: (w: Double, h: Double)?
+            if keepFrame,
+               let node = session.store.map.node(id: id),
+               let w = node.sketchWidth, let h = node.sketchHeight {
+                pinned = (w, h)
+            } else {
+                pinned = nil
+            }
             var ops: [MapOp] = []
             if trimmed.data != lastCommittedSketch {
                 ops.append(.setSketch(
                     nodeID: id,
                     data: trimmed.data,
-                    width: Double(trimmed.size.width),
-                    height: Double(trimmed.size.height)
+                    width: pinned?.w ?? Double(trimmed.size.width),
+                    height: pinned?.h ?? Double(trimmed.size.height)
                 ))
             }
             let modelTexts = trimmed.texts.isEmpty ? nil : trimmed.texts

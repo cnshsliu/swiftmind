@@ -196,23 +196,39 @@ final class ShapeGeometryTests: XCTestCase {
         let points = ShapeGeometry.roundedRectPoints(from: a, to: b)
         assertDenseClosed(points)
         let box = dragBox
+        // Rounded outlines never leave their drag box (regression: the
+        // top-left arc once swept 3/4 of its corner circle, bulging outside).
+        for p in points {
+            XCTAssertTrue(box.insetBy(dx: -1e-6, dy: -1e-6).contains(p),
+                          "(\(p.x), \(p.y)) escapes the rounded rect box")
+        }
         let r = min(max(min(box.width, box.height) * 0.2, 4), 28)
-        let centers = [
-            CGPoint(x: box.minX + r, y: box.minY + r), CGPoint(x: box.maxX - r, y: box.minY + r),
-            CGPoint(x: box.maxX - r, y: box.maxY - r), CGPoint(x: box.minX + r, y: box.maxY - r),
+        // (center, outward signs) per corner — a corner-circle sample must sit
+        // in ITS quarter (regression: the top-left arc once swept 3/4 of its
+        // circle, denting into the box while still "on" the circle).
+        let corners: [(center: CGPoint, sx: CGFloat, sy: CGFloat)] = [
+            (CGPoint(x: box.minX + r, y: box.minY + r), -1, -1),
+            (CGPoint(x: box.maxX - r, y: box.minY + r), 1, -1),
+            (CGPoint(x: box.maxX - r, y: box.maxY - r), 1, 1),
+            (CGPoint(x: box.minX + r, y: box.maxY - r), -1, 1),
         ]
         for p in points {
             // On the outline = on one of the 4 straight edges (inset by r)
-            // or on one of the 4 corner circles.
+            // or in the correct quarter of one of the 4 corner circles.
             let onEdge =
                 (abs(p.y - box.minY) < 1e-6 && p.x >= box.minX + r && p.x <= box.maxX - r)
                 || (abs(p.y - box.maxY) < 1e-6 && p.x >= box.minX + r && p.x <= box.maxX - r)
                 || (abs(p.x - box.minX) < 1e-6 && p.y >= box.minY + r && p.y <= box.maxY - r)
                 || (abs(p.x - box.maxX) < 1e-6 && p.y >= box.minY + r && p.y <= box.maxY - r)
-            let onCorner = centers.contains {
-                abs(hypot(p.x - $0.x, p.y - $0.y) - r) < 1e-6
+            let inCornerQuarter = corners.contains { corner in
+                guard abs(hypot(p.x - corner.center.x, p.y - corner.center.y) - r) < 1e-6 else {
+                    return false
+                }
+                return (p.x - corner.center.x) * corner.sx >= -1e-6
+                    && (p.y - corner.center.y) * corner.sy >= -1e-6
             }
-            XCTAssertTrue(onEdge || onCorner, "(\(p.x), \(p.y)) is off the rounded rect")
+            XCTAssertTrue(onEdge || inCornerQuarter,
+                          "(\(p.x), \(p.y)) is off the rounded rect outline")
         }
         // Bounding box spans the drag box (corners touch at 45° diagonals).
         XCTAssertEqual(points.map(\.x).min()!, box.minX, accuracy: 1e-6)
@@ -223,6 +239,12 @@ final class ShapeGeometryTests: XCTestCase {
         let points = ShapeGeometry.bubblePoints(from: a, to: b)
         assertDenseClosed(points)
         let box = dragBox
+        let boxWithTail = box.insetBy(dx: -1e-6, dy: -1e-6)
+            .union(CGRect(x: box.minX, y: box.maxY, width: box.width, height: box.height * 0.2))
+        for p in points {
+            XCTAssertTrue(boxWithTail.contains(p),
+                          "(\(p.x), \(p.y)) escapes the bubble outline")
+        }
         let tipY = box.maxY + box.height * 0.18
         XCTAssertEqual(points.map(\.y).max()!, tipY, accuracy: 1e-6,
                        "the tail tip must be the lowest point")

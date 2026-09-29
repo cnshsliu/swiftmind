@@ -107,6 +107,26 @@ public enum ShapeGeometry {
         return points
     }
 
+    /// The sketch board's shape vocabulary (the app's SketchTool maps onto it).
+    public enum ShapeKind: Equatable, Sendable {
+        case line, arrow, rect, roundedRect, ellipse, triangle, diamond, star, bubble
+    }
+
+    /// Dense samples for any shape kind. Line/arrow are the two endpoints
+    /// (arrowheads are added by the caller).
+    public static func points(for kind: ShapeKind, from a: CGPoint, to b: CGPoint) -> [CGPoint] {
+        switch kind {
+        case .line, .arrow: return [a, b]
+        case .rect: return rectPoints(from: a, to: b)
+        case .roundedRect: return roundedRectPoints(from: a, to: b)
+        case .ellipse: return ellipsePoints(from: a, to: b)
+        case .triangle: return trianglePoints(from: a, to: b)
+        case .diamond: return diamondPoints(from: a, to: b)
+        case .star: return starPoints(from: a, to: b)
+        case .bubble: return bubblePoints(from: a, to: b)
+        }
+    }
+
     /// Corner radius for rounded outlines, clamped to a sane band.
     private static func cornerRadius(of box: CGRect) -> CGFloat {
         min(max(min(box.width, box.height) * 0.2, 4), 28)
@@ -132,7 +152,7 @@ public enum ShapeGeometry {
         let br = CGPoint(x: box.maxX - r, y: box.maxY - r)
         let bl = CGPoint(x: box.minX + r, y: box.maxY - r)
         return [
-            .arc(center: tl, radius: r, start: .pi, end: -rightAngle),   // ends (minX+r, minY)
+            .arc(center: tl, radius: r, start: .pi, end: 3 * rightAngle), // ends (minX+r, minY)
             .line(CGPoint(x: tl.x, y: box.minY), CGPoint(x: tr.x, y: box.minY)),
             .arc(center: tr, radius: r, start: -rightAngle, end: 0),     // ends (maxX, minY+r)
             .line(CGPoint(x: box.maxX, y: tr.y), CGPoint(x: box.maxX, y: br.y)),
@@ -207,7 +227,7 @@ public enum ShapeGeometry {
         let br = CGPoint(x: box.maxX - r, y: box.maxY - r)
         let bl = CGPoint(x: box.minX + r, y: box.maxY - r)
         return points(outlining: [
-            .arc(center: CGPoint(x: box.minX + r, y: box.minY + r), radius: r, start: .pi, end: -rightAngle),
+            .arc(center: CGPoint(x: box.minX + r, y: box.minY + r), radius: r, start: .pi, end: 3 * rightAngle),
             .line(CGPoint(x: box.minX + r, y: box.minY), CGPoint(x: box.maxX - r, y: box.minY)),
             .arc(center: CGPoint(x: box.maxX - r, y: box.minY + r), radius: r, start: -rightAngle, end: 0),
             .line(CGPoint(x: box.maxX, y: box.minY + r), CGPoint(x: box.maxX, y: br.y)),

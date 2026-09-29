@@ -102,6 +102,22 @@ enum SketchTool: String, CaseIterable {
     static var shapes: [SketchTool] {
         [.line, .arrow, .rect, .roundedRect, .ellipse, .triangle, .diamond, .star, .bubble]
     }
+
+    /// Geometry vocabulary for commit/preview; nil for non-shape tools.
+    var shapeKind: ShapeGeometry.ShapeKind? {
+        switch self {
+        case .line: return .line
+        case .arrow: return .arrow
+        case .rect: return .rect
+        case .roundedRect: return .roundedRect
+        case .ellipse: return .ellipse
+        case .triangle: return .triangle
+        case .diamond: return .diamond
+        case .star: return .star
+        case .bubble: return .bubble
+        default: return nil
+        }
+    }
 }
 
 /// In-place sketch editor: a large borderless board plus a compact tool strip.
@@ -597,24 +613,9 @@ struct SketchEditorView: View {
                           opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
         }
         var pts: [PKStrokePoint]
-        switch tool {
-        case .line, .arrow:
-            pts = [point(a), point(b)]
-        case .rect:
-            pts = ShapeGeometry.rectPoints(from: a, to: b).map(point)
-        case .roundedRect:
-            pts = ShapeGeometry.roundedRectPoints(from: a, to: b).map(point)
-        case .ellipse:
-            pts = ShapeGeometry.ellipsePoints(from: a, to: b).map(point)
-        case .triangle:
-            pts = ShapeGeometry.trianglePoints(from: a, to: b).map(point)
-        case .diamond:
-            pts = ShapeGeometry.diamondPoints(from: a, to: b).map(point)
-        case .star:
-            pts = ShapeGeometry.starPoints(from: a, to: b).map(point)
-        case .bubble:
-            pts = ShapeGeometry.bubblePoints(from: a, to: b).map(point)
-        default:
+        if let kind = tool.shapeKind {
+            pts = ShapeGeometry.points(for: kind, from: a, to: b).map(point)
+        } else {
             pts = [point(a), point(b)]
         }
         let path = PKStrokePath(controlPoints: pts, creationDate: Date())
@@ -1295,7 +1296,21 @@ private struct ShapePreview: View {
             Path(ellipseIn: rect)
                 .stroke(color, style: StrokeStyle(lineWidth: width))
         default:
-            EmptyView()
+            // The library shapes preview through the SAME dense samples the
+            // commit will use — what you drag is exactly what you get.
+            if let kind = tool.shapeKind {
+                Path { path in
+                    let samples = ShapeGeometry.points(for: kind, from: start, to: end)
+                    guard let first = samples.first else { return }
+                    path.move(to: first)
+                    for sample in samples.dropFirst() {
+                        path.addLine(to: sample)
+                    }
+                }
+                .stroke(color, style: StrokeStyle(lineWidth: width, lineJoin: .round))
+            } else {
+                EmptyView()
+            }
         }
     }
 }
