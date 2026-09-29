@@ -128,9 +128,19 @@ struct SketchEditorView: View {
     let onDone: () -> Void
 
     @State private var drawing = PKDrawing()
+    /// In-progress pen/marker stroke, CONTENT points (recorded at arrival so
+    /// auto-pan during the drag can never bend the stroke).
     @State private var livePoints: [CGPoint] = []
-    /// Shape-tool drag in board points (start + current); nil while idle.
+    /// Points captured before the fit landed (raw board points, converted at
+    /// commit when the fit necessarily exists).
+    @State private var liveRawPoints: [CGPoint] = []
+    /// Shape-tool drag in CONTENT points (start + current); nil while idle.
     @State private var shapeDrag: (start: CGPoint, current: CGPoint)?
+    /// Board-space pointer while a drawing drag is active (auto-pan reads it
+    /// between drag events); nil while idle.
+    @State private var dragPointer: CGPoint?
+    /// Running edge auto-pan (see updateAutoPan).
+    @State private var autoPanTask: Task<Void, Never>?
     /// Indices of selected strokes (select tool).
     @State private var selectedIndices: Set<Int> = []
     /// Ids of selected text elements (select tool).
@@ -177,6 +187,10 @@ struct SketchEditorView: View {
     private static let toolbarHeight: CGFloat = 36
     /// Content-space margin kept around existing strokes when fitting.
     private static let fitPadding: CGFloat = 24
+    /// Edge band (board points) that triggers auto-pan while drawing.
+    private static let autoPanMargin: CGFloat = 36
+    /// Max auto-pan speed (board points per tick).
+    private static let autoPanSpeed: CGFloat = 14
 
     var body: some View {
         VStack(spacing: 0) {
@@ -184,6 +198,7 @@ struct SketchEditorView: View {
             board
         }
         .onAppear { load(drawingData) }
+        .onDisappear { stopAutoPan() }
         .onKeyPress { press in
             guard press.modifiers.subtracting(.shift).intersection([.command, .option, .control]).isEmpty
                     || press.modifiers == .command else {
@@ -240,9 +255,9 @@ struct SketchEditorView: View {
                 if let session = textEditing {
                     textEditingOverlay(session)
                 }
-                if tool == .pen || tool == .marker, !livePoints.isEmpty {
+                if tool == .pen || tool == .marker, !livePoints.isEmpty || !liveRawPoints.isEmpty {
                     StrokePreview(
-                        points: livePoints,
+                        points: livePoints.map { boardPoint(from: $0) } + liveRawPoints,
                         color: Color(nsColor: inkColor).opacity(tool == .marker ? 0.4 : 1),
                         width: inkWidth * fitScale
                     )
@@ -250,8 +265,8 @@ struct SketchEditorView: View {
                 if let drag = shapeDrag, tool.isShape {
                     ShapePreview(
                         tool: tool,
-                        start: drag.start,
-                        end: shiftConstrainedEnd(of: drag),
+                        start: boardPoint(from: drag.start),
+                        end: boardPoint(from: shiftConstrainedEnd(of: drag)),
                         color: Color(nsColor: inkColor),
                         width: inkWidth * fitScale
                     )
@@ -340,11 +355,70 @@ struct SketchEditorView: View {
         contentRect.origin.y -= delta.height / fitScale
     }
 
+    // MARK: Edge auto-pan while drawing
+
+    /// Auto-pan delta for the current pointer (board points per tick),
+    /// proportional to how deep it sits in the edge band. Zero outside.
+    private func autoPanDelta(for pointer: CGPoint) -> CGSize {
+        guard boardSize.width > 80, boardSize.height > 80 else { return .zero }
+        let m = Self.autoPanMargin
+        func axis(_ p: CGFloat, _ max: CGFloat) -> CGFloat {
+            if max - p < m {
+                let depth = min(1, (m - (max - p)) / m + 0.25)
+                return -Self.autoPanSpeed * depth
+            }
+            if p < m {
+                let depth = min(1, (m - p) / m + 0.25)
+                return Self.autoPanSpeed * depth
+            }
+            return 0
+        }
+        let dx = axis(pointer.x, boardSize.width)
+        let dy = axis(pointer.y, boardSize.height)
+        return CGSize(width: dx, height: dy)
+    }
+
+    /// Start/refresh the auto-pan task for an active drawing drag. The task
+    /// ticks ~20×/s, sliding the paper while the pointer sits in the edge
+    /// band — pen drags ALSO get a point per tick so the ink keeps flowing
+    /// while the paper slides (the pen holds still on screen).
+    private func updateAutoPan() {
+        guard let pointer = dragPointer else { return }
+        if autoPanTask != nil { return }
+        guard autoPanDelta(for: pointer) != .zero else { return }
+        autoPanTask = Task { @MainActor in
+            while !Task.isCancelled {
+                guard let pointer = dragPointer else { break }
+                let delta = autoPanDelta(for: pointer)
+                guard delta != .zero else { break }
+                panBoard(by: delta)
+                if tool == .pen || tool == .marker, fitComputed {
+                    livePoints.append(contentPoint(pointer))
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            await MainActor.run { autoPanTask = nil }
+        }
+    }
+
+    private func stopAutoPan() {
+        autoPanTask?.cancel()
+        autoPanTask = nil
+    }
+
     /// Board (gesture) point → content (stroke) point.
     private func contentPoint(_ boardPoint: CGPoint) -> CGPoint {
         CGPoint(
             x: boardPoint.x / fitScale + contentRect.minX,
             y: boardPoint.y / fitScale + contentRect.minY
+        )
+    }
+
+    /// Content (stroke) point → board (view) point — the exact inverse.
+    private func boardPoint(from content: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (content.x - contentRect.minX) * fitScale,
+            y: (content.y - contentRect.minY) * fitScale
         )
     }
 
@@ -374,14 +448,27 @@ struct SketchEditorView: View {
             if phase == .ended { beginTextEditing(at: contentPoint(location)) }
             return
         }
+        // Drawing drags feed the edge auto-pan (the paper slides while the
+        // pointer holds still near an edge, like right-drag panning).
+        let drawingDrag = tool.isShape || tool == .pen || tool == .marker
+        if drawingDrag {
+            if phase == .changed {
+                dragPointer = location
+                updateAutoPan()
+            } else {
+                dragPointer = nil
+                stopAutoPan()
+            }
+        }
         if tool.isShape {
             guard fitComputed else { return }
+            let content = contentPoint(location)
             switch phase {
             case .changed:
-                if shapeDrag == nil { shapeDrag = (start: location, current: location) }
-                else { shapeDrag?.current = location }
+                if shapeDrag == nil { shapeDrag = (start: content, current: content) }
+                else { shapeDrag?.current = content }
             case .ended:
-                shapeDrag?.current = location
+                shapeDrag?.current = content
                 commitShapeStroke()
             }
             return
@@ -429,11 +516,21 @@ struct SketchEditorView: View {
         }
         switch tool {
         case .pen, .marker:
-            // Record raw board points even before the fit lands (first frames
-            // of a session) — conversion happens at stroke commit, when the
-            // fit is necessarily computed. Gating input on the fit race
-            // dropped whole drags on slow layouts.
-            livePoints.append(location)
+            // Record CONTENT points at arrival so a mid-drag auto-pan (content
+            // rect shift) can never bend the stroke. Before the fit lands the
+            // point goes to the raw tail, converted at commit when the fit
+            // necessarily exists (gating input on the fit race dropped whole
+            // drags on slow layouts).
+            if fitComputed {
+                livePoints.append(contentPoint(location))
+            } else {
+                computeFitIfNeeded()
+                if fitComputed {
+                    livePoints.append(contentPoint(location))
+                } else {
+                    liveRawPoints.append(location)
+                }
+            }
             if phase == .ended { commitPenStroke() }
         case .eraser:
             guard fitComputed else { return }
@@ -454,15 +551,18 @@ struct SketchEditorView: View {
     @State private var movedOnce = false
 
     private func commitPenStroke() {
-        defer { livePoints.removeAll() }
-        let points = livePoints
+        defer {
+            livePoints.removeAll()
+            liveRawPoints.removeAll()
+        }
         computeFitIfNeeded() // last chance: the drag hit the board, so it exists
+        let points = livePoints + liveRawPoints.map(contentPoint)
         guard points.count > 1, fitComputed else { return }
         pushUndo()
         let now = Date().timeIntervalSinceReferenceDate
-        let strokePoints = points.map { boardPoint in
+        let strokePoints = points.map { location in
             PKStrokePoint(
-                location: contentPoint(boardPoint),
+                location: location,
                 timeOffset: now,
                 size: CGSize(width: inkWidth, height: inkWidth),
                 opacity: 1,
@@ -486,8 +586,8 @@ struct SketchEditorView: View {
     private func commitShapeStroke() {
         defer { shapeDrag = nil }
         guard let drag = shapeDrag else { return }
-        let a = contentPoint(drag.start)
-        let b = contentPoint(shiftConstrainedEnd(of: drag))
+        let a = drag.start
+        let b = shiftConstrainedEnd(of: drag)
         guard hypot(b.x - a.x, b.y - a.y) > 3 else { return }
         pushUndo()
         let now = Date().timeIntervalSinceReferenceDate
