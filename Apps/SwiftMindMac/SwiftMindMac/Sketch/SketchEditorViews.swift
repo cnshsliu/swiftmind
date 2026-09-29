@@ -943,23 +943,13 @@ struct SketchEditorView: View {
     private func moveSelected(by delta: CGPoint) {
         guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty else { return }
         if !selectedIndices.isEmpty {
+            // Translate the ORIGINAL control points (same path trim uses) —
+            // resampling through interpolatedPoints(by: .distance(4)) would
+            // discard the dense shape sampling and deform the outline.
+            let shift = CGAffineTransform(translationX: delta.x, y: delta.y)
             drawing.strokes = drawing.strokes.enumerated().map { index, stroke in
                 guard selectedIndices.contains(index) else { return stroke }
-                let moved = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map { pt in
-                    PKStrokePoint(
-                        location: CGPoint(x: pt.location.x + delta.x, y: pt.location.y + delta.y),
-                        timeOffset: pt.timeOffset,
-                        size: pt.size,
-                        opacity: pt.opacity,
-                        force: pt.force,
-                        azimuth: pt.azimuth,
-                        altitude: pt.altitude
-                    )
-                }
-                let path = moved.count > 1
-                    ? PKStrokePath(controlPoints: moved, creationDate: Date())
-                    : stroke.path
-                return PKStroke(ink: stroke.ink, path: path)
+                return SketchSupport.translated(stroke, by: shift)
             }
         }
         if !selectedTextIDs.isEmpty {

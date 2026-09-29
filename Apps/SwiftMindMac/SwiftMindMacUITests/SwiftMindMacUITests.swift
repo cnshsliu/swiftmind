@@ -1376,6 +1376,78 @@ extension SwiftMindMacUITests {
         XCTAssertTrue(markerFound, "the marker tool must commit a marker-ink stroke")
     }
 
+    /// Moving a committed shape with the select tool must not deform it:
+    /// the move used to resample the spline at 4pt and feed those points
+    /// back as control points, discarding the dense shape sampling. Draw a
+    /// star, move it, and assert the moved stroke still hugs a true star.
+    func testSketchMoveKeepsShapeGeometry() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        let menu = element("sketchShapesMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        menu.click()
+        let starItem = app.menuItems["Star"]
+        XCTAssertTrue(starItem.waitForExistence(timeout: 3))
+        starItem.click()
+
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.85))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        // Select the star (tap its top spike ≈ drag start), then drag it aside.
+        element("sketchToolSelect").click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52)).click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        let from = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6))
+        let to = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.65))
+        from.press(forDuration: 0.05, thenDragTo: to)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce commit
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
+        var starFound = false
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let drawing = try? PKDrawing(data: data) else { continue }
+            for stroke in drawing.strokes {
+                let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map(\.location)
+                guard pts.count > 60 else { continue }
+                let xs = pts.map(\.x), ys = pts.map(\.y)
+                guard let minX = xs.min(), let maxX = xs.max(),
+                      let minY = ys.min(), let maxY = ys.max(),
+                      maxX - minX > 10, maxY - minY > 10 else { continue }
+                let rx = (maxX - minX) / (2 * cos(CGFloat.pi / 10))
+                let ry = (maxY - minY) / (1 + sin(CGFloat.pi * 0.3))
+                let cx = (minX + maxX) / 2, cy = minY + ry
+                var star: [CGPoint] = []
+                for i in 0..<10 {
+                    let angle = -CGFloat.pi / 2 + CGFloat(i) * .pi / 5
+                    let f: CGFloat = i.isMultiple(of: 2) ? 1 : 0.45
+                    star.append(CGPoint(x: cx + rx * f * cos(angle), y: cy + ry * f * sin(angle)))
+                }
+                func dist(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+                    let abx = b.x - a.x, aby = b.y - a.y
+                    let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
+                    return hypot(p.x - a.x - abx * t, p.y - a.y - aby * t)
+                }
+                if pts.allSatisfy({ p in
+                    zip(star, star.dropFirst() + [star[0]]).map({ dist(p, $0.0, $0.1) }).min()! <= 1.5
+                }) {
+                    starFound = true
+                }
+            }
+        }
+        XCTAssertTrue(starFound, "a moved star must still be a true five-point star")
+    }
+
     /// Black ink must STAY black: PKDrawing.image() misreads grayscale
     /// catalog colors (.black/.white) — the gray channel becomes alpha, so
     /// black strokes vanished and white strokes rendered black. Committed
