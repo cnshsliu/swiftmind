@@ -1295,6 +1295,74 @@ extension SwiftMindMacUITests {
         }
     }
 
+    /// Board tool shortcuts (Photoshop conventions): V/B/H/E/T switch
+    /// tools, U cycles the shape library (first press from a non-shape tool
+    /// lands on Rectangle). Must not fire while a text session is open.
+    func testSketchToolShortcuts() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        func assertTool(_ id: String, _ label: String) {
+            XCTAssertTrue(element(id).isSelected, "\(label) should be the active tool")
+        }
+
+        app.typeKey(.init("e"), modifierFlags: [])
+        assertTool("sketchToolEraser", "E → eraser")
+        app.typeKey(.init("h"), modifierFlags: [])
+        assertTool("sketchToolMarker", "H → marker")
+        app.typeKey(.init("b"), modifierFlags: [])
+        assertTool("sketchToolPen", "B → pen")
+        app.typeKey(.init("t"), modifierFlags: [])
+        assertTool("sketchToolText", "T → text")
+        app.typeKey(.init("v"), modifierFlags: [])
+        assertTool("sketchToolSelect", "V → select")
+
+        // U from select lands on Rectangle (first shape); another U → Line.
+        app.typeKey(.init("u"), modifierFlags: [])
+        let menu = element("sketchShapesMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        // Letters must NOT switch tools while a text session is open.
+        app.typeKey(.init("t"), modifierFlags: [])
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6)).click()
+        let textEditor = element("sketchTextEditor")
+        XCTAssertTrue(textEditor.waitForExistence(timeout: 3))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5)) // focus lands async
+        textEditor.click()
+        app.typeKey(.init("v"), modifierFlags: [])
+        app.typeKey(.init("e"), modifierFlags: [])
+        app.typeKey(.init("h"), modifierFlags: [])
+        app.typeKey(.init("b"), modifierFlags: [])
+        app.typeKey(.init("u"), modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        // TextEditor exposes no AX value — commit and verify the payload.
+        element("sketchTextCommit").click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(textEditor.exists, "OK must close the session")
+        app.typeKey(.escape, modifierFlags: []) // close the board
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let matches = html.matches(of: #/<div class="node-sketch-texts" hidden="hidden">([A-Za-z0-9+/=]+)<\/div>/#)
+        var lettersLanded = false
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                continue
+            }
+            if json.contains(where: { ($0["text"] as? String)?.contains("vehbu") == true }) {
+                lettersLanded = true
+            }
+        }
+        XCTAssertTrue(lettersLanded,
+                      "letters must go into the text field, not the tools")
+    }
+
     /// Shape labels (PPT-style): text tool click on a shape edits its centered
     /// label; commit persists text + font and grows the frame to fit.
     func testSketchShapeLabelCommit() throws {

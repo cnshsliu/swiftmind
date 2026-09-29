@@ -524,6 +524,21 @@ struct MapCanvasView: View {
                 }
                 return nil
             }
+            // Board tool shortcuts (Photoshop conventions): V select, B pen,
+            // H marker, E eraser, T text, U cycles the shape library. Only
+            // while the sketch editor owns the board and no text session is
+            // open (letters belong to the field then). AppKit path because
+            // SwiftUI focus is unreliable over the board.
+            if SketchEventGuard.editorIsActive, bare, !SketchEventGuard.textEditingActive,
+               let ch = event.characters?.lowercased().first,
+               ["v", "b", "h", "e", "t", "u"].contains(ch) {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .swiftMindSketchToolShortcut, object: String(ch)
+                    )
+                }
+                return nil
+            }
             // 2 = d — toggle the sketch editor. Routed through the monitor
             // (not .onKeyPress) because SwiftUI focus can be lost after the
             // editor closes; the AppKit path is reliable. Never while a text

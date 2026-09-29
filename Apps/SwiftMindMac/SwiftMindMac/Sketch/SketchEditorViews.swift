@@ -3,6 +3,11 @@ import PencilKit
 import SwiftUI
 import SwiftMindCore
 
+// Shared with MapCanvasView's AppKit key monitor (board tool shortcuts).
+extension Notification.Name {
+    static let swiftMindSketchToolShortcut = Notification.Name("swiftMind.canvas.sketchToolShortcut")
+}
+
 // MARK: - Event-monitor guard
 
 /// State readable from the AppKit NSEvent monitors (which cannot see SwiftUI
@@ -247,6 +252,33 @@ struct SketchEditorView: View {
             // External model change (undo, agent) — reload unless it echoes us.
             guard newData != lastSyncedData else { return }
             load(newData)
+        }
+        // Tool shortcuts from the AppKit monitor (see MapCanvasView): the
+        // board itself is not focusable, so .onKeyPress alone misses them.
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindSketchToolShortcut)) { note in
+            guard textEditing == nil,
+                  let ch = note.object as? String else { return }
+            applyToolShortcut(ch)
+        }
+    }
+
+    /// Photoshop-convention single-letter tools: V select, B pen, H marker,
+    /// E eraser, T text, U cycles the shape library.
+    private func applyToolShortcut(_ ch: String) {
+        switch ch {
+        case "v": tool = .select
+        case "b": tool = .pen
+        case "h": tool = .marker
+        case "e": tool = .eraser
+        case "t": tool = .text
+        case "u":
+            if let index = SketchTool.shapes.firstIndex(of: tool) {
+                tool = SketchTool.shapes[(index + 1) % SketchTool.shapes.count]
+            } else {
+                tool = .rect
+            }
+        default:
+            break
         }
     }
 
@@ -1345,7 +1377,19 @@ struct SketchEditorView: View {
         .accessibilityIdentifier("sketchTool" + candidate.rawValue.prefix(1).uppercased()
                                  + candidate.rawValue.dropFirst())
         .accessibilityAddTraits(tool == candidate ? [.isSelected] : [])
-        .help(candidate.title)
+        .help(candidate.title + " (\(Self.shortcut(for: candidate)))")
+    }
+
+    /// Photoshop-convention letter for a tool (empty = no shortcut).
+    static func shortcut(for candidate: SketchTool) -> String {
+        switch candidate {
+        case .select: return "V"
+        case .pen: return "B"
+        case .marker: return "H"
+        case .eraser: return "E"
+        case .text: return "T"
+        default: return candidate.isShape ? "U" : ""
+        }
     }
 }
 
