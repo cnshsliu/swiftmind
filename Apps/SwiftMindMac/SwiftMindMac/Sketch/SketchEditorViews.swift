@@ -290,7 +290,9 @@ struct SketchEditorView: View {
                 if tool == .select, (!selectedIndices.isEmpty || !selectedTextIDs.isEmpty), fitComputed {
                     selectionChrome
                 }
-                if let drag = selectDrag, tool == .select {
+                // Marquee rect — only for a REAL marquee (drag on empty
+                // space); a move-drag already shows the selection chrome.
+                if let drag = selectDrag, tool == .select, !draggingSelection {
                     Rectangle()
                         .strokeBorder(Color.accentColor.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         .frame(width: abs(drag.current.x - drag.start.x) * fitScale,
