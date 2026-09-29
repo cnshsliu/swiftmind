@@ -226,6 +226,33 @@ final class MapStoreTests: XCTestCase {
 
     // MARK: - Measured card heights survive structure-only commands (1.2 fix)
 
+    func testSketchCommitKeepsMeasuredNoteHeights() throws {
+        var map = MindMap.makeEmpty(title: "T")
+        let bus = CommandBus()
+        try bus.execute(InsertChildCommand(parentID: map.root.id, text: "N"), on: &map)
+        let child = map.root.children[0].id
+        try bus.execute(SetNoteExpandedCommand(nodeID: child, isNoteExpanded: true), on: &map)
+        let store = MapStore(map: map)
+        store.updateMeasuredNoteHeight(222, for: child)
+        XCTAssertEqual(store.noteCardHeights[child], 222)
+
+        // A sketch-only commit (drawing/text edit) must keep the cache.
+        try store.dispatch(CompositeAgentCommand(ops: [
+            .setSketch(nodeID: child, data: Data([1, 2]), width: 10, height: 10),
+            .setSketchTexts(nodeID: child, texts: []),
+        ]))
+        XCTAssertEqual(store.noteCardHeights[child], 222,
+                       "sketch commits must not clear measured note heights")
+
+        // A batch that DOES touch note content still clears it.
+        try store.dispatch(CompositeAgentCommand(ops: [
+            .setSketch(nodeID: child, data: Data([3]), width: 10, height: 10),
+            .setNote(nodeID: child, markdown: "changed"),
+        ]))
+        XCTAssertTrue(store.noteCardHeights.isEmpty,
+                      "note-content batches must clear measured heights")
+    }
+
     func testReorderKeepsMeasuredNoteHeights() throws {
         let store = MapStore(map: .makeEmpty(title: "T"))
         let root = store.map.root.id

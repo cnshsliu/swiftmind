@@ -163,9 +163,18 @@ public final class MapStore {
     /// back to the AST estimate and re-measure on every relayout.
     static func commandInvalidatesMeasuredHeights(_ command: (any MapCommand)?) -> Bool {
         switch command {
-        case is SetNoteCommand, is SetSketchCommand, is SetSketchTextsCommand,
-             is DeleteNodesCommand, is SetNoteExpandedCommand, is CompositeAgentCommand:
+        case is SetNoteCommand, is DeleteNodesCommand, is SetNoteExpandedCommand:
             return true
+        case let composite as CompositeAgentCommand:
+            // Sketch-only batches (drawing/text edits) never touch note
+            // content — clearing the cache on every stroke commit made all
+            // markdown cards flash back to the AST estimate and re-measure.
+            return composite.ops.contains { op in
+                switch op {
+                case .setSketch, .setSketchTexts: return false
+                default: return true
+                }
+            }
         default:
             return false
         }
