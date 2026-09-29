@@ -430,6 +430,15 @@ struct SketchEditorView: View {
         )
     }
 
+    /// Ink color in sRGB for PKInk. Grayscale catalog colors (.black/.white/
+    /// .darkGray) break PKDrawing.image() rasterization — the renderer reads
+    /// the single gray channel as ALPHA: black strokes vanish (they show the
+    /// card behind) and white strokes render black. Converting to sRGB first
+    /// renders every swatch literally.
+    private var inkColorForPencilKit: NSColor {
+        inkColor.usingColorSpace(.sRGB) ?? inkColor
+    }
+
     /// Content (stroke) point → board (view) point — the exact inverse.
     private func boardPoint(from content: CGPoint) -> CGPoint {
         CGPoint(
@@ -589,7 +598,7 @@ struct SketchEditorView: View {
         }
         let path = PKStrokePath(controlPoints: strokePoints, creationDate: Date())
         drawing.strokes.append(PKStroke(
-            ink: PKInk(tool == .marker ? .marker : .pen, color: inkColor),
+            ink: PKInk(tool == .marker ? .marker : .pen, color: inkColorForPencilKit),
             path: path
         ))
         syncToModel()
@@ -619,7 +628,7 @@ struct SketchEditorView: View {
             pts = [point(a), point(b)]
         }
         let path = PKStrokePath(controlPoints: pts, creationDate: Date())
-        drawing.strokes.append(PKStroke(ink: PKInk(.pen, color: inkColor), path: path))
+        drawing.strokes.append(PKStroke(ink: PKInk(.pen, color: inkColorForPencilKit), path: path))
         // Arrowhead: two short strokes at the tip.
         if tool == .arrow {
             let angle = atan2(b.y - a.y, b.x - a.x)
@@ -631,7 +640,7 @@ struct SketchEditorView: View {
                 )
                 let hp = [point(b), point(tip)]
                 drawing.strokes.append(PKStroke(
-                    ink: PKInk(.pen, color: inkColor),
+                    ink: PKInk(.pen, color: inkColorForPencilKit),
                     path: PKStrokePath(controlPoints: hp, creationDate: Date())
                 ))
             }

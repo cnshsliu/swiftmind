@@ -1376,6 +1376,44 @@ extension SwiftMindMacUITests {
         XCTAssertTrue(markerFound, "the marker tool must commit a marker-ink stroke")
     }
 
+    /// Black ink must STAY black: PKDrawing.image() misreads grayscale
+    /// catalog colors (.black/.white) — the gray channel becomes alpha, so
+    /// black strokes vanished and white strokes rendered black. Committed
+    /// ink colors are converted to sRGB; assert the persisted stroke's ink.
+    func testSketchBlackInkStaysBlack() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        element("sketchInk0").click() // black
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
+        var blackStrokeFound = false
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let drawing = try? PKDrawing(data: data) else { continue }
+            for stroke in drawing.strokes {
+                let color = stroke.ink.color
+                guard let rgb = color.usingColorSpace(.sRGB) else { continue }
+                if rgb.redComponent < 0.05, rgb.greenComponent < 0.05, rgb.blueComponent < 0.05,
+                   rgb.alphaComponent > 0.9 {
+                    blackStrokeFound = true
+                }
+            }
+        }
+        XCTAssertTrue(blackStrokeFound, "a black-ink stroke must persist as opaque sRGB black")
+    }
+
     /// 1.2 Freeform parity: shapes browser offers the new shapes and their
     /// committed strokes hug the expected polylines (triangle / star).
     func testSketchShapesMenuLibrary() throws {
