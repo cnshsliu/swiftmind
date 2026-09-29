@@ -766,7 +766,10 @@ struct SketchEditorView: View {
             text: textDraft.isEmpty ? " " : textDraft,
             family: textFontFamily, size: textFontSize, sticky: textSticky != nil
         )
-        let width = min(max(measured.width * fitScale + 24, 160), boardSize.width - 24)
+        // One consistent panel width: the editor matches the fixed-width
+        // font bar, so the panel background never shows as an empty filled
+        // area beside a narrow editor.
+        let width = min(max(measured.width * fitScale + 24, 336), boardSize.width - 24)
         let height = min(max(measured.height * fitScale + 20, 44), boardSize.height * 0.6)
         let clampedX = min(max(anchor.x, 8), max(8, boardSize.width - width - 8))
         let clampedY = min(max(anchor.y, 8), max(8, boardSize.height - height - 8))
