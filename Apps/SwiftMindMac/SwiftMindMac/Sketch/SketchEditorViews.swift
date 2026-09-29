@@ -596,6 +596,7 @@ struct SketchEditorView: View {
                 .foregroundStyle(tool == candidate ? Color.accentColor : Color.secondary)
                 .accessibilityIdentifier("sketchTool" + candidate.rawValue.prefix(1).uppercased()
                                          + candidate.rawValue.dropFirst())
+                .accessibilityAddTraits(tool == candidate ? [.isSelected] : [])
             }
 
             Divider().frame(height: 14)
@@ -620,9 +621,12 @@ struct SketchEditorView: View {
 
             Divider().frame(height: 14)
 
-            ForEach(Array(Self.inks.enumerated()), id: \.offset) { _, ink in
+            ForEach(Array(Self.inks.enumerated()), id: \.offset) { index, ink in
                 Button {
-                    tool = .pen
+                    // Picking an ink only falls back to the pen from
+                    // non-drawing tools (eraser/select); a shape tool stays
+                    // active so the next drag draws that shape in the new ink.
+                    if tool == .eraser || tool == .select { tool = .pen }
                     inkColor = ink
                 } label: {
                     Circle()
@@ -636,6 +640,7 @@ struct SketchEditorView: View {
                         )
                 }
                 .buttonStyle(.borderless)
+                .accessibilityIdentifier("sketchInk\(index)")
             }
 
             Divider().frame(height: 14)

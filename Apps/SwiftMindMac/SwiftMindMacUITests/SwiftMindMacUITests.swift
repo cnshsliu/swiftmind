@@ -1340,6 +1340,37 @@ extension SwiftMindMacUITests {
                        "the ellipse tool must commit a dense, undeformed ring")
     }
 
+    /// Picking an ink color must NOT kick the active shape tool back to the
+    /// pen — draw a red ellipse next, not a red scribble. Only the
+    /// non-drawing tools (eraser/select) fall back to pen on ink selection.
+    func testSketchInkSelectionKeepsShapeTool() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        let ellipse = element("sketchToolEllipse")
+        XCTAssertTrue(ellipse.waitForExistence(timeout: 2))
+        ellipse.click()
+        XCTAssertTrue(ellipse.isSelected, "clicking the tool should select it")
+
+        let ink = element("sketchInk4") // systemRed
+        XCTAssertTrue(ink.waitForExistence(timeout: 2), "ink swatch should exist")
+        ink.click()
+
+        XCTAssertTrue(ellipse.isSelected,
+                      "picking an ink must keep the ellipse tool active")
+        XCTAssertFalse(element("sketchToolPen").isSelected)
+
+        // From the ERASER, an ink pick falls back to the pen (nothing to ink).
+        element("sketchToolEraser").click()
+        ink.click()
+        XCTAssertTrue(element("sketchToolPen").isSelected,
+                      "eraser + ink should switch to the pen")
+
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
     /// Min distance from a point to a rect's boundary (nearest edge distance
     /// if inside, nearest edge segment if outside).
     static func distance(from p: CGPoint, toPerimeterOf r: CGRect) -> CGFloat {
