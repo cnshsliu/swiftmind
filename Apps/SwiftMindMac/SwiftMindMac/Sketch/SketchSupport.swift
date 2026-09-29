@@ -31,16 +31,24 @@ enum SketchSupport {
         if let hit = cache.object(forKey: key) { return hit }
         guard let drawing = try? PKDrawing(data: data) else { return nil }
         let boardRect = CGRect(origin: .zero, size: boardSize)
-        let rendered = drawing.image(from: boardRect, scale: bucket)
+        // Aqua-forced: under Dark appearance PKDrawing.image() inverts black
+        // and white inks for legibility — thumbnails must show literal colors.
+        var rendered: NSImage?
+        if let aqua = NSAppearance(named: .aqua) {
+            aqua.performAsCurrentDrawingAppearance {
+                rendered = drawing.image(from: boardRect, scale: bucket)
+            }
+        }
+        let rasterized = rendered ?? drawing.image(from: boardRect, scale: bucket)
         guard !texts.isEmpty else {
-            cache.setObject(rendered, forKey: key)
-            return rendered
+            cache.setObject(rasterized, forKey: key)
+            return rasterized
         }
         // Compose text over the rasterized strokes in a flipped context
         // (content coordinates are y-down).
         let composed = NSImage(size: boardSize)
         composed.lockFocusFlipped(true)
-        rendered.draw(in: boardRect)
+        rasterized.draw(in: boardRect)
         for element in texts {
             SketchTextSupport.draw(element, in: boardRect)
         }

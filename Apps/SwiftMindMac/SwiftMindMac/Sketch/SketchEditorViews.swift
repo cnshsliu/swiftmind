@@ -1219,13 +1219,23 @@ private struct CommittedStrokesImage: View {
     let rect: CGRect
 
     var body: some View {
-        Image(
-            nsImage: drawing.image(
-                from: rect.width > 0 && rect.height > 0 ? rect : CGRect(x: 0, y: 0, width: 1, height: 1),
-                scale: 2
-            )
-        )
-        .resizable()
+        Image(nsImage: Self.render(drawing, rect: rect))
+            .resizable()
+    }
+
+    /// PKDrawing.image() adapts ink PRESENTATION to the current appearance —
+    /// under Dark, black ink renders white and white renders black (a
+    /// Notes-style legibility feature). Force aqua so the raster shows the
+    /// literal ink colors the user picked, matching the live drag preview.
+    static func render(_ drawing: PKDrawing, rect: CGRect) -> NSImage {
+        let bounds = rect.width > 0 && rect.height > 0 ? rect : CGRect(x: 0, y: 0, width: 1, height: 1)
+        var image: NSImage?
+        if let aqua = NSAppearance(named: .aqua) {
+            aqua.performAsCurrentDrawingAppearance {
+                image = drawing.image(from: bounds, scale: 2)
+            }
+        }
+        return image ?? drawing.image(from: bounds, scale: 2)
     }
 }
 
