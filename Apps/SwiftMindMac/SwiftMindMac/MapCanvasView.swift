@@ -74,6 +74,10 @@ struct MapCanvasView: View {
     @State private var lastChildByParent: [NodeID: NodeID] = [:]
     /// Follow mode (F): the active node is always panned to the viewport center.
     @State private var followMode = false
+    /// Running canvas-pan animation (see panAnimated). Canvas drawing does
+    /// not join SwiftUI transactions, so withAnimation desyncs the graph
+    /// from overlay cards; pans interpolate the offset per frame instead.
+    @State private var panAnimationTask: Task<Void, Never>? = nil
 
     // MARK: Floating note editor
     @State private var noteEditorNodeID: NodeID?
@@ -777,14 +781,11 @@ struct MapCanvasView: View {
             height: -(visual.frame.y + visual.frame.height / 2) * Double(scale)
         )
         guard target != offset else { return }
-        let apply = {
+        if animated, !reduceMotion {
+            panAnimated(to: target)
+        } else {
             offset = target
             panBase = target
-        }
-        if animated {
-            withAnimation(.easeOut(duration: 0.22)) { apply() }
-        } else {
-            apply()
         }
     }
 
@@ -872,14 +873,38 @@ struct MapCanvasView: View {
 
         guard dx != 0 || dy != 0 else { return }
 
-        let apply = {
-            offset = CGSize(width: offset.width + dx, height: offset.height + dy)
-            panBase = offset
-        }
-        if animated {
-            withAnimation(.easeOut(duration: 0.22)) { apply() }
+        let target = CGSize(width: offset.width + dx, height: offset.height + dy)
+        if animated, !reduceMotion {
+            panAnimated(to: target)
         } else {
-            apply()
+            offset = target
+            panBase = target
+        }
+    }
+
+    /// Animate a canvas pan by stepping `offset` per frame (easeOutCubic).
+    /// Both the Canvas node graph and overlay note cards read the raw offset,
+    /// so they move in lockstep — unlike withAnimation, which glides the
+    /// overlay views while the Canvas jumps straight to the target.
+    private func panAnimated(to target: CGSize) {
+        guard target != offset else { return }
+        panAnimationTask?.cancel()
+        let start = offset
+        let begun = Date()
+        panAnimationTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let t = min(Date().timeIntervalSince(begun) / 0.22, 1)
+                let eased = 1 - pow(1 - t, 3)
+                offset = CGSize(
+                    width: start.width + (target.width - start.width) * eased,
+                    height: start.height + (target.height - start.height) * eased
+                )
+                if t >= 1 { break }
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+            if !Task.isCancelled {
+                panBase = offset
+            }
         }
     }
 
@@ -1590,10 +1615,7 @@ struct MapCanvasView: View {
         noteEditorBaseline = nil
         // Restore the pre-editor pan only if the user hasn't panned since.
         if let saved = preEditorPan, let target = editorPanTarget, offset == target {
-            let apply = { offset = saved; panBase = saved }
-            if reduceMotion { apply() } else {
-                withAnimation(.easeOut(duration: 0.22)) { apply() }
-            }
+            panAnimated(to: saved)
         }
         preEditorPan = nil
         editorPanTarget = nil
@@ -1628,10 +1650,7 @@ struct MapCanvasView: View {
         preEditorPan = offset
         let target = CGSize(width: offset.width - overflow, height: offset.height)
         editorPanTarget = target
-        let apply = { offset = target; panBase = target }
-        if reduceMotion { apply() } else {
-            withAnimation(.easeOut(duration: 0.22)) { apply() }
-        }
+        panAnimated(to: target)
     }
 
     private func toggleNoteExpansion() {
