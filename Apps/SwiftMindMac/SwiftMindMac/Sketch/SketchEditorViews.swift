@@ -1278,10 +1278,23 @@ struct SketchEditorView: View {
                 }
             } label: {
                 Image(systemName: tool.isShape ? tool.icon : "square.on.square.dashed")
+                    .font(.system(size: 14, weight: tool.isShape ? .semibold : .regular))
+                    .frame(width: 30, height: 22)
+                    .background {
+                        if tool.isShape {
+                            Capsule().fill(Color.accentColor.opacity(0.16))
+                        }
+                    }
+                    .overlay {
+                        if tool.isShape {
+                            Capsule().strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1)
+                        }
+                    }
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             .foregroundStyle(tool.isShape ? Color.accentColor : Color.secondary)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: tool)
             .accessibilityIdentifier("sketchShapesMenu")
 
             toolButton(.text)
@@ -1365,18 +1378,35 @@ struct SketchEditorView: View {
 
     private static let inks: [NSColor] = [.black, .darkGray, .white, .systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue]
 
-    /// One flat tool button (the shape tools live in the shapes Menu).
+    /// One flat tool button (the shape tools live in the shapes Menu). The
+    /// active tool gets a capsule highlight + weight bump + spring pop so the
+    /// current selection reads at a glance.
     private func toolButton(_ candidate: SketchTool) -> some View {
-        Button {
+        let active = tool == candidate
+        return Button {
             tool = candidate
         } label: {
             Image(systemName: candidate.icon)
+                .font(.system(size: 14, weight: active ? .semibold : .regular))
+                .scaleEffect(active ? 1.12 : 1)
+                .frame(width: 30, height: 22)
+                .background {
+                    if active {
+                        Capsule().fill(Color.accentColor.opacity(0.16))
+                    }
+                }
+                .overlay {
+                    if active {
+                        Capsule().strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1)
+                    }
+                }
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(tool == candidate ? Color.accentColor : Color.secondary)
+        .foregroundStyle(active ? Color.accentColor : Color.secondary)
+        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: tool)
         .accessibilityIdentifier("sketchTool" + candidate.rawValue.prefix(1).uppercased()
                                  + candidate.rawValue.dropFirst())
-        .accessibilityAddTraits(tool == candidate ? [.isSelected] : [])
+        .accessibilityAddTraits(active ? [.isSelected] : [])
         .help(candidate.title + " (\(Self.shortcut(for: candidate)))")
     }
 
