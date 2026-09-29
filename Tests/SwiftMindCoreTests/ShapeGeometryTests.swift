@@ -110,4 +110,139 @@ final class ShapeGeometryTests: XCTestCase {
         let end = CGPoint(x: 200, y: 150)
         XCTAssertEqual(ShapeGeometry.constrainedEnd(from: a, to: end, shift: false), end)
     }
+
+    // MARK: - Shape library (Freeform parity)
+
+    private var dragBox: CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+               width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+
+    /// Min distance from a point to a segment.
+    private func distance(from p: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let abx = b.x - a.x, aby = b.y - a.y
+        let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
+        return hypot(p.x - a.x - abx * t, p.y - a.y - aby * t)
+    }
+
+    private func assertDenseClosed(_ points: [CGPoint], spacing: CGFloat = 2.5,
+                                   file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertGreaterThan(points.count, 20, file: file, line: line)
+        XCTAssertEqual(points.first, points.last, "loop must close", file: file, line: line)
+        for (p, q) in zip(points, points.dropFirst()) {
+            XCTAssertLessThanOrEqual(hypot(q.x - p.x, q.y - p.y), spacing,
+                                     "sampling must stay dense", file: file, line: line)
+        }
+    }
+
+    private func assertOnPolyline(_ points: [CGPoint], _ vertices: [CGPoint],
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        for p in points {
+            let best = zip(vertices, vertices.dropFirst() + [vertices[0]])
+                .map { distance(from: p, toSegment: $0.0, $0.1) }
+                .min()!
+            XCTAssertLessThanOrEqual(best, 1e-6,
+                                     "(\(p.x), \(p.y)) is off the expected polyline",
+                                     file: file, line: line)
+        }
+    }
+
+    func testTriangleOnExpectedEdges() {
+        let points = ShapeGeometry.trianglePoints(from: a, to: b)
+        assertDenseClosed(points)
+        let box = dragBox
+        assertOnPolyline(points, [
+            CGPoint(x: box.midX, y: box.minY),
+            CGPoint(x: box.maxX, y: box.maxY),
+            CGPoint(x: box.minX, y: box.maxY),
+        ])
+    }
+
+    func testDiamondOnExpectedEdges() {
+        let points = ShapeGeometry.diamondPoints(from: a, to: b)
+        assertDenseClosed(points)
+        let box = dragBox
+        assertOnPolyline(points, [
+            CGPoint(x: box.midX, y: box.minY),
+            CGPoint(x: box.maxX, y: box.midY),
+            CGPoint(x: box.midX, y: box.maxY),
+            CGPoint(x: box.minX, y: box.midY),
+        ])
+    }
+
+    func testStarOnTenVertexPolyline() {
+        let points = ShapeGeometry.starPoints(from: a, to: b)
+        assertDenseClosed(points)
+        let box = dragBox
+        let rx = box.width / (2 * cos(CGFloat.pi / 10))
+        let ry = box.height / (1 + sin(CGFloat.pi * 0.3))
+        let cx = box.midX, cy = box.minY + ry
+        var vertices: [CGPoint] = []
+        for i in 0..<10 {
+            let angle = -CGFloat.pi / 2 + CGFloat(i) * .pi / 5
+            let factor: CGFloat = i.isMultiple(of: 2) ? 1 : 0.45
+            vertices.append(CGPoint(x: cx + rx * factor * cos(angle),
+                                    y: cy + ry * factor * sin(angle)))
+        }
+        assertOnPolyline(points, vertices)
+        // The star fills the drag box: spikes touch all four edges.
+        XCTAssertEqual(points.map(\.x).min()!, box.minX, accuracy: 1e-6)
+        XCTAssertEqual(points.map(\.x).max()!, box.maxX, accuracy: 1e-6)
+        XCTAssertEqual(points.map(\.y).min()!, box.minY, accuracy: 1e-6)
+        XCTAssertEqual(points.map(\.y).max()!, box.maxY, accuracy: 1e-6)
+    }
+
+    func testRoundedRectPointsOnTrueOutline() {
+        let points = ShapeGeometry.roundedRectPoints(from: a, to: b)
+        assertDenseClosed(points)
+        let box = dragBox
+        let r = min(max(min(box.width, box.height) * 0.2, 4), 28)
+        let centers = [
+            CGPoint(x: box.minX + r, y: box.minY + r), CGPoint(x: box.maxX - r, y: box.minY + r),
+            CGPoint(x: box.maxX - r, y: box.maxY - r), CGPoint(x: box.minX + r, y: box.maxY - r),
+        ]
+        for p in points {
+            // On the outline = on one of the 4 straight edges (inset by r)
+            // or on one of the 4 corner circles.
+            let onEdge =
+                (abs(p.y - box.minY) < 1e-6 && p.x >= box.minX + r && p.x <= box.maxX - r)
+                || (abs(p.y - box.maxY) < 1e-6 && p.x >= box.minX + r && p.x <= box.maxX - r)
+                || (abs(p.x - box.minX) < 1e-6 && p.y >= box.minY + r && p.y <= box.maxY - r)
+                || (abs(p.x - box.maxX) < 1e-6 && p.y >= box.minY + r && p.y <= box.maxY - r)
+            let onCorner = centers.contains {
+                abs(hypot(p.x - $0.x, p.y - $0.y) - r) < 1e-6
+            }
+            XCTAssertTrue(onEdge || onCorner, "(\(p.x), \(p.y)) is off the rounded rect")
+        }
+        // Bounding box spans the drag box (corners touch at 45° diagonals).
+        XCTAssertEqual(points.map(\.x).min()!, box.minX, accuracy: 1e-6)
+        XCTAssertEqual(points.map(\.y).min()!, box.minY, accuracy: 1e-6)
+    }
+
+    func testBubbleHasTailBelowBottomEdge() {
+        let points = ShapeGeometry.bubblePoints(from: a, to: b)
+        assertDenseClosed(points)
+        let box = dragBox
+        let tipY = box.maxY + box.height * 0.18
+        XCTAssertEqual(points.map(\.y).max()!, tipY, accuracy: 1e-6,
+                       "the tail tip must be the lowest point")
+        // The tail is real ink: some point sits clearly below the box.
+        XCTAssertGreaterThan(points.map(\.y).max()!, box.maxY + 5)
+    }
+
+    func testAllShapesRespectDragBoundingBox() {
+        let box = dragBox
+        let shapes = [
+            ShapeGeometry.roundedRectPoints(from: a, to: b),
+            ShapeGeometry.trianglePoints(from: a, to: b),
+            ShapeGeometry.diamondPoints(from: a, to: b),
+            ShapeGeometry.starPoints(from: a, to: b),
+        ]
+        for points in shapes {
+            XCTAssertEqual(points.map(\.x).min()!, box.minX, accuracy: 1e-6)
+            XCTAssertEqual(points.map(\.x).max()!, box.maxX, accuracy: 1e-6)
+            XCTAssertEqual(points.map(\.y).min()!, box.minY, accuracy: 1e-6)
+            XCTAssertEqual(points.map(\.y).max()!, box.maxY, accuracy: 1e-6)
+        }
+    }
 }

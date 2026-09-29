@@ -71,6 +71,155 @@ public enum ShapeGeometry {
             return CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
         }
     }
+
+    // MARK: - Shape library (bbox-based, drag-direction agnostic)
+
+    /// One piece of a shape outline: a straight run or a circular arc.
+    private enum Outline {
+        case line(CGPoint, CGPoint)
+        /// Angles in radians; the sweep must be < 2π.
+        case arc(center: CGPoint, radius: CGFloat, start: CGFloat, end: CGFloat)
+    }
+
+    /// Dense samples around an outline built from lines and arcs, closing the
+    /// loop exactly at the first point.
+    private static func points(outlining outline: [Outline]) -> [CGPoint] {
+        var points: [CGPoint] = []
+        for piece in outline {
+            switch piece {
+            case .line(let a, let b):
+                points.append(contentsOf: samples(alongLineFrom: a, to: b))
+            case .arc(let center, let radius, let start, let end):
+                let sweep = end - start
+                let length = abs(sweep) * radius
+                let steps = max(2, Int((length / sampleSpacing).rounded(.up)))
+                for i in 0..<steps {
+                    let t = CGFloat(i) / CGFloat(steps)
+                    let angle = start + sweep * t
+                    points.append(CGPoint(
+                        x: center.x + radius * cos(angle),
+                        y: center.y + radius * sin(angle)
+                    ))
+                }
+            }
+        }
+        points.append(points[0]) // close the loop EXACTLY
+        return points
+    }
+
+    /// Corner radius for rounded outlines, clamped to a sane band.
+    private static func cornerRadius(of box: CGRect) -> CGFloat {
+        min(max(min(box.width, box.height) * 0.2, 4), 28)
+    }
+
+    private static func box(of a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(
+            x: min(a.x, b.x), y: min(a.y, b.y),
+            width: abs(b.x - a.x), height: abs(b.y - a.y)
+        )
+    }
+
+    private static let rightAngle = CGFloat.pi / 2
+
+    /// Rounded rectangle outline: four quarter-circle corners + four edges.
+    /// Each piece ends exactly where the next begins (arc endpoints and line
+    /// endpoints coincide — a gap here shows up as a straight-line chord in
+    /// the committed stroke).
+    private static func roundedRectOutline(of box: CGRect) -> [Outline] {
+        let r = cornerRadius(of: box)
+        let tl = CGPoint(x: box.minX + r, y: box.minY + r)
+        let tr = CGPoint(x: box.maxX - r, y: box.minY + r)
+        let br = CGPoint(x: box.maxX - r, y: box.maxY - r)
+        let bl = CGPoint(x: box.minX + r, y: box.maxY - r)
+        return [
+            .arc(center: tl, radius: r, start: .pi, end: -rightAngle),   // ends (minX+r, minY)
+            .line(CGPoint(x: tl.x, y: box.minY), CGPoint(x: tr.x, y: box.minY)),
+            .arc(center: tr, radius: r, start: -rightAngle, end: 0),     // ends (maxX, minY+r)
+            .line(CGPoint(x: box.maxX, y: tr.y), CGPoint(x: box.maxX, y: br.y)),
+            .arc(center: br, radius: r, start: 0, end: rightAngle),      // ends (maxX-r, maxY)
+            .line(CGPoint(x: br.x, y: box.maxY), CGPoint(x: bl.x, y: box.maxY)),
+            .arc(center: bl, radius: r, start: rightAngle, end: .pi),    // ends (minX, maxY-r)
+            .line(CGPoint(x: box.minX, y: bl.y), CGPoint(x: box.minX, y: tl.y)),
+        ]
+    }
+
+    /// Rounded rectangle (Freeform's soft rectangle).
+    public static func roundedRectPoints(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
+        points(outlining: roundedRectOutline(of: box(of: a, b)))
+    }
+
+    /// Triangle with the apex at the top-center of the drag box.
+    public static func trianglePoints(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
+        let box = box(of: a, b)
+        let apex = CGPoint(x: box.midX, y: box.minY)
+        let right = CGPoint(x: box.maxX, y: box.maxY)
+        let left = CGPoint(x: box.minX, y: box.maxY)
+        return points(outlining: [
+            .line(apex, right), .line(right, left), .line(left, apex),
+        ])
+    }
+
+    /// Diamond through the midpoints of the drag box's edges.
+    public static func diamondPoints(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
+        let box = box(of: a, b)
+        let top = CGPoint(x: box.midX, y: box.minY)
+        let right = CGPoint(x: box.maxX, y: box.midY)
+        let bottom = CGPoint(x: box.midX, y: box.maxY)
+        let left = CGPoint(x: box.minX, y: box.midY)
+        return points(outlining: [
+            .line(top, right), .line(right, bottom), .line(bottom, left), .line(left, top),
+        ])
+    }
+
+    /// Five-point star filling the drag box, inner radius 0.45 of outer. The
+    /// outer vertices sit at -90°/±18°/±54°+180°, so the radii are scaled by
+    /// cos(18°)/sin(54°) to make the spikes touch all four box edges.
+    public static func starPoints(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
+        let box = box(of: a, b)
+        let rx = box.width / (2 * cos(.pi / 10))
+        let ry = box.height / (1 + sin(.pi * 0.3))   // top spike + bottom spike pair
+        let cx = box.midX
+        let cy = box.minY + ry                       // top spike lands on minY
+        let inner: CGFloat = 0.45
+        var vertices: [CGPoint] = []
+        for i in 0..<10 {
+            let angle = -.pi / 2 + CGFloat(i) * .pi / 5
+            let factor: CGFloat = i.isMultiple(of: 2) ? 1 : inner
+            vertices.append(CGPoint(
+                x: cx + rx * factor * cos(angle),
+                y: cy + ry * factor * sin(angle)
+            ))
+        }
+        var outline: [Outline] = []
+        for i in 0..<vertices.count {
+            outline.append(.line(vertices[i], vertices[(i + 1) % vertices.count]))
+        }
+        return points(outlining: outline)
+    }
+
+    /// Speech bubble: rounded rectangle with a tail on the bottom-left.
+    public static func bubblePoints(from a: CGPoint, to b: CGPoint) -> [CGPoint] {
+        let box = box(of: a, b)
+        let r = cornerRadius(of: box)
+        let tailBase2 = CGPoint(x: box.minX + box.width * 0.30, y: box.maxY)
+        let tailTip = CGPoint(x: box.minX + box.width * 0.22, y: box.maxY + box.height * 0.18)
+        let tailBase1 = CGPoint(x: box.minX + box.width * 0.16, y: box.maxY)
+        let br = CGPoint(x: box.maxX - r, y: box.maxY - r)
+        let bl = CGPoint(x: box.minX + r, y: box.maxY - r)
+        return points(outlining: [
+            .arc(center: CGPoint(x: box.minX + r, y: box.minY + r), radius: r, start: .pi, end: -rightAngle),
+            .line(CGPoint(x: box.minX + r, y: box.minY), CGPoint(x: box.maxX - r, y: box.minY)),
+            .arc(center: CGPoint(x: box.maxX - r, y: box.minY + r), radius: r, start: -rightAngle, end: 0),
+            .line(CGPoint(x: box.maxX, y: box.minY + r), CGPoint(x: box.maxX, y: br.y)),
+            .arc(center: br, radius: r, start: 0, end: rightAngle),
+            .line(CGPoint(x: br.x, y: box.maxY), tailBase2),   // bottom edge → tail
+            .line(tailBase2, tailTip),                         // tail right side
+            .line(tailTip, tailBase1),                         // tail left side
+            .line(tailBase1, CGPoint(x: bl.x, y: box.maxY)),   // back to the bottom edge
+            .arc(center: bl, radius: r, start: rightAngle, end: .pi),
+            .line(CGPoint(x: box.minX, y: bl.y), CGPoint(x: box.minX, y: box.minY + r)),
+        ])
+    }
 }
 
 private extension CGFloat {

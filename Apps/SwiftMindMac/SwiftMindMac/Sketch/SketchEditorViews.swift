@@ -13,6 +13,10 @@ enum SketchEventGuard {
     /// True while the in-place sketch editor owns input.
     static var editorIsActive = false
 
+    /// True while a TEXT session is open on the sketch board — keystrokes
+    /// (especially "d") belong to the text field, never the canvas shortcuts.
+    static var textEditingActive = false
+
     /// Session of the key window's document (set by AppModel). Key-down
     /// monitors are installed per window — only the active session's
     /// monitor may eat keys; background windows' monitors pass through.
@@ -32,30 +36,71 @@ enum SketchEventGuard {
 
 enum SketchTool: String, CaseIterable {
     case pen
+    case marker
     case eraser
     case line
     case arrow
     case rect
+    case roundedRect
     case ellipse
+    case triangle
+    case diamond
+    case star
+    case bubble
+    case text
     case select
 
     var icon: String {
         switch self {
         case .pen: return "pencil.tip"
+        case .marker: return "highlighter"
         case .eraser: return "eraser"
         case .line: return "line.diagonal"
         case .arrow: return "arrow.up.right"
         case .rect: return "rectangle"
+        case .roundedRect: return "rectangle.rounded"
         case .ellipse: return "circle"
+        case .triangle: return "triangle"
+        case .diamond: return "diamond"
+        case .star: return "star"
+        case .bubble: return "bubble.left"
+        case .text: return "character.cursor.ibeam"
         case .select: return "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
+        }
+    }
+
+    /// Human title for the shapes menu.
+    var title: String {
+        switch self {
+        case .pen: return "Pen"
+        case .marker: return "Marker"
+        case .eraser: return "Eraser"
+        case .line: return "Line"
+        case .arrow: return "Arrow"
+        case .rect: return "Rectangle"
+        case .roundedRect: return "Rounded Rectangle"
+        case .ellipse: return "Ellipse"
+        case .triangle: return "Triangle"
+        case .diamond: return "Diamond"
+        case .star: return "Star"
+        case .bubble: return "Speech Bubble"
+        case .text: return "Text"
+        case .select: return "Select"
         }
     }
 
     var isShape: Bool {
         switch self {
-        case .line, .arrow, .rect, .ellipse: return true
-        default: return false
+        case .line, .arrow, .rect, .roundedRect, .ellipse, .triangle, .diamond, .star, .bubble:
+            return true
+        default:
+            return false
         }
+    }
+
+    /// All shape tools, in menu order.
+    static var shapes: [SketchTool] {
+        [.line, .arrow, .rect, .roundedRect, .ellipse, .triangle, .diamond, .star, .bubble]
     }
 }
 
@@ -72,11 +117,13 @@ enum SketchTool: String, CaseIterable {
 /// stroke; commit (trim) therefore always contains all strokes.
 struct SketchEditorView: View {
     @Binding var drawingData: Data
+    /// Text elements on the board (text boxes / sticky notes), content coords.
+    @Binding var texts: [SketchText]
     @Binding var tool: SketchTool
     @Binding var inkColor: NSColor
     /// Pen/shape stroke width in content points.
     @Binding var inkWidth: CGFloat
-    /// Called after every committed stroke/erase (drives the debounced commit).
+    /// Called after every committed stroke/text/erase (drives the debounced commit).
     let onStrokeChange: () -> Void
     let onDone: () -> Void
 
@@ -86,10 +133,32 @@ struct SketchEditorView: View {
     @State private var shapeDrag: (start: CGPoint, current: CGPoint)?
     /// Indices of selected strokes (select tool).
     @State private var selectedIndices: Set<Int> = []
+    /// Ids of selected text elements (select tool).
+    @State private var selectedTextIDs: Set<String> = []
     /// Select-tool drag: nil = tap-pending, else (start, current) in content space.
     @State private var selectDrag: (start: CGPoint, current: CGPoint)?
-    @State private var undoStack: [PKDrawing] = []
-    @State private var redoStack: [PKDrawing] = []
+    @State private var undoStack: [(drawing: PKDrawing, texts: [SketchText])] = []
+    @State private var redoStack: [(drawing: PKDrawing, texts: [SketchText])] = []
+
+    // MARK: Text tool state
+
+    /// Active text editing session (nil = none).
+    @State private var textEditing: TextEditingSession?
+    struct TextEditingSession: Identifiable {
+        let id: String
+        /// False while composing a brand-new text (Esc discards it).
+        var isExisting: Bool
+        /// Anchor (top-left) in content coordinates.
+        var x: Double
+        var y: Double
+    }
+    @State private var textDraft = ""
+    @State private var textFontFamily = SketchTextSupport.defaultFontFamily
+    @State private var textFontSize = SketchTextSupport.defaultFontSize
+    /// Sticky background; nil = plain text box.
+    @State private var textSticky: String? = nil
+    /// Keyboard focus for the open text session's editor.
+    @FocusState private var textEditorFocused: Bool
     /// Drag-start snapshot for the erase gesture (one undo step per erase drag).
     @State private var eraseSnapshot: PKDrawing?
     /// Last payload we wrote to the binding — distinguishes our own echoes
@@ -124,7 +193,13 @@ struct SketchEditorView: View {
                 if press.modifiers.contains(.shift) { redo() } else { undo() }
                 return .handled
             }
-            if press.key == .delete, tool == .select, !selectedIndices.isEmpty {
+            // ⌘Return commits the open text session (plain Return is a newline).
+            if press.key == .return, press.modifiers == .command, textEditing != nil {
+                commitTextEditing()
+                return .handled
+            }
+            if press.key == .delete, tool == .select,
+               !selectedIndices.isEmpty || !selectedTextIDs.isEmpty {
                 deleteSelection()
                 return .handled
             }
@@ -142,6 +217,9 @@ struct SketchEditorView: View {
         lastSyncedData = data
         undoStack.removeAll()
         redoStack.removeAll()
+        selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
+        textEditing = nil
         fitComputed = false
         computeFitIfNeeded()
     }
@@ -154,10 +232,18 @@ struct SketchEditorView: View {
                 if fitComputed {
                     CommittedStrokesImage(drawing: drawing, rect: contentRect)
                 }
-                if tool == .pen, !livePoints.isEmpty {
+                if fitComputed, !texts.isEmpty {
+                    ForEach(texts) { element in
+                        committedTextChrome(element)
+                    }
+                }
+                if let session = textEditing {
+                    textEditingOverlay(session)
+                }
+                if tool == .pen || tool == .marker, !livePoints.isEmpty {
                     StrokePreview(
                         points: livePoints,
-                        color: Color(nsColor: inkColor),
+                        color: Color(nsColor: inkColor).opacity(tool == .marker ? 0.4 : 1),
                         width: inkWidth * fitScale
                     )
                 }
@@ -170,7 +256,7 @@ struct SketchEditorView: View {
                         width: inkWidth * fitScale
                     )
                 }
-                if tool == .select, !selectedIndices.isEmpty, fitComputed {
+                if tool == .select, (!selectedIndices.isEmpty || !selectedTextIDs.isEmpty), fitComputed {
                     selectionChrome
                 }
                 if let drag = selectDrag, tool == .select {
@@ -213,13 +299,22 @@ struct SketchEditorView: View {
         }
     }
 
-    /// Fit the existing content into the board — once per session (or after an
-    /// external reload), so the board never shifts under the pen. Never
-    /// upscales: tiny content shows 1:1 centered in a board-sized content rect.
+    /// Fit the existing content (strokes AND text elements) into the board —
+    /// once per session (or after an external reload), so the board never
+    /// shifts under the pen. Never upscales: tiny content shows 1:1 centered
+    /// in a board-sized content rect.
     private func computeFitIfNeeded() {
         guard !fitComputed, boardSize.width > 40, boardSize.height > 40 else { return }
-        let bounds = drawing.bounds
+        var bounds = drawing.bounds
         if drawing.strokes.isEmpty || bounds.isNull || bounds.isEmpty || bounds.isInfinite {
+            bounds = .null
+        }
+        for text in texts {
+            bounds = bounds.union(CGRect(
+                x: text.x, y: text.y, width: text.width, height: text.height
+            ))
+        }
+        if bounds.isNull || bounds.isEmpty || bounds.isInfinite {
             fitScale = 1
             contentRect = CGRect(origin: .zero, size: boardSize)
         } else {
@@ -268,6 +363,17 @@ struct SketchEditorView: View {
     }
 
     private func handleDrag(_ location: CGPoint, phase: DragPhase) {
+        // While a text session is open, any board click commits it first
+        // (the editing overlay consumes clicks inside itself).
+        if textEditing != nil {
+            if phase == .ended { commitTextEditing() }
+            return
+        }
+        if tool == .text {
+            guard fitComputed else { return }
+            if phase == .ended { beginTextEditing(at: contentPoint(location)) }
+            return
+        }
         if tool.isShape {
             guard fitComputed else { return }
             switch phase {
@@ -322,7 +428,7 @@ struct SketchEditorView: View {
             return
         }
         switch tool {
-        case .pen:
+        case .pen, .marker:
             // Record raw board points even before the fit lands (first frames
             // of a session) — conversion happens at stroke commit, when the
             // fit is necessarily computed. Gating input on the fit race
@@ -366,7 +472,10 @@ struct SketchEditorView: View {
             )
         }
         let path = PKStrokePath(controlPoints: strokePoints, creationDate: Date())
-        drawing.strokes.append(PKStroke(ink: PKInk(.pen, color: inkColor), path: path))
+        drawing.strokes.append(PKStroke(
+            ink: PKInk(tool == .marker ? .marker : .pen, color: inkColor),
+            path: path
+        ))
         syncToModel()
     }
 
@@ -393,8 +502,18 @@ struct SketchEditorView: View {
             pts = [point(a), point(b)]
         case .rect:
             pts = ShapeGeometry.rectPoints(from: a, to: b).map(point)
+        case .roundedRect:
+            pts = ShapeGeometry.roundedRectPoints(from: a, to: b).map(point)
         case .ellipse:
             pts = ShapeGeometry.ellipsePoints(from: a, to: b).map(point)
+        case .triangle:
+            pts = ShapeGeometry.trianglePoints(from: a, to: b).map(point)
+        case .diamond:
+            pts = ShapeGeometry.diamondPoints(from: a, to: b).map(point)
+        case .star:
+            pts = ShapeGeometry.starPoints(from: a, to: b).map(point)
+        case .bubble:
+            pts = ShapeGeometry.bubblePoints(from: a, to: b).map(point)
         default:
             pts = [point(a), point(b)]
         }
@@ -419,6 +538,225 @@ struct SketchEditorView: View {
         syncToModel()
     }
 
+    // MARK: - Text tool
+
+    /// Tap with the text tool: edit the text under the point, or start a new
+    /// one anchored there.
+    private func beginTextEditing(at content: CGPoint) {
+        SketchEventGuard.textEditingActive = true
+        if let index = texts.lastIndex(where: {
+            CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                .insetBy(dx: -4, dy: -4).contains(content)
+        }) {
+            let element = texts[index]
+            textEditing = TextEditingSession(id: element.id, isExisting: true, x: element.x, y: element.y)
+            textDraft = element.text
+            textFontFamily = element.fontFamily
+            textFontSize = CGFloat(element.fontSize)
+            textSticky = element.background
+            inkColor = SketchTextSupport.hexColor(element.color)
+        } else {
+            textEditing = TextEditingSession(
+                id: UUID().uuidString, isExisting: false,
+                x: Double(content.x), y: Double(content.y)
+            )
+            textDraft = ""
+            textSticky = nil
+        }
+        selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
+    }
+
+    /// Commit the open text session into `texts` (measured frame, current
+    /// font/ink). Empty text (or `discard`) keeps the previous element, so
+    /// Esc on a new box discards it and Esc on an existing one reverts edits.
+    private func commitTextEditing(discard: Bool = false) {
+        guard let session = textEditing else { return }
+        textEditing = nil
+        SketchEventGuard.textEditingActive = false
+        let trimmed = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !discard, !trimmed.isEmpty else { return }
+        pushUndo()
+        let size = SketchTextSupport.measuredSize(
+            text: textDraft, family: textFontFamily,
+            size: textFontSize, sticky: textSticky != nil
+        )
+        let element = SketchText(
+            id: session.id,
+            text: textDraft,
+            x: session.x, y: session.y,
+            fontFamily: textFontFamily,
+            fontSize: Double(textFontSize),
+            color: SketchTextSupport.hex(from: inkColor),
+            background: textSticky,
+            width: Double(size.width), height: Double(size.height)
+        )
+        if let index = texts.firstIndex(where: { $0.id == session.id }) {
+            texts[index] = element
+        } else {
+            texts.append(element)
+        }
+        SketchTextSupport.noteFontUsed(textFontFamily)
+        syncToModel()
+    }
+
+    /// Committed text element on the board (scaled content → board).
+    @ViewBuilder
+    private func committedTextChrome(_ element: SketchText) -> some View {
+        let frame = CGRect(
+            x: (element.x - contentRect.minX) * fitScale,
+            y: (element.y - contentRect.minY) * fitScale,
+            width: element.width * fitScale,
+            height: element.height * fitScale
+        )
+        let body = Text(element.text)
+            .font(Font.custom(element.fontFamily, size: CGFloat(element.fontSize) * fitScale))
+            .foregroundStyle(Color(nsColor: SketchTextSupport.hexColor(element.color)))
+            .frame(
+                width: frame.width - (element.background != nil ? SketchTextSupport.stickyPadding * 2 * fitScale : 0),
+                height: frame.height - (element.background != nil ? SketchTextSupport.stickyPadding * 2 * fitScale : 0),
+                alignment: .topLeading
+            )
+        Group {
+            if element.background != nil {
+                body.padding(SketchTextSupport.stickyPadding * fitScale)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6 * fitScale)
+                            .fill(Color(nsColor: SketchTextSupport.hexColor(element.background!)))
+                            .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
+                    )
+            } else {
+                body
+            }
+        }
+        .overlay {
+            if selectedTextIDs.contains(element.id) {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.accentColor.opacity(0.9),
+                                  style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+            }
+        }
+        .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+        .position(x: frame.minX + frame.width / 2, y: frame.minY + frame.height / 2)
+        .accessibilityIdentifier("sketchText-\(element.id)")
+    }
+
+    /// In-place editor for the open text session: styled TextEditor + font bar
+    /// (family with recents on top, size, sticky background). Commit = the
+    /// button, ⌘Return, or clicking elsewhere; Esc reverts.
+    @ViewBuilder
+    private func textEditingOverlay(_ session: TextEditingSession) -> some View {
+        let anchor = CGPoint(
+            x: (CGFloat(session.x) - contentRect.minX) * fitScale,
+            y: (CGFloat(session.y) - contentRect.minY) * fitScale
+        )
+        let measured = SketchTextSupport.measuredSize(
+            text: textDraft.isEmpty ? " " : textDraft,
+            family: textFontFamily, size: textFontSize, sticky: textSticky != nil
+        )
+        let width = min(max(measured.width * fitScale + 24, 160), boardSize.width - 24)
+        let height = min(max(measured.height * fitScale + 20, 44), boardSize.height * 0.6)
+        let clampedX = min(max(anchor.x, 8), max(8, boardSize.width - width - 8))
+        let clampedY = min(max(anchor.y, 8), max(8, boardSize.height - height - 8))
+        VStack(alignment: .leading, spacing: 4) {
+            TextEditor(text: $textDraft)
+                .focused($textEditorFocused)
+                .font(Font.custom(textFontFamily, size: textFontSize * fitScale))
+                .foregroundStyle(Color(nsColor: inkColor))
+                .scrollContentBackground(.hidden)
+                .frame(width: width, height: height)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1.5)
+                        )
+                )
+            fontBar
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .textBackgroundColor).opacity(0.97))
+                .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        )
+        .padding(4)
+        .position(x: clampedX + width / 2, y: clampedY + height / 2)
+        .onExitCommand { commitTextEditing(discard: true) }
+        .onAppear {
+            DispatchQueue.main.async { textEditorFocused = true }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("sketchTextEditor")
+    }
+
+    /// Font controls for the open text session.
+    private var fontBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                let recents = SketchTextSupport.recentFontFamilies
+                    .filter { $0 != textFontFamily }
+                if !recents.isEmpty {
+                    Section("Recently Used") {
+                        ForEach(recents, id: \.self) { family in
+                            Button(family) { textFontFamily = family }
+                        }
+                    }
+                }
+                Section("All Fonts") {
+                    ForEach(SketchTextSupport.fontFamilies, id: \.self) { family in
+                        Button(family) {
+                            textFontFamily = family
+                            SketchTextSupport.noteFontUsed(family)
+                        }
+                    }
+                }
+            } label: {
+                Text(textFontFamily)
+                    .frame(maxWidth: 130, alignment: .leading)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .fixedSize()
+            .accessibilityIdentifier("sketchTextFontMenu")
+
+            Menu {
+                ForEach(SketchTextSupport.fontSizes, id: \.self) { size in
+                    Button(Int(size).description) { textFontSize = size }
+                }
+            } label: {
+                Text("\(Int(textFontSize)) pt")
+            }
+            .fixedSize()
+            .accessibilityIdentifier("sketchTextSizeMenu")
+
+            Menu {
+                Button("None") { textSticky = nil }
+                ForEach(Array(SketchTextSupport.stickyColors.enumerated()), id: \.offset) { _, hex in
+                    Button {
+                        textSticky = hex
+                    } label: {
+                        Label(hex, systemImage: "rectangle.fill")
+                            .foregroundStyle(Color(nsColor: SketchTextSupport.hexColor(hex)))
+                    }
+                }
+            } label: {
+                Image(systemName: textSticky == nil ? "note.text" : "rectangle.fill")
+            }
+            .fixedSize()
+            .accessibilityIdentifier("sketchTextSticky")
+            .accessibilityLabel("Sticky Note")
+
+            Spacer(minLength: 0)
+
+            Button("OK", action: { commitTextEditing() })
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityIdentifier("sketchTextCommit")
+        }
+        .frame(width: 320)
+    }
+
     /// Bounds of one stroke in content space (PKStroke exposes no bounds).
     private static func bounds(of stroke: PKStroke) -> CGRect {
         var rect: CGRect?
@@ -430,8 +768,20 @@ struct SketchEditorView: View {
         return rect ?? .null
     }
 
-    /// Tap with the select tool: pick the topmost stroke under the point.
+    private static func textFrame(of element: SketchText) -> CGRect {
+        CGRect(x: element.x, y: element.y, width: element.width, height: element.height)
+    }
+
+    /// Tap with the select tool: the topmost TEXT under the point wins, else
+    /// the stroke closest to the tap center.
     private func tapSelect(at content: CGPoint) {
+        if let index = texts.lastIndex(where: {
+            Self.textFrame(of: $0).insetBy(dx: -4, dy: -4).contains(content)
+        }) {
+            selectedTextIDs = [texts[index].id]
+            selectedIndices = []
+            return
+        }
         var best: (index: Int, dist: CGFloat)?
         for (index, stroke) in drawing.strokes.enumerated() {
             let b = Self.bounds(of: stroke)
@@ -444,11 +794,17 @@ struct SketchEditorView: View {
             if best == nil || dist < best!.dist { best = (index, dist) }
         }
         selectedIndices = best.map { [$0.index] } ?? []
+        selectedTextIDs = []
     }
 
-    /// True when a content point sits inside a selected stroke's bounds.
+    /// True when a content point sits inside a selected stroke's or text's bounds.
     private func hitSelected(at content: CGPoint) -> Bool {
-        selectedIndices.contains { index in
+        if selectedTextIDs.contains(where: { id in
+            texts.first(where: { $0.id == id }).map { Self.textFrame(of: $0).contains(content) } == true
+        }) {
+            return true
+        }
+        return selectedIndices.contains { index in
             guard index < drawing.strokes.count else { return false }
             let b = Self.bounds(of: drawing.strokes[index])
             return !b.isNull
@@ -457,7 +813,7 @@ struct SketchEditorView: View {
         }
     }
 
-    /// Marquee: select every stroke whose bounds intersect the drag rect.
+    /// Marquee: select strokes AND texts whose bounds intersect the drag rect.
     private func marqueeSelect(from a: CGPoint, to b: CGPoint) {
         let rect = CGRect(
             x: min(a.x, b.x), y: min(a.y, b.y),
@@ -467,51 +823,70 @@ struct SketchEditorView: View {
             let bounds = Self.bounds(of: drawing.strokes[index])
             return !bounds.isNull && bounds.insetBy(dx: -4, dy: -4).intersects(rect)
         })
+        selectedTextIDs = Set(texts.filter {
+            Self.textFrame(of: $0).insetBy(dx: -4, dy: -4).intersects(rect)
+        }.map(\.id))
     }
 
-    /// Move the selected strokes by a content-space delta (no undo push —
-    /// the caller pushes once at drag start).
+    /// Move the selected strokes AND texts by a content-space delta (no undo
+    /// push — the caller pushes once at drag start).
     private func moveSelected(by delta: CGPoint) {
-        guard !selectedIndices.isEmpty else { return }
-        drawing.strokes = drawing.strokes.enumerated().map { index, stroke in
-            guard selectedIndices.contains(index) else { return stroke }
-            let moved = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map { pt in
-                PKStrokePoint(
-                    location: CGPoint(x: pt.location.x + delta.x, y: pt.location.y + delta.y),
-                    timeOffset: pt.timeOffset,
-                    size: pt.size,
-                    opacity: pt.opacity,
-                    force: pt.force,
-                    azimuth: pt.azimuth,
-                    altitude: pt.altitude
-                )
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty else { return }
+        if !selectedIndices.isEmpty {
+            drawing.strokes = drawing.strokes.enumerated().map { index, stroke in
+                guard selectedIndices.contains(index) else { return stroke }
+                let moved = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map { pt in
+                    PKStrokePoint(
+                        location: CGPoint(x: pt.location.x + delta.x, y: pt.location.y + delta.y),
+                        timeOffset: pt.timeOffset,
+                        size: pt.size,
+                        opacity: pt.opacity,
+                        force: pt.force,
+                        azimuth: pt.azimuth,
+                        altitude: pt.altitude
+                    )
+                }
+                let path = moved.count > 1
+                    ? PKStrokePath(controlPoints: moved, creationDate: Date())
+                    : stroke.path
+                return PKStroke(ink: stroke.ink, path: path)
             }
-            let path = moved.count > 1
-                ? PKStrokePath(controlPoints: moved, creationDate: Date())
-                : stroke.path
-            return PKStroke(ink: stroke.ink, path: path)
+        }
+        if !selectedTextIDs.isEmpty {
+            texts = texts.map { element in
+                guard selectedTextIDs.contains(element.id) else { return element }
+                var moved = element
+                moved.x += Double(delta.x)
+                moved.y += Double(delta.y)
+                return moved
+            }
         }
     }
 
-    /// Delete the selected strokes (one undo step).
+    /// Delete the selected strokes and texts (one undo step).
     private func deleteSelection() {
-        guard !selectedIndices.isEmpty else { return }
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty else { return }
         pushUndo()
         drawing.strokes = drawing.strokes.enumerated()
             .filter { !selectedIndices.contains($0.offset) }
             .map(\.element)
+        texts = texts.filter { !selectedTextIDs.contains($0.id) }
         selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
         syncToModel()
     }
 
-    /// Bounding box chrome around the selected strokes (content → board).
+    /// Bounding box chrome around the selected strokes and texts (content → board).
     @ViewBuilder
     private var selectionChrome: some View {
-        let boxes = selectedIndices.compactMap { index -> CGRect? in
+        let strokeBoxes = selectedIndices.compactMap { index -> CGRect? in
             guard index < drawing.strokes.count else { return nil }
             let b = Self.bounds(of: drawing.strokes[index])
             return b.isNull ? nil : b
         }
+        let textBoxes = texts.filter { selectedTextIDs.contains($0.id) }
+            .map { Self.textFrame(of: $0) }
+        let boxes = strokeBoxes + textBoxes
         if let union = boxes.dropFirst().reduce(boxes.first, { acc, next in
             acc.map { $0.union(next) } ?? next
         }) {
@@ -549,7 +924,7 @@ struct SketchEditorView: View {
     // MARK: Model sync / undo
 
     private func pushUndo() {
-        undoStack.append(drawing)
+        undoStack.append((drawing, texts))
         if undoStack.count > 100 { undoStack.removeFirst() }
         redoStack.removeAll()
     }
@@ -563,22 +938,34 @@ struct SketchEditorView: View {
 
     private func undo() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append(drawing)
-        drawing = previous
+        redoStack.append((drawing, texts))
+        drawing = previous.drawing
+        texts = previous.texts
+        selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
+        textEditing = nil
         syncToModel()
     }
 
     private func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(drawing)
-        drawing = next
+        undoStack.append((drawing, texts))
+        drawing = next.drawing
+        texts = next.texts
+        selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
+        textEditing = nil
         syncToModel()
     }
 
     private func clear() {
-        guard !drawing.strokes.isEmpty else { return }
+        guard !drawing.strokes.isEmpty || !texts.isEmpty else { return }
         pushUndo()
         drawing = PKDrawing()
+        texts = []
+        selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
+        textEditing = nil
         syncToModel()
     }
 
@@ -586,18 +973,36 @@ struct SketchEditorView: View {
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            ForEach(SketchTool.allCases, id: \.self) { candidate in
-                Button {
-                    tool = candidate
-                } label: {
-                    Image(systemName: candidate.icon)
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(tool == candidate ? Color.accentColor : Color.secondary)
-                .accessibilityIdentifier("sketchTool" + candidate.rawValue.prefix(1).uppercased()
-                                         + candidate.rawValue.dropFirst())
-                .accessibilityAddTraits(tool == candidate ? [.isSelected] : [])
+            ForEach([SketchTool.pen, .marker, .eraser], id: \.self) { candidate in
+                toolButton(candidate)
             }
+
+            Divider().frame(height: 14)
+
+            // Shapes browser (Freeform-style): one control, the label mirrors
+            // the active shape.
+            Menu {
+                ForEach(SketchTool.shapes, id: \.self) { candidate in
+                    Button {
+                        tool = candidate
+                    } label: {
+                        if tool == candidate {
+                            Label(candidate.title, systemImage: candidate.icon)
+                        } else {
+                            Text(candidate.title)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: tool.isShape ? tool.icon : "square.on.square.dashed")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .foregroundStyle(tool.isShape ? Color.accentColor : Color.secondary)
+            .accessibilityIdentifier("sketchShapesMenu")
+
+            toolButton(.text)
+            toolButton(.select)
 
             Divider().frame(height: 14)
 
@@ -676,6 +1081,21 @@ struct SketchEditorView: View {
     }
 
     private static let inks: [NSColor] = [.black, .darkGray, .white, .systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue]
+
+    /// One flat tool button (the shape tools live in the shapes Menu).
+    private func toolButton(_ candidate: SketchTool) -> some View {
+        Button {
+            tool = candidate
+        } label: {
+            Image(systemName: candidate.icon)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(tool == candidate ? Color.accentColor : Color.secondary)
+        .accessibilityIdentifier("sketchTool" + candidate.rawValue.prefix(1).uppercased()
+                                 + candidate.rawValue.dropFirst())
+        .accessibilityAddTraits(tool == candidate ? [.isSelected] : [])
+        .help(candidate.title)
+    }
 }
 
 // MARK: - Rendering pieces

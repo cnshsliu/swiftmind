@@ -107,6 +107,10 @@ struct MapCanvasView: View {
     /// Baseline of the last committed sketch payload; skips no-op commits and
     /// detects external model changes while the editor is open.
     @State private var lastCommittedSketch: Data?
+    /// Text elements draft (text boxes / sticky notes), content coordinates.
+    @State private var sketchTextsDraft: [SketchText] = []
+    /// Model baseline for the texts — external-change detection like above.
+    @State private var lastCommittedSketchTexts: [SketchText] = []
     @State private var sketchCommitTask: Task<Void, Never>?
     /// True once the user drew/erased since open/last commit — close without
     /// edits must not push a redundant SetSketchCommand.
@@ -382,6 +386,10 @@ struct MapCanvasView: View {
                         lastCommittedSketch = node.sketch
                         sketchIsDirty = false
                     }
+                    if (node.sketchTexts ?? []) != lastCommittedSketchTexts {
+                        sketchTextsDraft = node.sketchTexts ?? []
+                        lastCommittedSketchTexts = sketchTextsDraft
+                    }
                 } else {
                     // Node vanished — close without committing.
                     closeSketchEditor(committing: false)
@@ -511,8 +519,9 @@ struct MapCanvasView: View {
             }
             // 2 = d — toggle the sketch editor. Routed through the monitor
             // (not .onKeyPress) because SwiftUI focus can be lost after the
-            // editor closes; the AppKit path is reliable.
-            if event.keyCode == 2, bare {
+            // editor closes; the AppKit path is reliable. Never while a text
+            // session is open on the board — "d" is just a letter there.
+            if event.keyCode == 2, bare, !SketchEventGuard.textEditingActive {
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .swiftMindCanvasSketchToggle, object: nil)
                 }
@@ -1133,6 +1142,7 @@ struct MapCanvasView: View {
                    let image = SketchSupport.image(
                        nodeID: node.id,
                        data: data,
+                       texts: model.sketchTexts ?? [],
                        boardSize: CGSize(width: contentW, height: contentH),
                        scale: scale
                    ) {
@@ -1725,6 +1735,7 @@ struct MapCanvasView: View {
     }
 
     private func nodeHasSketchContent(_ node: Node) -> Bool {
+        if let texts = node.sketchTexts, !texts.isEmpty { return true }
         guard let sketch = node.sketch else { return false }
         return sketch != SketchSupport.emptyDrawingData()
     }
@@ -1762,6 +1773,8 @@ struct MapCanvasView: View {
             sketchDraft = empty
             lastCommittedSketch = empty
         }
+        sketchTextsDraft = node.sketchTexts ?? []
+        lastCommittedSketchTexts = sketchTextsDraft
         sketchIsDirty = false
         drawingNodeID = nodeID
         SketchEventGuard.editorIsActive = true
@@ -1801,26 +1814,34 @@ struct MapCanvasView: View {
         }
     }
 
-    /// Trim the draft to its stroke bounding box (+ padding), normalize to the
-    /// padding origin, and persist. Empty drawing → placeholder board. A draft
-    /// that fails to decode is NOT treated as empty — wiping real content on a
-    /// transient decode failure is unrecoverable, so we keep the last commit.
+    /// Trim the draft (strokes AND texts) to the content bounding box
+    /// (+ padding), normalize to the padding origin, and persist as one
+    /// command batch. No content → placeholder board. A draft that fails to
+    /// decode is NOT treated as empty — wiping real content on a transient
+    /// decode failure is unrecoverable, so we keep the last commit.
     private func commitSketchDraft() {
         guard sketchIsDirty,
               let id = drawingNodeID,
               session.store.map.node(id: id) != nil else { return }
         let padding = LayoutConfig().sketchTrimPadding
-        if let trimmed = SketchSupport.trim(sketchDraft, padding: padding) {
-            guard trimmed.data != lastCommittedSketch else { return }
-            session.applyQuiet(
-                SetSketchCommand(
+        if let trimmed = SketchSupport.trim(sketchDraft, texts: sketchTextsDraft, padding: padding) {
+            var ops: [MapOp] = []
+            if trimmed.data != lastCommittedSketch {
+                ops.append(.setSketch(
                     nodeID: id,
-                    sketch: trimmed.data,
+                    data: trimmed.data,
                     width: Double(trimmed.size.width),
                     height: Double(trimmed.size.height)
-                )
-            )
+                ))
+            }
+            let modelTexts = trimmed.texts.isEmpty ? nil : trimmed.texts
+            if modelTexts != (lastCommittedSketchTexts.isEmpty ? nil : lastCommittedSketchTexts) {
+                ops.append(.setSketchTexts(nodeID: id, texts: modelTexts))
+            }
+            guard !ops.isEmpty else { return }
+            session.applyQuiet(CompositeAgentCommand(ops: ops))
             lastCommittedSketch = trimmed.data
+            lastCommittedSketchTexts = trimmed.texts
         } else {
             let decodesToNoStrokes = ((try? PKDrawing(data: sketchDraft))?.strokes.isEmpty) == true
             guard decodesToNoStrokes else { return }
@@ -1855,6 +1876,7 @@ struct MapCanvasView: View {
 
         SketchEditorView(
             drawingData: $sketchDraft,
+            texts: $sketchTextsDraft,
             tool: $sketchTool,
             inkColor: $sketchInkColor,
             inkWidth: $sketchInkWidth,

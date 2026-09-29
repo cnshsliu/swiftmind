@@ -501,6 +501,7 @@ struct SketchNotePreview: View {
         return SketchSupport.image(
             nodeID: node.id,
             data: data,
+            texts: node.sketchTexts ?? [],
             boardSize: size,
             scale: 2
         )

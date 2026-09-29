@@ -10,6 +10,10 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     /// Trimmed content width/height (incl. trim padding) in board points; nil until content exists.
     public var sketchWidth: Double?
     public var sketchHeight: Double?
+    /// Text elements on the sketch board (text boxes / sticky notes), in
+    /// content coordinates. Optional so files written before texts existed
+    /// decode unchanged.
+    public var sketchTexts: [SketchText]?
     public var links: [NodeLink]
     public var icons: [NodeIcon]
     public var attributes: [NodeAttribute]
@@ -32,6 +36,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         sketch: Data? = nil,
         sketchWidth: Double? = nil,
         sketchHeight: Double? = nil,
+        sketchTexts: [SketchText]? = nil,
         links: [NodeLink] = [],
         icons: [NodeIcon] = [],
         attributes: [NodeAttribute] = [],
@@ -50,6 +55,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.sketch = sketch
         self.sketchWidth = sketchWidth
         self.sketchHeight = sketchHeight
+        self.sketchTexts = sketchTexts
         self.links = links
         self.icons = icons
         self.attributes = attributes

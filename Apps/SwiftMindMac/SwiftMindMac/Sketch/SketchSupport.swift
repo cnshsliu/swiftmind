@@ -18,33 +18,77 @@ enum SketchSupport {
     }
 
     /// Rasterized board image, memoized per (node, content hash, zoom bucket).
-    static func image(nodeID: NodeID, data: Data, boardSize: CGSize, scale: CGFloat) -> NSImage? {
+    /// Text elements are composited on top of the PencilKit rasterization.
+    static func image(
+        nodeID: NodeID,
+        data: Data,
+        texts: [SketchText],
+        boardSize: CGSize,
+        scale: CGFloat
+    ) -> NSImage? {
         let bucket = max(1, (scale * 2).rounded())
-        let key = "\(nodeID.rawValue)#\(data.hashValue)#\(Int(bucket))" as NSString
+        let key = "\(nodeID.rawValue)#\(data.hashValue)#\(texts.map(\.id).joined().hashValue)#\(texts.map(\.text).joined().hashValue)#\(Int(bucket))" as NSString
         if let hit = cache.object(forKey: key) { return hit }
         guard let drawing = try? PKDrawing(data: data) else { return nil }
-        let rendered = drawing.image(from: CGRect(origin: .zero, size: boardSize), scale: bucket)
-        cache.setObject(rendered, forKey: key)
-        return rendered
+        let boardRect = CGRect(origin: .zero, size: boardSize)
+        let rendered = drawing.image(from: boardRect, scale: bucket)
+        guard !texts.isEmpty else {
+            cache.setObject(rendered, forKey: key)
+            return rendered
+        }
+        // Compose text over the rasterized strokes in a flipped context
+        // (content coordinates are y-down).
+        let composed = NSImage(size: boardSize)
+        composed.lockFocusFlipped(true)
+        rendered.draw(in: boardRect)
+        for element in texts {
+            SketchTextSupport.draw(element, in: boardRect)
+        }
+        composed.unlockFocus()
+        cache.setObject(composed, forKey: key)
+        return composed
     }
 
-    /// Trim-to-content: translates strokes so content sits at `padding` from
-    /// the origin (baked into the path points) and returns the new payload
-    /// plus the padded content size. Returns nil for an empty (or
-    /// undecodable) drawing.
-    static func trim(_ data: Data, padding: Double) -> (data: Data, size: CGSize)? {
-        guard let drawing = try? PKDrawing(data: data) else { return nil }
-        let bounds = drawing.bounds
-        guard !bounds.isNull, !bounds.isEmpty, !bounds.isInfinite else { return nil }
+    /// Trim-to-content over strokes AND text elements: everything is
+    /// translated so the union content sits at `padding` from the origin and
+    /// the padded union size is returned. Returns nil when there is no
+    /// content at all (no strokes, or an undecodable drawing with no texts).
+    static func trim(
+        _ data: Data,
+        texts: [SketchText],
+        padding: Double
+    ) -> (data: Data, texts: [SketchText], size: CGSize)? {
         let pad = CGFloat(padding)
-        let shift = CGAffineTransform(
-            translationX: -bounds.minX + pad,
-            y: -bounds.minY + pad
-        )
-        let trimmed = PKDrawing(strokes: drawing.strokes.map { translated($0, by: shift) })
+        let drawing = try? PKDrawing(data: data)
+        let strokeBounds = drawing?.bounds ?? .null
+        let hasStrokes = drawing != nil && !strokeBounds.isNull
+            && !strokeBounds.isEmpty && !strokeBounds.isInfinite
+        guard hasStrokes || !texts.isEmpty else { return nil }
+
+        var union = CGRect.null
+        if hasStrokes { union = strokeBounds }
+        for text in texts {
+            union = union.union(CGRect(x: text.x, y: text.y, width: text.width, height: text.height))
+        }
+        let shift = CGAffineTransform(translationX: -union.minX + pad, y: -union.minY + pad)
+        let trimmedData: Data
+        if let drawing, hasStrokes {
+            trimmedData = PKDrawing(strokes: drawing.strokes.map { translated($0, by: shift) })
+                .dataRepresentation()
+        } else {
+            trimmedData = emptyDrawingData()
+        }
+        let shiftedTexts = texts.map { text in
+            var moved = text
+            let origin = CGPoint(x: text.x, y: text.y).applying(shift)
+            moved.x = Double(origin.x)
+            moved.y = Double(origin.y)
+            return moved
+        }
         return (
-            trimmed.dataRepresentation(),
-            CGSize(width: bounds.width + pad * 2, height: bounds.height + pad * 2)
+            trimmedData,
+            shiftedTexts,
+            CGSize(width: union.width + pad * 2, height: union.height + pad * 2)
         )
     }
 

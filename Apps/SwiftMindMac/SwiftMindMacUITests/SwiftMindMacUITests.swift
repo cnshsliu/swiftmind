@@ -1266,12 +1266,15 @@ extension SwiftMindMacUITests {
         focusCanvasWithSelection()
         let editor = element("sketchEditor")
 
-        func drawShape(_ toolID: String, _ from: CGVector, _ to: CGVector) {
+        func drawShape(_ menuTitle: String, _ from: CGVector, _ to: CGVector) {
             app.typeKey(.init("d"), modifierFlags: [])
             XCTAssertTrue(editor.waitForExistence(timeout: 3), "sketch editor should open")
-            let button = element(toolID)
-            XCTAssertTrue(button.waitForExistence(timeout: 2), "\(toolID) toolbar button")
-            button.click()
+            let menu = element("sketchShapesMenu")
+            XCTAssertTrue(menu.waitForExistence(timeout: 2), "shapes menu button")
+            menu.click()
+            let item = app.menuItems[menuTitle]
+            XCTAssertTrue(item.waitForExistence(timeout: 3), "menu should offer \(menuTitle)")
+            item.click()
             let start = editor.coordinate(withNormalizedOffset: from)
             let end = editor.coordinate(withNormalizedOffset: to)
             start.press(forDuration: 0.05, thenDragTo: end)
@@ -1281,8 +1284,8 @@ extension SwiftMindMacUITests {
             XCTAssertFalse(editor.exists)
         }
 
-        drawShape("sketchToolRect", CGVector(dx: 0.25, dy: 0.55), CGVector(dx: 0.6, dy: 0.85))
-        drawShape("sketchToolEllipse", CGVector(dx: 0.4, dy: 0.55), CGVector(dx: 0.7, dy: 0.85))
+        drawShape("Rectangle", CGVector(dx: 0.25, dy: 0.55), CGVector(dx: 0.6, dy: 0.85))
+        drawShape("Ellipse", CGVector(dx: 0.4, dy: 0.55), CGVector(dx: 0.7, dy: 0.85))
 
         // Decode every committed sketch payload; at least one stroke per shape
         // must hug its own bbox perimeter (a spline through sparse points
@@ -1340,35 +1343,231 @@ extension SwiftMindMacUITests {
                        "the ellipse tool must commit a dense, undeformed ring")
     }
 
-    /// Picking an ink color must NOT kick the active shape tool back to the
-    /// pen — draw a red ellipse next, not a red scribble. Only the
-    /// non-drawing tools (eraser/select) fall back to pen on ink selection.
-    func testSketchInkSelectionKeepsShapeTool() throws {
+    /// 1.2 Freeform parity: the marker commits PKInk(.marker) strokes.
+    func testSketchMarkerInkCommits() throws {
         focusCanvasWithSelection()
         app.typeKey(.init("d"), modifierFlags: [])
         let editor = element("sketchEditor")
         XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        element("sketchToolMarker").click()
 
-        let ellipse = element("sketchToolEllipse")
-        XCTAssertTrue(ellipse.waitForExistence(timeout: 2))
-        ellipse.click()
-        XCTAssertTrue(ellipse.isSelected, "clicking the tool should select it")
-
-        let ink = element("sketchInk4") // systemRed
-        XCTAssertTrue(ink.waitForExistence(timeout: 2), "ink swatch should exist")
-        ink.click()
-
-        XCTAssertTrue(ellipse.isSelected,
-                      "picking an ink must keep the ellipse tool active")
-        XCTAssertFalse(element("sketchToolPen").isSelected)
-
-        // From the ERASER, an ink pick falls back to the pen (nothing to ink).
-        element("sketchToolEraser").click()
-        ink.click()
-        XCTAssertTrue(element("sketchToolPen").isSelected,
-                      "eraser + ink should switch to the pen")
-
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
         app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        RunLoop.current.run(until: Date().addingTimeInterval(2.5)) // autosave
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        // Scan EVERY sketch payload — the scratch map may carry nodes from
+        // earlier runs, and document order is not draw order.
+        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
+        var markerFound = false
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let drawing = try? PKDrawing(data: data) else { continue }
+            if drawing.strokes.contains(where: { $0.ink.inkType == .marker }) {
+                markerFound = true
+            }
+        }
+        XCTAssertTrue(markerFound, "the marker tool must commit a marker-ink stroke")
+    }
+
+    /// 1.2 Freeform parity: shapes browser offers the new shapes and their
+    /// committed strokes hug the expected polylines (triangle / star).
+    func testSketchShapesMenuLibrary() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        func pickShape(_ title: String) {
+            let menu = element("sketchShapesMenu")
+            XCTAssertTrue(menu.waitForExistence(timeout: 2), "shapes menu button")
+            menu.click()
+            let item = app.menuItems[title]
+            XCTAssertTrue(item.waitForExistence(timeout: 3), "menu should offer \(title)")
+            item.click()
+        }
+
+        func draw() {
+            let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+            let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.85))
+            start.press(forDuration: 0.05, thenDragTo: end)
+            RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+        }
+
+        pickShape("Triangle")
+        draw()
+        pickShape("Star")
+        draw()
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        RunLoop.current.run(until: Date().addingTimeInterval(2.5)) // autosave
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
+        var triangleFound = false
+        var starFound = false
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let drawing = try? PKDrawing(data: data) else { continue }
+            for stroke in drawing.strokes {
+                let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map(\.location)
+                guard pts.count > 40 else { continue }
+                let xs = pts.map(\.x), ys = pts.map(\.y)
+                guard let minX = xs.min(), let maxX = xs.max(),
+                      let minY = ys.min(), let maxY = ys.max() else { continue }
+                func dist(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+                    let abx = b.x - a.x, aby = b.y - a.y
+                    let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
+                    return hypot(p.x - a.x - abx * t, p.y - a.y - aby * t)
+                }
+                // Triangle: three vertices from the stroke's own bbox.
+                let tri = [
+                    CGPoint(x: (minX + maxX) / 2, y: minY),
+                    CGPoint(x: maxX, y: maxY),
+                    CGPoint(x: minX, y: maxY),
+                ]
+                if pts.allSatisfy({ p in
+                    zip(tri, tri.dropFirst() + [tri[0]]).map({ dist(p, $0.0, $0.1) }).min()! <= 1.5
+                }) {
+                    triangleFound = true
+                }
+                // Star: ten vertices recomputed with the production formulas.
+                let rx = (maxX - minX) / (2 * cos(CGFloat.pi / 10))
+                let ry = (maxY - minY) / (1 + sin(CGFloat.pi * 0.3))
+                let cx = (minX + maxX) / 2, cy = minY + ry
+                var star: [CGPoint] = []
+                for i in 0..<10 {
+                    let angle = -CGFloat.pi / 2 + CGFloat(i) * .pi / 5
+                    let f: CGFloat = i.isMultiple(of: 2) ? 1 : 0.45
+                    star.append(CGPoint(x: cx + rx * f * cos(angle), y: cy + ry * f * sin(angle)))
+                }
+                if pts.allSatisfy({ p in
+                    zip(star, star.dropFirst() + [star[0]]).map({ dist(p, $0.0, $0.1) }).min()! <= 1.5
+                }) {
+                    starFound = true
+                }
+            }
+        }
+        XCTAssertTrue(triangleFound, "the triangle tool must commit a true triangle")
+        XCTAssertTrue(starFound, "the star tool must commit a true five-point star")
+    }
+
+    /// 1.2 Freeform parity: text boxes and sticky notes commit to the model
+    /// (node-sketch-texts payload) and reopen with the editor.
+    func testSketchTextAndStickyCommit() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        element("sketchToolText").click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6)).click()
+        let textEditor = element("sketchTextEditor")
+        XCTAssertTrue(textEditor.waitForExistence(timeout: 3), "text tool click opens the editor")
+        app.typeText("board note")
+
+        // Sticky: give it a yellow background, then commit. Menus surface as
+        // pop-up/menu buttons — query by identifier OR the sticky label.
+        let sticky = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == 'sketchTextSticky' OR label CONTAINS[c] 'Sticky'")
+        ).firstMatch
+        XCTAssertTrue(sticky.waitForExistence(timeout: 3), "sticky control should exist")
+        sticky.click()
+        let yellow = app.menuItems["#FFF685"]
+        XCTAssertTrue(yellow.waitForExistence(timeout: 3), "sticky palette should offer yellow")
+        yellow.click()
+        element("sketchTextCommit").click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(textEditor.exists, "OK must close the text editor")
+
+        // Committed element is on the board; close the sketch editor (commit).
+        let committed = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'sketchText-'")).firstMatch
+        XCTAssertTrue(committed.waitForExistence(timeout: 3), "committed text should render")
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        guard let match = html.firstMatch(
+            of: #/<div class="node-sketch-texts" hidden="hidden">([A-Za-z0-9+/=]+)<\/div>/#
+        ), let data = Data(base64Encoded: String(match.output.1)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            XCTFail("node-sketch-texts payload should persist"); return
+        }
+        let element = json.first {
+            ($0["text"] as? String)?.contains("board note") == true
+        }
+        XCTAssertNotNil(element, "the typed text must be persisted")
+        XCTAssertEqual(element?["background"] as? String, "#FFF685", "sticky background must persist")
+        XCTAssertEqual(element?["fontFamily"] as? String, "Helvetica", "default font must persist")
+    }
+
+    /// Picking an ink color must NOT kick the active shape tool back to the
+    /// pen — draw a red ellipse next, not a red scribble. Verified
+    /// behaviorally: pick Ellipse from the shapes menu, change ink, draw —
+    /// the committed stroke must still be a true ellipse.
+    func testSketchInkSelectionKeepsShapeTool() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        let menu = element("sketchShapesMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        menu.click()
+        let ellipseItem = app.menuItems["Ellipse"]
+        XCTAssertTrue(ellipseItem.waitForExistence(timeout: 3))
+        ellipseItem.click()
+
+        // Change ink to red (systemRed is the 4th swatch).
+        element("sketchInk4").click()
+
+        // Draw: if the ink pick had kicked the tool back to pen, this would
+        // commit a scribble instead of an ellipse ring.
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.85))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let matches = html.matches(of: #/<div class="node-sketch" hidden="hidden">([^|<]+)\|([0-9.]+)\|([0-9.]+)<\/div>/#)
+        var ellipseFound = false
+        for match in matches {
+            guard let data = Data(base64Encoded: String(match.output.1)),
+                  let drawing = try? PKDrawing(data: data) else { continue }
+            for stroke in drawing.strokes {
+                let pts = stroke.path.interpolatedPoints(in: nil, by: .distance(4)).map(\.location)
+                guard pts.count >= 60 else { continue }
+                let xs = pts.map(\.x), ys = pts.map(\.y)
+                guard let minX = xs.min(), let maxX = xs.max(),
+                      let minY = ys.min(), let maxY = ys.max(),
+                      maxX - minX > 10, maxY - minY > 10 else { continue }
+                let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+                let rx = (maxX - minX) / 2, ry = (maxY - minY) / 2
+                if pts.allSatisfy({ p in
+                    let term = pow((p.x - cx) / rx, 2) + pow((p.y - cy) / ry, 2)
+                    return abs(term - 1) <= 0.05
+                }) {
+                    ellipseFound = true
+                }
+            }
+        }
+        XCTAssertTrue(ellipseFound,
+                      "after an ink pick the ellipse tool must still draw ellipses")
     }
 
     /// Min distance from a point to a rect's boundary (nearest edge distance
@@ -1384,10 +1583,9 @@ extension SwiftMindMacUITests {
         ]
         var best = CGFloat.greatestFiniteMagnitude
         for (a, b) in zip(corners, corners.dropFirst()) {
-            let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
-            let ap = CGPoint(x: p.x - a.x, y: p.y - a.y)
-            let t = min(max((ap.x * ab.x + ap.y * ab.y) / (ab.x * ab.x + ab.y * ab.y), 0), 1)
-            let closest = CGPoint(x: a.x + ab.x * t, y: a.y + ab.y * t)
+            let abx = b.x - a.x, aby = b.y - a.y
+            let t = min(max(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby), 0), 1)
+            let closest = CGPoint(x: a.x + abx * t, y: a.y + aby * t)
             best = min(best, hypot(p.x - closest.x, p.y - closest.y))
         }
         return best

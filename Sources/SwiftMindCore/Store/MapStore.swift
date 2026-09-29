@@ -163,8 +163,8 @@ public final class MapStore {
     /// back to the AST estimate and re-measure on every relayout.
     static func commandInvalidatesMeasuredHeights(_ command: (any MapCommand)?) -> Bool {
         switch command {
-        case is SetNoteCommand, is SetSketchCommand, is DeleteNodesCommand,
-             is SetNoteExpandedCommand, is CompositeAgentCommand:
+        case is SetNoteCommand, is SetSketchCommand, is SetSketchTextsCommand,
+             is DeleteNodesCommand, is SetNoteExpandedCommand, is CompositeAgentCommand:
             return true
         default:
             return false
