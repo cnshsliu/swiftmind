@@ -40,9 +40,14 @@ public enum HTMLCodec {
             }
             out += "</section>\n"
         }
-        if !map.styleSheet.styles.isEmpty {
+        // Only CUSTOM entries (diffed against the default sheet) — defaults
+        // are reconstructable, and not re-encoding them keeps files (and
+        // round-trip comparisons) byte-identical to the pre-section format.
+        let customStyles = map.styleSheet.styles
+            .filter { StyleSheet.defaultSheet.styles[$0.key] != $0.value }
+        if !customStyles.isEmpty {
             out += "<section class=\"named-styles\" hidden=\"hidden\">\n"
-            for (styleName, style) in map.styleSheet.styles.sorted(by: { $0.key < $1.key }) {
+            for (styleName, style) in customStyles.sorted(by: { $0.key < $1.key }) {
                 let fill = style.fillRed.map { fr in
                     colorHex(red: fr, green: style.fillGreen ?? 0, blue: style.fillBlue ?? 0)
                 }
@@ -126,8 +131,9 @@ public enum HTMLCodec {
             bookmarks: delegate.bookmarks
         )
         map.styleSheet.rules = delegate.styleRules
-        if !delegate.namedStyles.isEmpty {
-            map.styleSheet.styles = delegate.namedStyles
+        // Merge customs over the default sheet (built-ins stay intact).
+        for (name, style) in delegate.namedStyles {
+            map.styleSheet.styles[name] = style
         }
         // Ensure registry includes any attr names found on nodes.
         Self.collectAttributeNames(from: root).forEach { map.attributeRegistry.ensureRegistered($0) }
