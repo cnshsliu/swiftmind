@@ -1535,6 +1535,43 @@ extension SwiftMindMacUITests {
         }
     }
 
+    /// Custom named styles: "Save as Style…" persists the node's current
+    /// style under a name; the picker offers it and the file round-trips.
+    func testSaveNamedStyleRoundTrip() throws {
+        focusCanvasWithSelection()
+
+        let styleTab = app.radioButtons["Style"]
+        XCTAssertTrue(styleTab.waitForExistence(timeout: 3))
+        styleTab.click()
+
+        var save = element("saveNamedStyleButton")
+        if !save.waitForExistence(timeout: 2) {
+            save = app.buttons["Save as Style…"]
+        }
+        XCTAssertTrue(save.waitForExistence(timeout: 3), "Save as Style button")
+        if !save.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        }
+        save.click()
+        let field = element("newStyleNameField")
+        XCTAssertTrue(field.waitForExistence(timeout: 3))
+        field.click()
+        field.typeText("urgent")
+        element("confirmSaveStyle").click()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        XCTAssertTrue(html.contains("named-styles"),
+                      "the named-styles section must persist")
+        XCTAssertTrue(html.contains("data-name=\"urgent\""),
+                      "the custom style 'urgent' must persist")
+    }
+
     /// The Icons page shows the full categorized catalog (96 icons across 8
     /// categories) and toggling one persists to the map.
     func testInspectorIconsPageCatalog() throws {

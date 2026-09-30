@@ -52,6 +52,9 @@ struct InspectorView: View {
     /// Sticky across node selection changes — adjusting the same property on
     /// a series of nodes stays on the same page.
     @State private var tab: InspectorTab = .content
+    /// "Save as Named Style" sheet.
+    @State private var showingSaveStyle = false
+    @State private var newStyleName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,6 +93,40 @@ struct InspectorView: View {
             syncFromSelection(force: true)
         }
     }
+
+    /// Save the node's CURRENT style (typography + colors) under a name.
+    private var saveStyleSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Save as Named Style").font(.headline)
+            TextField("Style name", text: $newStyleName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("newStyleNameField")
+            HStack {
+                Button("Cancel") { showingSaveStyle = false }
+                Spacer()
+                Button("Save") {
+                    saveNamedStyle()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(newStyleName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("confirmSaveStyle")
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+    }
+
+    private func saveNamedStyle() {
+        let name = newStyleName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, let node = primaryNode else { return }
+        var styles = session.store.map.styleSheet.styles
+        styles[name] = styleFromDrafts()
+        session.apply(SetNamedStylesCommand(styles: styles))
+        session.applyQuiet(SetStyleNameCommand(nodeID: node.id, styleName: name))
+        showingSaveStyle = false
+    }
+
+    private static let builtInStyles: Set<String> = ["topic", "important", "note"]
 
     // MARK: - Pages
 
@@ -227,6 +264,34 @@ struct InspectorView: View {
                         }
                     }
                     .accessibilityIdentifier("namedStylePicker")
+
+                    Button("Save as Style…") {
+                        newStyleName = ""
+                        showingSaveStyle = true
+                    }
+                    .font(.caption)
+                    .accessibilityIdentifier("saveNamedStyleButton")
+
+                    // Delete custom styles (built-ins stay).
+                    let custom = namedStyleKeys.filter { !Self.builtInStyles.contains($0) }
+                    if !custom.isEmpty {
+                        Menu {
+                            ForEach(custom, id: \.self) { key in
+                                Button(key, role: .destructive) {
+                                    var styles = session.store.map.styleSheet.styles
+                                    styles[key] = nil
+                                    session.apply(SetNamedStylesCommand(styles: styles))
+                                }
+                            }
+                        } label: {
+                            Label("Delete Style", systemImage: "minus.circle")
+                                .font(.caption)
+                        }
+                        .accessibilityIdentifier("deleteNamedStyleMenu")
+                    }
+                }
+                .sheet(isPresented: $showingSaveStyle) {
+                    saveStyleSheet
                 }
 
                 Section("Style") {

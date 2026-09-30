@@ -40,6 +40,21 @@ public enum HTMLCodec {
             }
             out += "</section>\n"
         }
+        if !map.styleSheet.styles.isEmpty {
+            out += "<section class=\"named-styles\" hidden=\"hidden\">\n"
+            for (styleName, style) in map.styleSheet.styles.sorted(by: { $0.key < $1.key }) {
+                let fill = style.fillRed.map { fr in
+                    colorHex(red: fr, green: style.fillGreen ?? 0, blue: style.fillBlue ?? 0)
+                }
+                out += "  <style data-name=\"\(escapeAttribute(styleName))\""
+                out += " data-font-size=\"\(formatNumber(style.fontSize))\""
+                out += " data-bold=\"\(style.isBold ? "true" : "false")\""
+                out += " data-text-color=\"\(escapeAttribute(colorHex(red: style.textRed, green: style.textGreen, blue: style.textBlue) ?? ""))\""
+                out += " data-fill-color=\"\(escapeAttribute(fill ?? ""))\"/>\n"
+            }
+            out += "</section>\n"
+        }
+
         if !map.styleSheet.rules.isEmpty {
             out += "<section class=\"style-rules\" hidden=\"hidden\">\n"
             for rule in map.styleSheet.rules {
@@ -111,6 +126,9 @@ public enum HTMLCodec {
             bookmarks: delegate.bookmarks
         )
         map.styleSheet.rules = delegate.styleRules
+        if !delegate.namedStyles.isEmpty {
+            map.styleSheet.styles = delegate.namedStyles
+        }
         // Ensure registry includes any attr names found on nodes.
         Self.collectAttributeNames(from: root).forEach { map.attributeRegistry.ensureRegistered($0) }
         return map
@@ -301,6 +319,17 @@ public enum HTMLCodec {
         return colorHex(red: r, green: g, blue: b)
     }
 
+    /// "#RRGGBB" → sRGB 0...1 components.
+    static func parseColorHex(_ hex: String) -> (r: Double, g: Double, b: Double)? {
+        let cleaned = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard cleaned.count == 6, let value = UInt64(cleaned, radix: 16) else { return nil }
+        return (
+            Double((value >> 16) & 0xFF) / 255,
+            Double((value >> 8) & 0xFF) / 255,
+            Double(value & 0xFF) / 255
+        )
+    }
+
     static func colorHex(red: Double, green: Double, blue: Double) -> String {
         let ri = clampByte(red)
         let gi = clampByte(green)
@@ -344,6 +373,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     var activeFilter: MapFilter?
     var bookmarks: [Bookmark] = []
     var styleRules: [ConditionalStyleRule] = []
+    var namedStyles: [String: NodeStyle] = [:]
 
     private var nodeStack: [Node] = []
     private var capturingTitle = false
@@ -362,6 +392,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var inAttributeRegistry = false
     private var inBookmarksSection = false
     private var inStyleRulesSection = false
+    private var inNamedStylesSection = false
     private var titleBuffer = ""
     private var nodeTitleBuffer = ""
     private var noteBuffer = ""
@@ -452,7 +483,27 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 inBookmarksSection = true
             } else if classes.contains("style-rules") {
                 inStyleRulesSection = true
+            } else if classes.contains("named-styles") {
+                inNamedStylesSection = true
             }
+
+        case "style":
+            guard foundSwiftMindArticle, inNamedStylesSection else { return }
+            guard let styleName = attributeDict["data-name"], !styleName.isEmpty else { return }
+            let fontSize = Double(attributeDict["data-font-size"] ?? "") ?? 14
+            let bold = attributeDict["data-bold"] == "true"
+            let textHex = attributeDict["data-text-color"].flatMap(HTMLCodec.parseColorHex(_:))
+            let fillHex = attributeDict["data-fill-color"].flatMap(HTMLCodec.parseColorHex(_:))
+            namedStyles[styleName] = NodeStyle(
+                fontSize: fontSize,
+                isBold: bold,
+                textRed: textHex?.r ?? 0,
+                textGreen: textHex?.g ?? 0,
+                textBlue: textHex?.b ?? 0,
+                fillRed: fillHex?.r,
+                fillGreen: fillHex?.g,
+                fillBlue: fillHex?.b
+            )
 
         case "attr":
             guard foundSwiftMindArticle, inAttributeRegistry else { return }
@@ -729,6 +780,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
             inAttributeRegistry = false
             inBookmarksSection = false
             inStyleRulesSection = false
+            inNamedStylesSection = false
 
         case "ul":
             if inLinksList {
