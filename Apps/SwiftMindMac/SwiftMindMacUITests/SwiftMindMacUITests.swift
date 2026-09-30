@@ -1705,7 +1705,10 @@ extension SwiftMindMacUITests {
         app.typeKey(.init("d"), modifierFlags: [])
         XCTAssertTrue(editor.waitForExistence(timeout: 3))
 
-        element("sketchInk0").click() // black
+        element("sketchInk").click() // foreground picker
+        let blackSwatch = element("sketchInk-#000000")
+        XCTAssertTrue(blackSwatch.waitForExistence(timeout: 3), "palette should offer black")
+        blackSwatch.click()
         let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6))
         let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6))
         start.press(forDuration: 0.05, thenDragTo: end)
@@ -1841,8 +1844,11 @@ extension SwiftMindMacUITests {
         XCTAssertTrue(ellipseItem.waitForExistence(timeout: 3))
         ellipseItem.click()
 
-        // Change ink to red (systemRed is the 4th swatch).
-        element("sketchInk4").click()
+        // Change ink to red via the foreground picker (deterministic hex).
+        element("sketchInk").click()
+        let redSwatch = element("sketchInk-#FF6B6B")
+        XCTAssertTrue(redSwatch.waitForExistence(timeout: 3), "palette should offer red")
+        redSwatch.click()
 
         // Draw: if the ink pick had kicked the tool back to pen, this would
         // commit a scribble instead of a shape element.
@@ -1859,7 +1865,7 @@ extension SwiftMindMacUITests {
         // the default black) on an ellipse element.
         let ellipse = shapes.first {
             $0["kind"] as? String == "ellipse"
-                && ($0["strokeColor"] as? String)?.uppercased() != "#000000"
+                && ($0["strokeColor"] as? String)?.uppercased() == "#FF6B6B"
         }
         XCTAssertNotNil(ellipse,
                         "after a red-ink pick the ellipse tool must still draw a red ellipse")

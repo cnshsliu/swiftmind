@@ -1368,27 +1368,22 @@ struct SketchEditorView: View {
 
             Divider().frame(height: 14)
 
-            ForEach(Array(Self.inks.enumerated()), id: \.offset) { index, ink in
-                Button {
-                    // Picking an ink only falls back to the pen from
-                    // non-drawing tools (eraser/select); a shape tool stays
-                    // active so the next drag draws that shape in the new ink.
-                    if tool == .eraser || tool == .select { tool = .pen }
-                    inkColor = ink
-                } label: {
-                    Circle()
-                        .fill(Color(nsColor: ink))
-                        .frame(width: 12, height: 12)
-                        .overlay(
-                            Circle().strokeBorder(
-                                inkColor == ink ? Color.accentColor : Color.clear,
-                                lineWidth: 2
-                            )
-                        )
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("sketchInk\(index)")
-            }
+            // Foreground (ink) + background (board) color pair — PPT-style.
+            // The fg picker drives pen/marker ink, shape strokes, and text
+            // color; the bg picker sets the board background.
+            SketchColorPicker(
+                title: "Ink Color",
+                selection: Binding(
+                    get: { SketchTextSupport.hex(from: inkColor) },
+                    set: { inkColor = $0.map { SketchTextSupport.hexColor($0) } ?? .black }
+                ),
+                identifier: "sketchInk"
+            )
+            SketchColorPicker(
+                title: "Board Background",
+                selection: $boardBackground,
+                identifier: "sketchBoardBackground"
+            )
 
             Divider().frame(height: 14)
 
@@ -1413,12 +1408,6 @@ struct SketchEditorView: View {
 
             Spacer(minLength: 0)
 
-            SketchColorPicker(
-                title: "Board Background",
-                selection: $boardBackground,
-                identifier: "sketchBoardBackground"
-            )
-
             Button("Done", action: onDone)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -1427,8 +1416,6 @@ struct SketchEditorView: View {
         .padding(.vertical, 6)
         .frame(height: Self.toolbarHeight)
     }
-
-    private static let inks: [NSColor] = [.black, .darkGray, .white, .systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue]
 
     /// One flat tool button (the shape tools live in the shapes Menu). The
     /// active tool gets a capsule highlight + weight bump + spring pop so the

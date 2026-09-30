@@ -19,7 +19,7 @@ struct SketchColorPicker: View {
 
     /// Swatch palette: paper tones, basics, and saturated accents.
     static let presets: [String] = [
-        "#FFFFFF", "#F2F2F7", "#BDBDC2", "#1C1C1E",
+        "#FFFFFF", "#F2F2F7", "#BDBDC2", "#000000",
         "#FFF8E1", "#FFF685", "#FFD1E8", "#FF6B6B",
         "#C8E6FF", "#4A90D9", "#D6F5D0", "#34C759",
     ]
