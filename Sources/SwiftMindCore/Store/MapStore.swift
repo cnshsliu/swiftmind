@@ -173,7 +173,7 @@ public final class MapStore {
             // markdown cards flash back to the AST estimate and re-measure.
             return composite.ops.contains { op in
                 switch op {
-                case .setSketch, .setSketchTexts, .setSketchShapes: return false
+                case .setSketch, .setSketchTexts, .setSketchShapes, .setSketchImages: return false
                 default: return true
                 }
             }

@@ -24,12 +24,13 @@ enum SketchSupport {
         data: Data,
         texts: [SketchText],
         shapes: [SketchShape] = [],
+        images: [SketchImageElement] = [],
         background: String? = nil,
         boardSize: CGSize,
         scale: CGFloat
     ) -> NSImage? {
         let bucket = max(1, (scale * 2).rounded())
-        let key = "\(nodeID.rawValue)#\(data.hashValue)#\(texts.map(\.id).joined().hashValue)#\(texts.map(\.text).joined().hashValue)#\(shapes.count)#\(shapes.map { $0.text ?? "" }.joined().hashValue)#\(Int(bucket))" as NSString
+        let key = "\(nodeID.rawValue)#\(data.hashValue)#\(texts.map(\.id).joined().hashValue)#\(texts.map(\.text).joined().hashValue)#\(shapes.count)#\(shapes.map { $0.text ?? "" }.joined().hashValue)#\(images.count)#\(images.map { $0.data.hashValue }.reduce(0, &+))#\(Int(bucket))" as NSString
         if let hit = cache.object(forKey: key) { return hit }
         guard let drawing = try? PKDrawing(data: data) else { return nil }
         let boardRect = CGRect(origin: .zero, size: boardSize)
@@ -52,6 +53,11 @@ enum SketchSupport {
                 x: min(shape.x, shape.x + shape.width),
                 y: min(shape.y, shape.y + shape.height),
                 width: abs(shape.width), height: abs(shape.height)
+            ))
+        }
+        for image in images {
+            region = region.union(CGRect(
+                x: image.x, y: image.y, width: image.width, height: image.height
             ))
         }
         if region.isNull || region.isEmpty || region.isInfinite {
@@ -94,6 +100,13 @@ enum SketchSupport {
             cg?.translateBy(x: dest.minX, y: dest.minY)
             cg?.scaleBy(x: fit, y: fit)
             cg?.translateBy(x: -region.minX, y: -region.minY)
+            for image in images {
+                if let nsImage = NSImage(data: image.data) {
+                    nsImage.draw(in: CGRect(
+                        x: image.x, y: image.y, width: image.width, height: image.height
+                    ))
+                }
+            }
             for shape in shapes {
                 Self.draw(shape)
             }
@@ -172,14 +185,15 @@ enum SketchSupport {
         _ data: Data,
         texts: [SketchText],
         shapes: [SketchShape] = [],
+        images: [SketchImageElement] = [],
         padding: Double
-    ) -> (data: Data, texts: [SketchText], shapes: [SketchShape], size: CGSize)? {
+    ) -> (data: Data, texts: [SketchText], shapes: [SketchShape], images: [SketchImageElement], size: CGSize)? {
         let pad = CGFloat(padding)
         let drawing = try? PKDrawing(data: data)
         let strokeBounds = drawing?.bounds ?? .null
         let hasStrokes = drawing != nil && !strokeBounds.isNull
             && !strokeBounds.isEmpty && !strokeBounds.isInfinite
-        guard hasStrokes || !texts.isEmpty || !shapes.isEmpty else { return nil }
+        guard hasStrokes || !texts.isEmpty || !shapes.isEmpty || !images.isEmpty else { return nil }
 
         var union = CGRect.null
         if hasStrokes { union = strokeBounds }
@@ -191,6 +205,11 @@ enum SketchSupport {
                 x: min(shape.x, shape.x + shape.width),
                 y: min(shape.y, shape.y + shape.height),
                 width: abs(shape.width), height: abs(shape.height)
+            ))
+        }
+        for image in images {
+            union = union.union(CGRect(
+                x: image.x, y: image.y, width: image.width, height: image.height
             ))
         }
         let shift = CGAffineTransform(translationX: -union.minX + pad, y: -union.minY + pad)
@@ -208,6 +227,13 @@ enum SketchSupport {
             moved.y = Double(origin.y)
             return moved
         }
+        let shiftedImages = images.map { image in
+            var moved = image
+            let origin = CGPoint(x: image.x, y: image.y).applying(shift)
+            moved.x = Double(origin.x)
+            moved.y = Double(origin.y)
+            return moved
+        }
         let shiftedShapes = shapes.map { shape in
             var moved = shape
             let origin = CGPoint(x: shape.x, y: shape.y).applying(shift)
@@ -219,6 +245,7 @@ enum SketchSupport {
             trimmedData,
             shiftedTexts,
             shiftedShapes,
+            shiftedImages,
             CGSize(width: union.width + pad * 2, height: union.height + pad * 2)
         )
     }

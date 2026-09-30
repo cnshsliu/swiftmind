@@ -19,6 +19,8 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     public var sketchShapes: [SketchShape]?
     /// Sketch board background "#RRGGBB"; nil = system default.
     public var sketchBackground: String?
+    /// Image elements on the sketch board.
+    public var sketchImages: [SketchImageElement]?
     public var links: [NodeLink]
     public var icons: [NodeIcon]
     public var attributes: [NodeAttribute]
@@ -44,6 +46,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         sketchTexts: [SketchText]? = nil,
         sketchShapes: [SketchShape]? = nil,
         sketchBackground: String? = nil,
+        sketchImages: [SketchImageElement]? = nil,
         links: [NodeLink] = [],
         icons: [NodeIcon] = [],
         attributes: [NodeAttribute] = [],
@@ -65,6 +68,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.sketchTexts = sketchTexts
         self.sketchShapes = sketchShapes
         self.sketchBackground = sketchBackground
+        self.sketchImages = sketchImages
         self.links = links
         self.icons = icons
         self.attributes = attributes

@@ -144,6 +144,8 @@ struct SketchEditorView: View {
     @Binding var texts: [SketchText]
     /// Shape elements on the board (PPT-style), content coords.
     @Binding var shapes: [SketchShape]
+    /// Image elements on the board, content coords.
+    @Binding var images: [SketchImageElement]
     /// Board background hex ("#RRGGBB"); nil = system default.
     @Binding var boardBackground: String?
     @Binding var tool: SketchTool
@@ -174,10 +176,12 @@ struct SketchEditorView: View {
     @State private var selectedTextIDs: Set<String> = []
     /// Ids of selected shape elements (select tool).
     @State private var selectedShapeIDs: Set<String> = []
+    /// Ids of selected image elements (select tool).
+    @State private var selectedImageIDs: Set<String> = []
     /// Select-tool drag: nil = tap-pending, else (start, current) in content space.
     @State private var selectDrag: (start: CGPoint, current: CGPoint)?
-    @State private var undoStack: [(drawing: PKDrawing, texts: [SketchText], shapes: [SketchShape])] = []
-    @State private var redoStack: [(drawing: PKDrawing, texts: [SketchText], shapes: [SketchShape])] = []
+    @State private var undoStack: [(drawing: PKDrawing, texts: [SketchText], shapes: [SketchShape], images: [SketchImageElement])] = []
+    @State private var redoStack: [(drawing: PKDrawing, texts: [SketchText], shapes: [SketchShape], images: [SketchImageElement])] = []
 
     // MARK: Text tool state
 
@@ -202,6 +206,7 @@ struct SketchEditorView: View {
     /// In-board clipboard for ⌘C/⌘V.
     @State private var boardClipboard: (shapes: [SketchShape], texts: [SketchText], strokes: [PKStroke]) =
         ([], [], [])
+    @State private var pastedImages: [SketchImageElement] = []
     /// Last fill applied to a shape — new fillable shapes inherit it
     /// (PPT behavior). nil = outline only. Line/arrow are never filled.
     @State private var lastShapeFill: String? = nil
@@ -331,6 +336,11 @@ struct SketchEditorView: View {
                 if fitComputed, !shapes.isEmpty {
                     ForEach(shapes) { shape in
                         shapeChrome(shape)
+                    }
+                }
+                if fitComputed, !images.isEmpty {
+                    ForEach(images) { image in
+                        imageChrome(image)
                     }
                 }
                 if fitComputed, !texts.isEmpty {
@@ -988,13 +998,14 @@ struct SketchEditorView: View {
                 .filter { selectedIndices.contains($0.offset) }
                 .map(\.element)
         )
+        pastedImages = images.filter { selectedImageIDs.contains($0.id) }
     }
 
     /// ⌘V on the board: duplicate the clipboard 16pt down-right, fresh ids,
     /// and select the duplicates (one undo step).
     private func pasteBoardClipboard() {
         guard !(boardClipboard.shapes.isEmpty && boardClipboard.texts.isEmpty
-            && boardClipboard.strokes.isEmpty) else { return }
+            && boardClipboard.strokes.isEmpty && pastedImages.isEmpty) else { return }
         pushUndo()
         let dx: Double = 16, dy: Double = 16
         var pastedShapeIDs: [String] = []
@@ -1019,12 +1030,25 @@ struct SketchEditorView: View {
         let newStrokes = boardClipboard.strokes.map { stroke in
             SketchSupport.translated(stroke, by: CGAffineTransform(translationX: dx, y: dy))
         }
+        let newImages = pastedImages.map { image -> SketchImageElement in
+            var copy = image
+            copy.id = UUID().uuidString
+            copy.x += dx
+            copy.y += dy
+            return copy
+        }
+        var pastedImageIDs: [String] = []
+        images.append(contentsOf: newImages.map { image in
+            pastedImageIDs.append(image.id)
+            return image
+        })
         shapes.append(contentsOf: newShapes)
         texts.append(contentsOf: newTexts)
         drawing.strokes.append(contentsOf: newStrokes)
         selectedIndices = Set(firstPastedStroke..<drawing.strokes.count)
         selectedTextIDs = Set(pastedTextIDs)
         selectedShapeIDs = Set(pastedShapeIDs)
+        selectedImageIDs = Set(pastedImageIDs)
         syncToModel()
     }
 
@@ -1039,6 +1063,72 @@ struct SketchEditorView: View {
             updated.fillColor = fill
             return updated
         }
+        syncToModel()
+    }
+
+    /// Image element on the board (scaled content → board).
+    @ViewBuilder
+    private func imageChrome(_ image: SketchImageElement) -> some View {
+        if let nsImage = NSImage(data: image.data) {
+            let frame = CGRect(
+                x: (image.x - contentRect.minX) * fitScale,
+                y: (image.y - contentRect.minY) * fitScale,
+                width: image.width * fitScale,
+                height: image.height * fitScale
+            )
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: frame.width, height: frame.height)
+                .overlay {
+                    if selectedImageIDs.contains(image.id) {
+                        Rectangle()
+                            .strokeBorder(Color.accentColor.opacity(0.9),
+                                          style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+                    }
+                }
+                .position(x: frame.midX, y: frame.midY)
+                .accessibilityIdentifier("sketchImage-\(image.id)")
+        }
+    }
+
+    /// Toolbar photo button: pick an image, normalize (note-image pipeline),
+    /// drop it centered on the board aspect-fitted to ≤320pt.
+    private func insertImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an image to place on the board"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url,
+                  let raw = try? Data(contentsOf: url),
+                  let png = ClipboardService.normalizeImage(raw) else { return }
+            DispatchQueue.main.async {
+                insertImageData(png)
+            }
+        }
+    }
+
+    private func insertImageData(_ png: Data) {
+        guard let nsImage = NSImage(data: png) else { return }
+        let natural = nsImage.size
+        guard natural.width > 1, natural.height > 1 else { return }
+        let cap: CGFloat = 320
+        let scale = min(1, cap / max(natural.width, natural.height))
+        let size = CGSize(width: natural.width * scale, height: natural.height * scale)
+        // Board center in content coords.
+        let center = contentPoint(CGPoint(x: boardSize.width / 2, y: boardSize.height / 2))
+        pushUndo()
+        images.append(SketchImageElement(
+            x: Double(center.x - size.width / 2),
+            y: Double(center.y - size.height / 2),
+            width: Double(size.width), height: Double(size.height),
+            data: png
+        ))
+        selectedIndices.removeAll()
+        selectedTextIDs.removeAll()
+        selectedShapeIDs.removeAll()
+        selectedImageIDs = [images[images.count - 1].id]
+        tool = .select
         syncToModel()
     }
 
@@ -1251,6 +1341,17 @@ struct SketchEditorView: View {
     /// Tap with the select tool: the topmost TEXT under the point wins, else
     /// the stroke closest to the tap center.
     private func tapSelect(at content: CGPoint) {
+        if let index = images.lastIndex(where: {
+            CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                .insetBy(dx: -2, dy: -2).contains(content)
+        }) {
+            selectedImageIDs = [images[index].id]
+            selectedIndices = []
+            selectedTextIDs = []
+            selectedShapeIDs = []
+            return
+        }
+        selectedImageIDs = []
         if let index = texts.lastIndex(where: {
             Self.textFrame(of: $0).insetBy(dx: -4, dy: -4).contains(content)
         }) {
@@ -1309,6 +1410,13 @@ struct SketchEditorView: View {
         }) {
             return true
         }
+        if selectedImageIDs.contains(where: { id in
+            images.first(where: { $0.id == id }).map {
+                CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height).contains(content)
+            } == true
+        }) {
+            return true
+        }
         return selectedIndices.contains { index in
             guard index < drawing.strokes.count else { return false }
             let b = Self.bounds(of: drawing.strokes[index])
@@ -1334,12 +1442,26 @@ struct SketchEditorView: View {
         selectedShapeIDs = Set(shapes.filter {
             Self.contentFrame(of: $0).insetBy(dx: -4, dy: -4).intersects(rect)
         }.map(\.id))
+        selectedImageIDs = Set(images.filter {
+            CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                .insetBy(dx: -4, dy: -4).intersects(rect)
+        }.map(\.id))
     }
 
     /// Move the selected strokes AND texts by a content-space delta (no undo
     /// push — the caller pushes once at drag start).
     private func moveSelected(by delta: CGPoint) {
-        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty else { return }
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty
+            || !selectedShapeIDs.isEmpty || !selectedImageIDs.isEmpty else { return }
+        if !selectedImageIDs.isEmpty {
+            images = images.map { image in
+                guard selectedImageIDs.contains(image.id) else { return image }
+                var moved = image
+                moved.x += Double(delta.x)
+                moved.y += Double(delta.y)
+                return moved
+            }
+        }
         if !selectedIndices.isEmpty {
             // Translate the ORIGINAL control points (same path trim uses) —
             // resampling through interpolatedPoints(by: .distance(4)) would
@@ -1372,16 +1494,19 @@ struct SketchEditorView: View {
 
     /// Delete the selected strokes and texts (one undo step).
     private func deleteSelection() {
-        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty else { return }
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty
+            || !selectedShapeIDs.isEmpty || !selectedImageIDs.isEmpty else { return }
         pushUndo()
         drawing.strokes = drawing.strokes.enumerated()
             .filter { !selectedIndices.contains($0.offset) }
             .map(\.element)
         texts = texts.filter { !selectedTextIDs.contains($0.id) }
         shapes = shapes.filter { !selectedShapeIDs.contains($0.id) }
+        images = images.filter { !selectedImageIDs.contains($0.id) }
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
         selectedShapeIDs.removeAll()
+        selectedImageIDs.removeAll()
         syncToModel()
     }
 
@@ -1435,7 +1560,7 @@ struct SketchEditorView: View {
     // MARK: Model sync / undo
 
     private func pushUndo() {
-        undoStack.append((drawing, texts, shapes))
+        undoStack.append((drawing, texts, shapes, images))
         if undoStack.count > 100 { undoStack.removeFirst() }
         redoStack.removeAll()
     }
@@ -1449,10 +1574,11 @@ struct SketchEditorView: View {
 
     private func undo() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append((drawing, texts, shapes))
+        redoStack.append((drawing, texts, shapes, images))
         drawing = previous.drawing
         texts = previous.texts
         shapes = previous.shapes
+        images = previous.images
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
         selectedShapeIDs.removeAll()
@@ -1463,10 +1589,11 @@ struct SketchEditorView: View {
 
     private func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append((drawing, texts, shapes))
+        undoStack.append((drawing, texts, shapes, images))
         drawing = next.drawing
         texts = next.texts
         shapes = next.shapes
+        images = next.images
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
         selectedShapeIDs.removeAll()
@@ -1481,6 +1608,7 @@ struct SketchEditorView: View {
         drawing = PKDrawing()
         texts = []
         shapes = []
+        images = []
         selectedIndices.removeAll()
         selectedTextIDs.removeAll()
         selectedShapeIDs.removeAll()
@@ -1558,6 +1686,13 @@ struct SketchEditorView: View {
             }
 
             Divider().frame(height: 14)
+
+            Button(action: insertImage) {
+                Image(systemName: "photo")
+            }
+            .buttonStyle(.borderless)
+            .help("Insert Image")
+            .accessibilityIdentifier("sketchInsertImage")
 
             // Foreground (ink) + background (board) color pair — PPT-style.
             // The fg picker drives pen/marker ink, shape strokes, and text

@@ -222,6 +222,13 @@ public enum HTMLCodec {
             out += "<div class=\"node-sketch\" hidden=\"hidden\">\(sketch.base64EncodedString())|\(w)|\(h)</div>\n"
         }
 
+        if let images = node.sketchImages, !images.isEmpty {
+            if let json = try? JSONEncoder().encode(images) {
+                out += pad + "  "
+                out += "<div class=\"node-sketch-images\" hidden=\"hidden\">\(json.base64EncodedString())</div>\n"
+            }
+        }
+
         if let shapes = node.sketchShapes, !shapes.isEmpty {
             if let json = try? JSONEncoder().encode(shapes) {
                 out += pad + "  "
@@ -391,6 +398,8 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var capturingSketchTexts = false
     /// True while inside `<div class="node-sketch-shapes">`.
     private var capturingSketchShapes = false
+    /// True while inside `<div class="node-sketch-images">`.
+    private var capturingSketchImages = false
     /// True while inside `<ul class="node-links">` so link `<li>`s are not tree nodes.
     private var inLinksList = false
     /// True while inside `<ul class="node-attrs">`.
@@ -405,6 +414,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
     private var sketchBuffer = ""
     private var sketchTextsBuffer = ""
     private var sketchShapesBuffer = ""
+    private var sketchImagesBuffer = ""
 
     private static func classTokens(_ attributeDict: [String: String]) -> [String] {
         (attributeDict["class"] ?? "")
@@ -699,6 +709,10 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 capturingSketchShapes = true
                 sketchShapesBuffer = ""
             }
+            if classes.contains("node-sketch-images") {
+                capturingSketchImages = true
+                sketchImagesBuffer = ""
+            }
 
         default:
             break
@@ -723,6 +737,9 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
         }
         if capturingSketchShapes {
             sketchShapesBuffer += string
+        }
+        if capturingSketchImages {
+            sketchImagesBuffer += string
         }
     }
 
@@ -779,6 +796,15 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                        .trimmingCharacters(in: .whitespacesAndNewlines)),
                    let shapes = try? JSONDecoder().decode([SketchShape].self, from: data) {
                     nodeStack[nodeStack.count - 1].sketchShapes = shapes
+                }
+            }
+            if capturingSketchImages {
+                capturingSketchImages = false
+                if !nodeStack.isEmpty,
+                   let data = Data(base64Encoded: sketchImagesBuffer
+                       .trimmingCharacters(in: .whitespacesAndNewlines)),
+                   let images = try? JSONDecoder().decode([SketchImageElement].self, from: data) {
+                    nodeStack[nodeStack.count - 1].sketchImages = images
                 }
             }
 

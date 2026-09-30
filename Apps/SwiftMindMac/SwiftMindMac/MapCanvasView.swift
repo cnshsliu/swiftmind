@@ -116,6 +116,9 @@ struct MapCanvasView: View {
     @State private var lastCommittedSketchShapes: [SketchShape] = []
     /// Board background draft (editor binding); changes apply immediately.
     @State private var sketchBackgroundDraft: String? = nil
+    /// Image elements draft, content coordinates.
+    @State private var sketchImagesDraft: [SketchImageElement] = []
+    @State private var lastCommittedSketchImages: [SketchImageElement] = []
     @State private var sketchCommitTask: Task<Void, Never>?
     /// True once the user drew/erased since open/last commit — close without
     /// edits must not push a redundant SetSketchCommand.
@@ -401,6 +404,12 @@ struct MapCanvasView: View {
                     }
                     if node.sketchBackground != sketchBackgroundDraft {
                         sketchBackgroundDraft = node.sketchBackground
+        sketchImagesDraft = node.sketchImages ?? []
+        lastCommittedSketchImages = sketchImagesDraft
+                    }
+                    if (node.sketchImages ?? []) != lastCommittedSketchImages {
+                        sketchImagesDraft = node.sketchImages ?? []
+                        lastCommittedSketchImages = sketchImagesDraft
                     }
                 } else {
                     // Node vanished — close without committing.
@@ -1187,6 +1196,7 @@ struct MapCanvasView: View {
                        data: data,
                        texts: model.sketchTexts ?? [],
                        shapes: model.sketchShapes ?? [],
+                       images: model.sketchImages ?? [],
                        background: model.sketchBackground,
                        boardSize: CGSize(width: contentW, height: contentH),
                        scale: scale
@@ -1781,6 +1791,7 @@ struct MapCanvasView: View {
     private func nodeHasSketchContent(_ node: Node) -> Bool {
         if let texts = node.sketchTexts, !texts.isEmpty { return true }
         if let shapes = node.sketchShapes, !shapes.isEmpty { return true }
+        if let images = node.sketchImages, !images.isEmpty { return true }
         guard let sketch = node.sketch else { return false }
         return sketch != SketchSupport.emptyDrawingData()
     }
@@ -1885,7 +1896,8 @@ struct MapCanvasView: View {
               session.store.map.node(id: id) != nil else { return }
         let padding = LayoutConfig().sketchTrimPadding
         if let trimmed = SketchSupport.trim(
-            sketchDraft, texts: sketchTextsDraft, shapes: sketchShapesDraft, padding: padding
+            sketchDraft, texts: sketchTextsDraft, shapes: sketchShapesDraft,
+            images: sketchImagesDraft, padding: padding
         ) {
             // Mid-session (keepFrame): pin the board size to the model's
             // current value — the stroke payload is still trimmed/normalized,
@@ -1916,11 +1928,16 @@ struct MapCanvasView: View {
             if modelShapes != (lastCommittedSketchShapes.isEmpty ? nil : lastCommittedSketchShapes) {
                 ops.append(.setSketchShapes(nodeID: id, shapes: modelShapes))
             }
+            let modelImages = trimmed.images.isEmpty ? nil : trimmed.images
+            if modelImages != (lastCommittedSketchImages.isEmpty ? nil : lastCommittedSketchImages) {
+                ops.append(.setSketchImages(nodeID: id, images: modelImages))
+            }
             guard !ops.isEmpty else { return }
             session.applyQuiet(CompositeAgentCommand(ops: ops))
             lastCommittedSketch = trimmed.data
             lastCommittedSketchTexts = trimmed.texts
             lastCommittedSketchShapes = trimmed.shapes
+            lastCommittedSketchImages = trimmed.images
         } else {
             let decodesToNoStrokes = ((try? PKDrawing(data: sketchDraft))?.strokes.isEmpty) == true
             guard decodesToNoStrokes else { return }
@@ -1960,6 +1977,7 @@ struct MapCanvasView: View {
             drawingData: $sketchDraft,
             texts: $sketchTextsDraft,
             shapes: $sketchShapesDraft,
+            images: $sketchImagesDraft,
             boardBackground: $sketchBackgroundDraft,
             tool: $sketchTool,
             inkColor: $sketchInkColor,

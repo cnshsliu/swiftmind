@@ -683,6 +683,7 @@ struct SketchNotePreview: View {
             data: data,
             texts: node.sketchTexts ?? [],
             shapes: node.sketchShapes ?? [],
+            images: node.sketchImages ?? [],
             background: node.sketchBackground,
             boardSize: size,
             scale: 2
