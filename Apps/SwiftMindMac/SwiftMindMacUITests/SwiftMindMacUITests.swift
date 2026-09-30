@@ -1477,6 +1477,64 @@ extension SwiftMindMacUITests {
         XCTAssertFalse(editor.exists, "Esc must close the board")
     }
 
+    /// Corner-resize handles grow a shape, and ⌘C/⌘V duplicates it in-board.
+    /// Uses DIAMOND — unique to this test — so accumulated scratch-map nodes
+    /// from other runs cannot pollute the assertion.
+    func testSketchResizeHandlesAndClipboard() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        let menu = element("sketchShapesMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        menu.click()
+        let diamond = app.menuItems["Diamond"]
+        XCTAssertTrue(diamond.waitForExistence(timeout: 3))
+        diamond.click()
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.8))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        // Select it, then drag the TOP-RIGHT corner outward.
+        app.activate()
+        element("sketchToolSelect").click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.65)).click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let tr = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+        let trFar = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.35))
+        tr.press(forDuration: 0.05, thenDragTo: trFar)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        // In-board duplicate: ⌘C then ⌘V.
+        app.typeKey("c", modifierFlags: .command)
+        app.typeKey("v", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let shapes = try decodePersistedShapes()
+        let diamonds = shapes.filter { $0["kind"] as? String == "diamond" }
+        XCTAssertEqual(diamonds.count, 2, "⌘C/⌘V must duplicate the diamond")
+
+        // Resize check RELATIVE to the board: the drag drew 0.3 board-widths
+        // and the corner pull widened it to ~0.5.
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let boardMatch = html.firstMatch(
+            of: #/<div class="node-sketch" hidden="hidden">[A-Za-z0-9+/=]+\|([0-9.]+)\|[0-9.]+</div>/#
+        )
+        let boardWidth = Double(boardMatch.map { String($0.output.1) } ?? "") ?? 0
+        for shape in diamonds {
+            let width = shape["width"] as? Double ?? 0
+            XCTAssertGreaterThan(width, boardWidth * 0.42,
+                                 "resized diamond should span ~0.5 board widths (\(width) of \(boardWidth))")
+        }
+    }
+
     /// The Icons page shows the full categorized catalog (96 icons across 8
     /// categories) and toggling one persists to the map.
     func testInspectorIconsPageCatalog() throws {

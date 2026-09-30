@@ -107,6 +107,37 @@ public enum ShapeGeometry {
         return points
     }
 
+    /// Circle-likeness of a pen stroke: closed (endpoints near), round
+    /// enough bbox, low radial variance around the bbox center, and a near
+    /// full angular sweep. Conservative thresholds — accidental conversion
+    /// is worse than no conversion.
+    public static func recognizesEllipse(_ points: [CGPoint]) -> Bool {
+        guard points.count > 24 else { return false }
+        let xs = points.map(\.x), ys = points.map(\.y)
+        guard let minX = xs.min(), let maxX = xs.max(),
+              let minY = ys.min(), let maxY = ys.max() else { return false }
+        let w = maxX - minX, h = maxY - minY
+        guard max(w, h) > 24, min(w, h) / max(w, h) > 0.55 else { return false }
+        let diag = hypot(w, h)
+        guard let first = points.first, let last = points.last,
+              hypot(last.x - first.x, last.y - first.y) < diag * 0.2 else { return false }
+        let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+        let radii = points.map { hypot($0.x - cx, $0.y - cy) }
+        let mean = radii.reduce(0, +) / CGFloat(radii.count)
+        let stdDev = sqrt(radii.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / CGFloat(radii.count))
+        guard mean > 0, stdDev / mean < 0.22 else { return false }
+        // Angular sweep (unwrapped) must cover ≥ ~315°.
+        let angles = points.map { atan2($0.y - cy, $0.x - cx) }
+        var total: CGFloat = 0
+        for (a, b) in zip(angles, angles.dropFirst()) {
+            var d = b - a
+            while d > .pi { d -= 2 * .pi }
+            while d < -.pi { d += 2 * .pi }
+            total += d
+        }
+        return abs(total) > 5.5
+    }
+
     /// The sketch board's shape vocabulary (the app's SketchTool maps onto it).
     public enum ShapeKind: String, Equatable, Sendable {
         case line, arrow, rect, roundedRect, ellipse, triangle, diamond, star, bubble

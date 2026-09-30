@@ -529,6 +529,19 @@ struct MapCanvasView: View {
                 }
                 return nil
             }
+            // Board copy/paste (⌘C/⌘V) while the sketch editor owns input —
+            // otherwise these fall through to the map's node clipboard.
+            if SketchEventGuard.editorIsActive, !SketchEventGuard.textEditingActive,
+               event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+               let ch = event.characters?.lowercased().first, ch == "c" || ch == "v" {
+                let name = ch == "c"
+                    ? Notification.Name.swiftMindSketchBoardCopy
+                    : Notification.Name.swiftMindSketchBoardPaste
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: name, object: nil)
+                }
+                return nil
+            }
             // Board tool shortcuts (Photoshop conventions): V select, B pen,
             // H marker, E eraser, T text, U cycles the shape library. Only
             // while the sketch editor owns the board and no text session is

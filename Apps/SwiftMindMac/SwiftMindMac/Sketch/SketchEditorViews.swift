@@ -6,6 +6,8 @@ import SwiftMindCore
 // Shared with MapCanvasView's AppKit key monitor (board tool shortcuts).
 extension Notification.Name {
     static let swiftMindSketchToolShortcut = Notification.Name("swiftMind.canvas.sketchToolShortcut")
+    static let swiftMindSketchBoardCopy = Notification.Name("swiftMind.canvas.sketchBoardCopy")
+    static let swiftMindSketchBoardPaste = Notification.Name("swiftMind.canvas.sketchBoardPaste")
 }
 
 // MARK: - Event-monitor guard
@@ -194,6 +196,12 @@ struct SketchEditorView: View {
     @State private var textFontSize = SketchTextSupport.defaultFontSize
     /// Sticky background; nil = plain text box.
     @State private var textSticky: String? = nil
+    /// Active corner-resize of the single selected shape (driven by the
+    /// board's MAIN gesture — child gestures on handle views froze mid-drag).
+    @State private var resizeActive: (id: String, corner: ResizeCorner, anchor: CGPoint, isLine: Bool)?
+    /// In-board clipboard for ⌘C/⌘V.
+    @State private var boardClipboard: (shapes: [SketchShape], texts: [SketchText], strokes: [PKStroke]) =
+        ([], [], [])
     /// Last fill applied to a shape — new fillable shapes inherit it
     /// (PPT behavior). nil = outline only. Line/arrow are never filled.
     @State private var lastShapeFill: String? = nil
@@ -264,6 +272,14 @@ struct SketchEditorView: View {
             guard textEditing == nil,
                   let ch = note.object as? String else { return }
             applyToolShortcut(ch)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindSketchBoardCopy)) { _ in
+            guard textEditing == nil else { return }
+            copyBoardSelection()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindSketchBoardPaste)) { _ in
+            guard textEditing == nil else { return }
+            pasteBoardClipboard()
         }
     }
 
@@ -347,6 +363,10 @@ struct SketchEditorView: View {
                 }
                 if tool == .select, !selectedShapeIDs.isEmpty {
                     shapeFillBar
+                }
+                if tool == .select, selectedShapeIDs.count == 1, fitComputed,
+                   let shape = shapes.first(where: { $0.id == selectedShapeIDs.first }) {
+                    resizeHandles(for: shape)
                 }
                 // Marquee rect — only for a REAL marquee (drag on empty
                 // space); a move-drag already shows the selection chrome.
@@ -568,9 +588,24 @@ struct SketchEditorView: View {
             case .changed:
                 if selectDrag == nil {
                     selectDrag = (start: content, current: content)
-                    // Dragging FROM a selected stroke moves it; otherwise marquee.
-                    draggingSelection = hitSelected(at: content)
-                    if draggingSelection { pushUndo() }
+                    if let corner = grabbedResizeCorner(at: content),
+                       let shape = shapes.first(where: { $0.id == selectedShapeIDs.first }) {
+                        // Corner grab resizes (single selected shape only).
+                        let frame = Self.contentFrame(of: shape)
+                        resizeActive = (
+                            id: shape.id, corner: corner,
+                            anchor: anchorFor(corner, of: frame),
+                            isLine: shape.kind == .line || shape.kind == .arrow
+                        )
+                        pushUndo()
+                    } else {
+                        // Dragging FROM a selected stroke moves it; otherwise marquee.
+                        draggingSelection = hitSelected(at: content)
+                        if draggingSelection { pushUndo() }
+                    }
+                } else if resizeActive != nil {
+                    selectDrag?.current = content
+                    applyResize(pointer: content)
                 } else if draggingSelection {
                     guard var drag = selectDrag else { return }
                     drag.current = content
@@ -589,6 +624,11 @@ struct SketchEditorView: View {
                     selectDrag = nil
                     draggingSelection = false
                     movedOnce = false
+                }
+                if resizeActive != nil {
+                    resizeActive = nil
+                    syncToModel()
+                    return
                 }
                 guard var drag = selectDrag else { return }
                 drag.current = content
@@ -646,6 +686,25 @@ struct SketchEditorView: View {
         computeFitIfNeeded() // last chance: the drag hit the board, so it exists
         let points = livePoints + liveRawPoints.map(contentPoint)
         guard points.count > 1, fitComputed else { return }
+
+        // Hand-drawn recognition: a confident circle-ish pen stroke snaps to
+        // a true ellipse MODEL SHAPE (editable: fill, label, move).
+        if tool == .pen, ShapeGeometry.recognizesEllipse(points) {
+            pushUndo()
+            let xs = points.map(\.x), ys = points.map(\.y)
+            let minX = xs.min()!, maxX = xs.max()!, minY = ys.min()!, maxY = ys.max()!
+            shapes.append(SketchShape(
+                kind: .ellipse,
+                x: Double(minX), y: Double(minY),
+                width: Double(maxX - minX), height: Double(maxY - minY),
+                strokeColor: SketchTextSupport.hex(from: inkColorForPencilKit),
+                strokeWidth: Double(inkWidth),
+                fillColor: lastShapeFill
+            ))
+            syncToModel()
+            return
+        }
+
         pushUndo()
         let now = Date().timeIntervalSinceReferenceDate
         let strokePoints = points.map { location in
@@ -811,6 +870,28 @@ struct SketchEditorView: View {
         syncToModel()
     }
 
+    /// Four visual corner grips for the single selected shape. Hit-testing
+    /// happens in the board's MAIN gesture (grabbedResizeCorner); gestures on
+    /// these child views froze mid-drag on re-render.
+    @ViewBuilder
+    private func resizeHandles(for shape: SketchShape) -> some View {
+        let frame = Self.contentFrame(of: shape)
+        let corners: [(CGPoint, ResizeCorner)] = [
+            (CGPoint(x: frame.minX, y: frame.minY), .tl),
+            (CGPoint(x: frame.maxX, y: frame.minY), .tr),
+            (CGPoint(x: frame.maxX, y: frame.maxY), .br),
+            (CGPoint(x: frame.minX, y: frame.maxY), .bl),
+        ]
+        ForEach(corners, id: \.1) { corner, _ in
+            ResizeHandle()
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .position(x: (corner.x - contentRect.minX) * fitScale,
+                          y: (corner.y - contentRect.minY) * fitScale)
+                .allowsHitTesting(false)
+        }
+    }
+
     /// PPT-style fill bar for the selected shapes (bottom of the board).
     private var shapeFillBar: some View {
         VStack {
@@ -835,6 +916,116 @@ struct SketchEditorView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             .padding(10)
         }
+    }
+
+    private enum ResizeCorner: Hashable { case tl, tr, br, bl }
+
+    /// True when the content point sits within a corner's grab radius of the
+    /// single selected shape (resize beats select/marquee).
+    private func grabbedResizeCorner(at content: CGPoint) -> ResizeCorner? {
+        guard selectedShapeIDs.count == 1,
+              let shape = shapes.first(where: { $0.id == selectedShapeIDs.first }) else {
+            return nil
+        }
+        let frame = Self.contentFrame(of: shape)
+        let radius: CGFloat = max(14, CGFloat(shape.strokeWidth) * 3)
+        let corners: [(CGPoint, ResizeCorner)] = [
+            (CGPoint(x: frame.minX, y: frame.minY), .tl),
+            (CGPoint(x: frame.maxX, y: frame.minY), .tr),
+            (CGPoint(x: frame.maxX, y: frame.maxY), .br),
+            (CGPoint(x: frame.minX, y: frame.maxY), .bl),
+        ]
+        return corners.first { corner, _ in
+            hypot(content.x - corner.x, content.y - corner.y) <= radius
+        }?.1
+    }
+
+    /// Anchor = the fixed opposite corner.
+    private func anchorFor(_ corner: ResizeCorner, of frame: CGRect) -> CGPoint {
+        switch corner {
+        case .tl: return CGPoint(x: frame.maxX, y: frame.maxY)
+        case .tr: return CGPoint(x: frame.minX, y: frame.maxY)
+        case .br: return CGPoint(x: frame.minX, y: frame.minY)
+        case .bl: return CGPoint(x: frame.maxX, y: frame.minY)
+        }
+    }
+
+    /// Re-frame the resizing shape between its anchor and the pointer.
+    private func applyResize(pointer: CGPoint) {
+        guard let drag = resizeActive,
+              let index = shapes.firstIndex(where: { $0.id == drag.id }) else { return }
+        var updated = shapes[index]
+        if drag.isLine {
+            // tl/bl grip the start point, tr/br the end.
+            let startIsAnchor = (drag.corner == .tr || drag.corner == .br)
+            let start = startIsAnchor ? drag.anchor : pointer
+            let end = startIsAnchor ? pointer : drag.anchor
+            updated.x = Double(start.x)
+            updated.y = Double(start.y)
+            updated.width = Double(end.x - start.x)
+            updated.height = Double(end.y - start.y)
+        } else {
+            let minX = min(drag.anchor.x, pointer.x), maxX = max(drag.anchor.x, pointer.x)
+            let minY = min(drag.anchor.y, pointer.y), maxY = max(drag.anchor.y, pointer.y)
+            updated.x = Double(minX)
+            updated.y = Double(minY)
+            updated.width = Double(max(maxX - minX, 12))
+            updated.height = Double(max(maxY - minY, 12))
+        }
+        shapes[index] = updated
+    }
+
+    /// ⌘C on the board: stash the selected elements (internal clipboard —
+    /// independent of the system pasteboard's node-level copy).
+    private func copyBoardSelection() {
+        guard !selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty else {
+            return
+        }
+        boardClipboard = (
+            shapes: shapes.filter { selectedShapeIDs.contains($0.id) },
+            texts: texts.filter { selectedTextIDs.contains($0.id) },
+            strokes: drawing.strokes.enumerated()
+                .filter { selectedIndices.contains($0.offset) }
+                .map(\.element)
+        )
+    }
+
+    /// ⌘V on the board: duplicate the clipboard 16pt down-right, fresh ids,
+    /// and select the duplicates (one undo step).
+    private func pasteBoardClipboard() {
+        guard !(boardClipboard.shapes.isEmpty && boardClipboard.texts.isEmpty
+            && boardClipboard.strokes.isEmpty) else { return }
+        pushUndo()
+        let dx: Double = 16, dy: Double = 16
+        var pastedShapeIDs: [String] = []
+        let newShapes = boardClipboard.shapes.map { shape -> SketchShape in
+            var copy = shape
+            copy.id = UUID().uuidString
+            copy.x += dx
+            copy.y += dy
+            pastedShapeIDs.append(copy.id)
+            return copy
+        }
+        var pastedTextIDs: [String] = []
+        let newTexts = boardClipboard.texts.map { element -> SketchText in
+            var copy = element
+            copy.id = UUID().uuidString
+            copy.x += dx
+            copy.y += dy
+            pastedTextIDs.append(copy.id)
+            return copy
+        }
+        let firstPastedStroke = drawing.strokes.count
+        let newStrokes = boardClipboard.strokes.map { stroke in
+            SketchSupport.translated(stroke, by: CGAffineTransform(translationX: dx, y: dy))
+        }
+        shapes.append(contentsOf: newShapes)
+        texts.append(contentsOf: newTexts)
+        drawing.strokes.append(contentsOf: newStrokes)
+        selectedIndices = Set(firstPastedStroke..<drawing.strokes.count)
+        selectedTextIDs = Set(pastedTextIDs)
+        selectedShapeIDs = Set(pastedShapeIDs)
+        syncToModel()
     }
 
     /// Fill applied live to every selected shape; one undo step, one commit.
@@ -1535,6 +1726,17 @@ private struct SketchRightPanCatcher: NSViewRepresentable {
         }
 
         override func rightMouseUp(with event: NSEvent) {}
+    }
+}
+
+/// One resize grip: a small white dot with an accent ring.
+private struct ResizeHandle: View {
+    var body: some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: 9, height: 9)
+            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
     }
 }
 

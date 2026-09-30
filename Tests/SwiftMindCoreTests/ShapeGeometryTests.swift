@@ -106,6 +106,46 @@ final class ShapeGeometryTests: XCTestCase {
         XCTAssertEqual(constrained.y - a.y, 180, accuracy: 1e-9)
     }
 
+    // MARK: - Hand-drawn circle recognition
+
+    func testRecognizesTrueCircle() {
+        // 64 samples on a radius-40 circle + slight hand jitter.
+        var points: [CGPoint] = []
+        for i in 0...64 {
+            let t = CGFloat(i) / 64 * 2 * .pi
+            let jitter = i.isMultiple(of: 3) ? CGFloat(1.5) : CGFloat(0.5)
+            points.append(CGPoint(x: 100 + (40 + jitter) * cos(t),
+                                  y: 100 + (40 - jitter) * sin(t)))
+        }
+        XCTAssertTrue(ShapeGeometry.recognizesEllipse(points), "a drawn circle should snap")
+    }
+
+    func testDoesNotRecognizeStraightLine() {
+        let points = (0...40).map { CGPoint(x: CGFloat($0) * 4, y: CGFloat($0)) }
+        XCTAssertFalse(ShapeGeometry.recognizesEllipse(points))
+    }
+
+    func testDoesNotRecognizeOpenArc() {
+        // Three quarters of a circle — never closes.
+        var points: [CGPoint] = []
+        for i in 0...48 {
+            let t = CGFloat(i) / 48 * 1.5 * .pi
+            points.append(CGPoint(x: 100 + 40 * cos(t), y: 100 + 40 * sin(t)))
+        }
+        XCTAssertFalse(ShapeGeometry.recognizesEllipse(points), "an open arc must stay ink")
+    }
+
+    func testDoesNotRecognizeZigzag() {
+        var points: [CGPoint] = []
+        for i in 0...60 {
+            let t = CGFloat(i) / 60 * 2 * .pi
+            let r: CGFloat = i.isMultiple(of: 2) ? 20 : 60
+            points.append(CGPoint(x: 100 + r * cos(t), y: 100 + r * sin(t)))
+        }
+        points.append(points[0])
+        XCTAssertFalse(ShapeGeometry.recognizesEllipse(points))
+    }
+
     func testNoShiftLeavesEndUntouched() {
         let end = CGPoint(x: 200, y: 150)
         XCTAssertEqual(ShapeGeometry.constrainedEnd(from: a, to: end, shift: false), end)
