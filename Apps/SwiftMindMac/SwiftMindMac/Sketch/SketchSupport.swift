@@ -24,6 +24,7 @@ enum SketchSupport {
         data: Data,
         texts: [SketchText],
         shapes: [SketchShape] = [],
+        background: String? = nil,
         boardSize: CGSize,
         scale: CGFloat
     ) -> NSImage? {
@@ -82,6 +83,10 @@ enum SketchSupport {
         )
         let composed = NSImage(size: boardSize)
         composed.lockFocusFlipped(true)
+        if let background {
+            SketchTextSupport.hexColor(background).setFill()
+            boardRect.fill()
+        }
         rasterized.draw(in: dest)
         if !shapes.isEmpty || !texts.isEmpty {
             let cg = NSGraphicsContext.current?.cgContext

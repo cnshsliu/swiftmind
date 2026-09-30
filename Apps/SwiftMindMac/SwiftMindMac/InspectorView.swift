@@ -503,6 +503,7 @@ struct SketchNotePreview: View {
             data: data,
             texts: node.sketchTexts ?? [],
             shapes: node.sketchShapes ?? [],
+            background: node.sketchBackground,
             boardSize: size,
             scale: 2
         )

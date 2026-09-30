@@ -171,6 +171,9 @@ public enum HTMLCodec {
         if let styleName = node.styleName, !styleName.isEmpty {
             out += " data-style-name=\"\(escapeAttribute(styleName))\""
         }
+        if let bg = node.sketchBackground, !bg.isEmpty {
+            out += " data-sketch-bg=\"\(escapeAttribute(bg))\""
+        }
         if let formula = node.formula, !formula.isEmpty {
             // Source string only — the browser skin never executes anything.
             out += " data-formula=\"\(escapeAttribute(formula))\""
@@ -573,6 +576,9 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
 
             let noteExpanded = attributeDict["data-note-expanded"] == "true"
 
+            let sketchBackground = attributeDict["data-sketch-bg"]
+                .flatMap { $0.isEmpty ? nil : $0 }
+
             var icons: [NodeIcon] = []
             if let iconsAttr = attributeDict["data-icons"], !iconsAttr.isEmpty {
                 icons = iconsAttr
@@ -594,6 +600,7 @@ private final class DecoderDelegate: NSObject, XMLParserDelegate {
                 id: NodeID(rawValue: idRaw),
                 text: "",
                 noteMarkdown: "",
+                sketchBackground: sketchBackground,
                 links: [],
                 icons: icons,
                 attributes: [],

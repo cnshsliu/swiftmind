@@ -1324,6 +1324,69 @@ extension SwiftMindMacUITests {
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
     }
 
+    /// PPT-style colors: board background (preset swatch) persists on the
+    /// node (data-sketch-bg) and shape fill (custom RGB) persists on the shape.
+    func testSketchBoardBackgroundAndShapeFill() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        // Board background: cream preset.
+        element("sketchBoardBackground").click()
+        let cream = element("sketchBoardBackground-#FFF8E1")
+        XCTAssertTrue(cream.waitForExistence(timeout: 3), "board palette should open")
+        cream.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        // Shape + custom RGB fill (deep sky-ish 64/156/255).
+        let menu = element("sketchShapesMenu")
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        menu.click()
+        let tri = app.menuItems["Triangle"]
+        XCTAssertTrue(tri.waitForExistence(timeout: 3))
+        tri.click()
+        let start = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let end = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.8))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        app.activate()
+        element("sketchToolSelect").click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6)).click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        element("sketchShapeFill").click()
+        let r = element("sketchShapeFillApplyRGB")
+        XCTAssertTrue(r.waitForExistence(timeout: 3), "fill picker should open")
+        // Three RGB fields precede the Apply button in the picker panel.
+        let fields = app.textFields.matching(
+            NSPredicate(format: "placeholderValue IN {'R', 'G', 'B'}")
+        ).allElementsBoundByIndex
+        XCTAssertEqual(fields.count, 3, "picker should expose R/G/B fields")
+        fields[0].click(); fields[0].typeText("64")
+        fields[1].click(); fields[1].typeText("156")
+        fields[2].click(); fields[2].typeText("255")
+        r.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        // Board background persisted on the node.
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        XCTAssertTrue(html.contains("data-sketch-bg=\"#FFF8E1\""),
+                      "board background should persist as data-sketch-bg")
+
+        // Shape fill persisted with the custom RGB.
+        let shapes = try decodePersistedShapes()
+        let filled = shapes.first {
+            $0["kind"] as? String == "triangle" && $0["fillColor"] as? String == "#409CFF"
+        }
+        XCTAssertNotNil(filled, "custom RGB fill (64,156,255 → #409CFF) must persist")
+    }
+
     /// 'd' OPENS the board and never closes it — only Esc / Done close, so a
     /// stray keypress cannot throw away the user's place mid-drawing.
     func testSketchDKeyOpensOnly() throws {
@@ -1656,15 +1719,12 @@ extension SwiftMindMacUITests {
         XCTAssertTrue(textEditor.waitForExistence(timeout: 3), "text tool click opens the editor")
         app.typeText("board note")
 
-        // Sticky: give it a yellow background, then commit. Menus surface as
-        // pop-up/menu buttons — query by identifier OR the sticky label.
-        let sticky = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier == 'sketchTextSticky' OR label CONTAINS[c] 'Sticky'")
-        ).firstMatch
+        // Sticky: give it the yellow background via the color picker popover.
+        let sticky = element("sketchTextSticky")
         XCTAssertTrue(sticky.waitForExistence(timeout: 3), "sticky control should exist")
         sticky.click()
-        let yellow = app.menuItems["#FFF685"]
-        XCTAssertTrue(yellow.waitForExistence(timeout: 3), "sticky palette should offer yellow")
+        let yellow = element("sketchTextSticky-#FFF685")
+        XCTAssertTrue(yellow.waitForExistence(timeout: 3), "palette should offer yellow")
         yellow.click()
         element("sketchTextCommit").click()
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))

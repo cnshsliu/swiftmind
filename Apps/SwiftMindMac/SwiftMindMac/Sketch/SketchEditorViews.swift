@@ -142,6 +142,8 @@ struct SketchEditorView: View {
     @Binding var texts: [SketchText]
     /// Shape elements on the board (PPT-style), content coords.
     @Binding var shapes: [SketchShape]
+    /// Board background hex ("#RRGGBB"); nil = system default.
+    @Binding var boardBackground: String?
     @Binding var tool: SketchTool
     @Binding var inkColor: NSColor
     /// Pen/shape stroke width in content points.
@@ -301,6 +303,9 @@ struct SketchEditorView: View {
     private var board: some View {
         GeometryReader { geo in
             ZStack {
+                if let boardBackground {
+                    Color(nsColor: SketchTextSupport.hexColor(boardBackground))
+                }
                 if fitComputed {
                     CommittedStrokesImage(drawing: drawing, rect: contentRect)
                 }
@@ -336,6 +341,9 @@ struct SketchEditorView: View {
                 if tool == .select,
                    (!selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty), fitComputed {
                     selectionChrome
+                }
+                if tool == .select, !selectedShapeIDs.isEmpty {
+                    shapeFillBar
                 }
                 // Marquee rect — only for a REAL marquee (drag on empty
                 // space); a move-drag already shows the selection chrome.
@@ -795,6 +803,45 @@ struct SketchEditorView: View {
         syncToModel()
     }
 
+    /// PPT-style fill bar for the selected shapes (bottom of the board).
+    private var shapeFillBar: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 8) {
+                Text("Fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SketchColorPicker(
+                    title: "Shape Fill",
+                    supportsNone: true,
+                    selection: Binding(
+                        get: { shapes.last { selectedShapeIDs.contains($0.id) }?.fillColor },
+                        set: { applyShapeFill($0) }
+                    ),
+                    identifier: "sketchShapeFill"
+                )
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .padding(10)
+        }
+    }
+
+    /// Fill applied live to every selected shape; one undo step, one commit.
+    private func applyShapeFill(_ fill: String?) {
+        guard !selectedShapeIDs.isEmpty else { return }
+        pushUndo()
+        shapes = shapes.map { shape in
+            guard selectedShapeIDs.contains(shape.id) else { return shape }
+            var updated = shape
+            updated.fillColor = fill
+            return updated
+        }
+        syncToModel()
+    }
+
     /// Committed shape element on the board: outline via the SAME dense
     /// ShapeGeometry samples, optional fill, optional centered label.
     @ViewBuilder
@@ -969,22 +1016,12 @@ struct SketchEditorView: View {
             .fixedSize()
             .accessibilityIdentifier("sketchTextSizeMenu")
 
-            Menu {
-                Button("None") { textSticky = nil }
-                ForEach(Array(SketchTextSupport.stickyColors.enumerated()), id: \.offset) { _, hex in
-                    Button {
-                        textSticky = hex
-                    } label: {
-                        Label(hex, systemImage: "rectangle.fill")
-                            .foregroundStyle(Color(nsColor: SketchTextSupport.hexColor(hex)))
-                    }
-                }
-            } label: {
-                Image(systemName: textSticky == nil ? "note.text" : "rectangle.fill")
-            }
-            .fixedSize()
-            .accessibilityIdentifier("sketchTextSticky")
-            .accessibilityLabel("Sticky Note")
+            SketchColorPicker(
+                title: "Text Background",
+                supportsNone: true,
+                selection: $textSticky,
+                identifier: "sketchTextSticky"
+            )
 
             Spacer(minLength: 0)
 
@@ -1366,6 +1403,12 @@ struct SketchEditorView: View {
             .accessibilityIdentifier("sketchClear")
 
             Spacer(minLength: 0)
+
+            SketchColorPicker(
+                title: "Board Background",
+                selection: $boardBackground,
+                identifier: "sketchBoardBackground"
+            )
 
             Button("Done", action: onDone)
                 .buttonStyle(.borderedProminent)

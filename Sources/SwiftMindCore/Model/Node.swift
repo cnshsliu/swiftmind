@@ -17,6 +17,8 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
     /// Shape elements on the sketch board (PPT-style: geometry + fill +
     /// centered label). Optional for the same decode-compat reason.
     public var sketchShapes: [SketchShape]?
+    /// Sketch board background "#RRGGBB"; nil = system default.
+    public var sketchBackground: String?
     public var links: [NodeLink]
     public var icons: [NodeIcon]
     public var attributes: [NodeAttribute]
@@ -41,6 +43,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         sketchHeight: Double? = nil,
         sketchTexts: [SketchText]? = nil,
         sketchShapes: [SketchShape]? = nil,
+        sketchBackground: String? = nil,
         links: [NodeLink] = [],
         icons: [NodeIcon] = [],
         attributes: [NodeAttribute] = [],
@@ -61,6 +64,7 @@ public struct Node: Identifiable, Equatable, Sendable, Codable {
         self.sketchHeight = sketchHeight
         self.sketchTexts = sketchTexts
         self.sketchShapes = sketchShapes
+        self.sketchBackground = sketchBackground
         self.links = links
         self.icons = icons
         self.attributes = attributes

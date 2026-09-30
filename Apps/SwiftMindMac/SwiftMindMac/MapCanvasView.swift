@@ -114,6 +114,8 @@ struct MapCanvasView: View {
     /// Shape elements draft (PPT-style), content coordinates.
     @State private var sketchShapesDraft: [SketchShape] = []
     @State private var lastCommittedSketchShapes: [SketchShape] = []
+    /// Board background draft (editor binding); changes apply immediately.
+    @State private var sketchBackgroundDraft: String? = nil
     @State private var sketchCommitTask: Task<Void, Never>?
     /// True once the user drew/erased since open/last commit — close without
     /// edits must not push a redundant SetSketchCommand.
@@ -396,6 +398,9 @@ struct MapCanvasView: View {
                     if (node.sketchShapes ?? []) != lastCommittedSketchShapes {
                         sketchShapesDraft = node.sketchShapes ?? []
                         lastCommittedSketchShapes = sketchShapesDraft
+                    }
+                    if node.sketchBackground != sketchBackgroundDraft {
+                        sketchBackgroundDraft = node.sketchBackground
                     }
                 } else {
                     // Node vanished — close without committing.
@@ -1151,11 +1156,13 @@ struct MapCanvasView: View {
                     width: boardW,
                     height: boardH
                 )
-                // Light card keeps black ink legible in dark mode.
-                context.fill(
-                    Path(roundedRect: boardRect, cornerRadius: 4),
-                    with: .color(Color(nsColor: .textBackgroundColor))
-                )
+                // Board background: explicit color, else the system text
+                // background (light card keeps black ink legible in dark mode).
+                let boardBackground = session.store.map.node(id: node.id)?.sketchBackground
+                let boardFill = boardBackground.map {
+                    Color(nsColor: SketchTextSupport.hexColor($0))
+                } ?? Color(nsColor: .textBackgroundColor)
+                context.fill(Path(roundedRect: boardRect, cornerRadius: 4), with: .color(boardFill))
                 if let model = session.store.map.node(id: node.id),
                    let data = model.sketch,
                    let contentW = model.sketchWidth, let contentH = model.sketchHeight,
@@ -1167,6 +1174,7 @@ struct MapCanvasView: View {
                        data: data,
                        texts: model.sketchTexts ?? [],
                        shapes: model.sketchShapes ?? [],
+                       background: model.sketchBackground,
                        boardSize: CGSize(width: contentW, height: contentH),
                        scale: scale
                    ) {
@@ -1801,6 +1809,7 @@ struct MapCanvasView: View {
         lastCommittedSketchTexts = sketchTextsDraft
         sketchShapesDraft = node.sketchShapes ?? []
         lastCommittedSketchShapes = sketchShapesDraft
+        sketchBackgroundDraft = node.sketchBackground
         sketchIsDirty = false
         drawingNodeID = nodeID
         SketchEventGuard.editorIsActive = true
@@ -1938,6 +1947,7 @@ struct MapCanvasView: View {
             drawingData: $sketchDraft,
             texts: $sketchTextsDraft,
             shapes: $sketchShapesDraft,
+            boardBackground: $sketchBackgroundDraft,
             tool: $sketchTool,
             inkColor: $sketchInkColor,
             inkWidth: $sketchInkWidth,
@@ -1956,6 +1966,14 @@ struct MapCanvasView: View {
         .shadow(color: .black.opacity(0.25), radius: 10, y: 2)
         .position(x: centerX, y: centerY)
         .onExitCommand { closeSketchEditor() }
+        .onChange(of: sketchBackgroundDraft) { _, newValue in
+            // Immediate + undoable; external changes (⌘Z) resync via the
+            // content-revision handler below.
+            guard let id = drawingNodeID,
+                  let node = session.store.map.node(id: id),
+                  node.sketchBackground != newValue else { return }
+            session.applyQuiet(SetSketchBackgroundCommand(nodeID: id, background: newValue))
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sketchEditor")
     }
