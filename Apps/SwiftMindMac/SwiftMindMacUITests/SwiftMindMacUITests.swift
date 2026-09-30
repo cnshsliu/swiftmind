@@ -1295,6 +1295,35 @@ extension SwiftMindMacUITests {
         }
     }
 
+    /// Board tool shortcuts (V/B/H/E/T/U) live ONLY while the board is open.
+    /// After closing, those letters must fall through to the map shortcuts
+    /// ('e' opens the note editor again) and must not reopen the board.
+    func testSketchToolShortcutsStopAfterClose() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        app.typeKey(.init("b"), modifierFlags: []) // works inside
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(editor.exists)
+
+        // On the map again: letters do not reopen the board…
+        app.typeKey(.init("v"), modifierFlags: [])
+        app.typeKey(.init("u"), modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(editor.exists, "tool letters must not reopen the board")
+
+        // …and the map's own shortcuts are back ('e' opens the note editor).
+        app.typeKey(.init("e"), modifierFlags: [])
+        let noteEditor = element("noteEditor")
+        XCTAssertTrue(noteEditor.waitForExistence(timeout: 3),
+                      "map-level 'e' must work after the board closes")
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+    }
+
     /// 'd' OPENS the board and never closes it — only Esc / Done close, so a
     /// stray keypress cannot throw away the user's place mid-drawing.
     func testSketchDKeyOpensOnly() throws {

@@ -1825,6 +1825,10 @@ struct MapCanvasView: View {
         drawingNodeID = nil
         sketchIsDirty = false
         SketchEventGuard.editorIsActive = false
+        // A text session can still be open when the whole board closes (Esc
+        // with focus outside the field) — leaving textEditingActive set would
+        // swallow 'd' and the tool shortcuts for the rest of the session.
+        SketchEventGuard.textEditingActive = false
         canvasFocused = true
     }
 
