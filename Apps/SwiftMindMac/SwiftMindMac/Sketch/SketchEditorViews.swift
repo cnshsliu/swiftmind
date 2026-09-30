@@ -194,6 +194,9 @@ struct SketchEditorView: View {
     @State private var textFontSize = SketchTextSupport.defaultFontSize
     /// Sticky background; nil = plain text box.
     @State private var textSticky: String? = nil
+    /// Last fill applied to a shape — new fillable shapes inherit it
+    /// (PPT behavior). nil = outline only. Line/arrow are never filled.
+    @State private var lastShapeFill: String? = nil
     /// Shape whose LABEL is being edited (the same overlay UI, sticky hidden);
     /// nil while editing a free text box.
     @State private var labelShapeID: String? = nil
@@ -673,12 +676,17 @@ struct SketchEditorView: View {
         let a = drag.start
         let b = shiftConstrainedEnd(of: drag)
         pushUndo()
+        // Fillable shapes (everything except line/arrow) inherit the last
+        // fill the user applied — drawing a series of filled shapes just
+        // works, PPT-style.
+        let fillable = kind != .line && kind != .arrow
         let shape = SketchShape(
             kind: SketchShape.Kind(rawValue: kind.rawValue)!,
             x: Double(a.x), y: Double(a.y),
             width: Double(b.x - a.x), height: Double(b.y - a.y),
             strokeColor: SketchTextSupport.hex(from: inkColor),
-            strokeWidth: Double(inkWidth)
+            strokeWidth: Double(inkWidth),
+            fillColor: fillable ? lastShapeFill : nil
         )
         shapes.append(shape)
         syncToModel()
@@ -832,6 +840,7 @@ struct SketchEditorView: View {
     /// Fill applied live to every selected shape; one undo step, one commit.
     private func applyShapeFill(_ fill: String?) {
         guard !selectedShapeIDs.isEmpty else { return }
+        lastShapeFill = fill
         pushUndo()
         shapes = shapes.map { shape in
             guard selectedShapeIDs.contains(shape.id) else { return shape }

@@ -1387,6 +1387,76 @@ extension SwiftMindMacUITests {
         XCTAssertNotNil(filled, "custom RGB fill (64,156,255 → #409CFF) must persist")
     }
 
+    /// Fill is sticky: after filling one shape, the NEXT shape drawn comes
+    /// pre-filled with the same color (fillable kinds only — line/arrow and
+    /// pen strokes never fill).
+    func testSketchFillStickyForNewShapes() throws {
+        focusCanvasWithSelection()
+        let editor = element("sketchEditor")
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        func pickShape(_ title: String) {
+            let menu = element("sketchShapesMenu")
+            XCTAssertTrue(menu.waitForExistence(timeout: 2))
+            menu.click()
+            let item = app.menuItems[title]
+            XCTAssertTrue(item.waitForExistence(timeout: 3))
+            item.click()
+        }
+        func draw(_ from: CGVector, _ to: CGVector) {
+            let a = editor.coordinate(withNormalizedOffset: from)
+            let b = editor.coordinate(withNormalizedOffset: to)
+            a.press(forDuration: 0.05, thenDragTo: b)
+            RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        }
+
+        // First triangle: no fill (outline only).
+        pickShape("Triangle")
+        draw(CGVector(dx: 0.1, dy: 0.5), CGVector(dx: 0.3, dy: 0.7))
+
+        // Fill it red via the select-tool fill bar.
+        app.activate()
+        element("sketchToolSelect").click()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.6)).click()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        element("sketchShapeFill").click()
+        let red = element("sketchShapeFill-#FF6B6B")
+        XCTAssertTrue(red.waitForExistence(timeout: 3))
+        red.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+
+        // Back to a fillable shape: the new one inherits the red fill…
+        app.activate()
+        element("sketchToolStar")
+        // star via menu (no flat button)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let menu = element("sketchShapesMenu")
+        menu.click()
+        let star = app.menuItems["Star"]
+        XCTAssertTrue(star.waitForExistence(timeout: 3))
+        star.click()
+        draw(CGVector(dx: 0.5, dy: 0.5), CGVector(dx: 0.8, dy: 0.8))
+
+        // …and a line never fills.
+        menu.click()
+        let line = app.menuItems["Line"]
+        XCTAssertTrue(line.waitForExistence(timeout: 3))
+        line.click()
+        draw(CGVector(dx: 0.5, dy: 0.2), CGVector(dx: 0.8, dy: 0.3))
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let shapes = try decodePersistedShapes()
+        let filledStar = shapes.first {
+            $0["kind"] as? String == "star" && $0["fillColor"] as? String == "#FF6B6B"
+        }
+        XCTAssertNotNil(filledStar, "a shape drawn AFTER filling must inherit the fill")
+        let lineShape = shapes.first { $0["kind"] as? String == "line" }
+        XCTAssertNil(lineShape?["fillColor"] ?? nil, "lines must never fill")
+    }
+
     /// 'd' OPENS the board and never closes it — only Esc / Done close, so a
     /// stray keypress cannot throw away the user's place mid-drawing.
     func testSketchDKeyOpensOnly() throws {
