@@ -165,31 +165,6 @@ struct InspectorView: View {
                     }
                 }
 
-                Section("Attributes") {
-                    AttributeInspectorSection(session: session, node: node)
-                }
-
-                Section("Formula") {
-                    FormulaInspectorSection(session: session, node: node)
-                }
-
-                Section("Named Style") {
-                    Picker("Style", selection: Binding(
-                        get: { node.styleName ?? "" },
-                        set: { newValue in
-                            let name: String? = newValue.isEmpty ? nil : newValue
-                            guard name != node.styleName else { return }
-                            session.applyQuiet(SetStyleNameCommand(nodeID: node.id, styleName: name))
-                        }
-                    )) {
-                        Text("None").tag("")
-                        ForEach(namedStyleKeys, id: \.self) { key in
-                            Text(key.capitalized).tag(key)
-                        }
-                    }
-                    .accessibilityIdentifier("namedStylePicker")
-                }
-
                 Section("Style") {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -257,6 +232,31 @@ struct InspectorView: View {
                         Text("Fill").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Section("Attributes") {
+                    AttributeInspectorSection(session: session, node: node)
+                }
+
+                Section("Formula") {
+                    FormulaInspectorSection(session: session, node: node)
+                }
+
+                Section("Named Style") {
+                    Picker("Style", selection: Binding(
+                        get: { node.styleName ?? "" },
+                        set: { newValue in
+                            let name: String? = newValue.isEmpty ? nil : newValue
+                            guard name != node.styleName else { return }
+                            session.applyQuiet(SetStyleNameCommand(nodeID: node.id, styleName: name))
+                        }
+                    )) {
+                        Text("None").tag("")
+                        ForEach(namedStyleKeys, id: \.self) { key in
+                            Text(key.capitalized).tag(key)
+                        }
+                    }
+                    .accessibilityIdentifier("namedStylePicker")
+                }
+
             } else {
                 ContentUnavailableView(
                     "No Selection",
