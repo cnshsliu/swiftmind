@@ -379,7 +379,10 @@ final class SwiftMindMacUITests: XCTestCase {
     }
 
     func testFormulaSetAndClear() throws {
-        // Root is selected on launch; the inspector is visible by default.
+        // Formula lives on the inspector's Data page now.
+        let dataTab = app.radioButtons["Data"]
+        XCTAssertTrue(dataTab.waitForExistence(timeout: 3), "inspector tabs should exist")
+        dataTab.click()
         let field = element("formulaField")
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Formula field should be in the inspector")
 
@@ -1474,19 +1477,41 @@ extension SwiftMindMacUITests {
         XCTAssertFalse(editor.exists, "Esc must close the board")
     }
 
+    /// The Icons page shows the full categorized catalog (96 icons across 8
+    /// categories) and toggling one persists to the map.
+    func testInspectorIconsPageCatalog() throws {
+        focusCanvasWithSelection()
+
+        let iconsTab = app.radioButtons["Icons"]
+        XCTAssertTrue(iconsTab.waitForExistence(timeout: 3), "inspector tabs should exist")
+        iconsTab.click()
+        let page = element("inspectorIconsPage")
+        XCTAssertTrue(page.waitForExistence(timeout: 3), "icons page should appear")
+
+        // Categorized grid: ~96 toggle buttons.
+        let buttons = page.descendants(matching: .button)
+        XCTAssertGreaterThanOrEqual(buttons.count, 90,
+                                     "the expanded catalog should offer ~96 icons")
+
+        // Toggle one and verify persistence.
+        buttons.firstMatch.click()
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("data-icons=") },
+            "a toggled icon must persist"
+        )
+    }
+
     /// Node colors are sticky too: picking a fill in the inspector makes
     /// subsequently inserted nodes (⌘T) inherit it.
     func testNodeFillColorStickyForNewNodes() throws {
         focusCanvasWithSelection() // a fresh child node is selected
 
-        // Give the selected node a fill via the inspector picker (the style
-        // section can sit below the fold — scroll the inspector if needed).
+        // Give the selected node a fill via the Style page's picker.
+        let styleTab = app.radioButtons["Style"]
+        XCTAssertTrue(styleTab.waitForExistence(timeout: 3), "inspector tabs should exist")
+        styleTab.click()
         let fill = element("inspectorFillColor")
         XCTAssertTrue(fill.waitForExistence(timeout: 3), "inspector fill picker")
-        if !fill.isHittable {
-            app.scrollViews.firstMatch.swipeUp()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        }
         fill.click()
         let swatch = element("inspectorFillColor-#FFD1E8")
         XCTAssertTrue(swatch.waitForExistence(timeout: 3), "palette should offer pink")

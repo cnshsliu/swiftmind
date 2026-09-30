@@ -36,10 +36,67 @@ struct InspectorView: View {
         return session.store.map.node(id: primaryID)
     }
 
+    enum InspectorTab: String, CaseIterable, Identifiable {
+        case content, style, icons, data
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .content: return "Content"
+            case .style: return "Style"
+            case .icons: return "Icons"
+            case .data: return "Data"
+            }
+        }
+    }
+
+    /// Sticky across node selection changes — adjusting the same property on
+    /// a series of nodes stays on the same page.
+    @State private var tab: InspectorTab = .content
+
     var body: some View {
-        Form {
+        VStack(spacing: 0) {
+            Picker("Section", selection: $tab) {
+                ForEach(InspectorTab.allCases) { candidate in
+                    Text(candidate.title).tag(candidate)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+            .accessibilityIdentifier("inspectorTabPicker")
+
             if let node = primaryNode {
-                Section("Node") {
+                switch tab {
+                case .content: contentPage(node)
+                case .style: stylePage(node)
+                case .icons: iconsPage(node)
+                case .data: dataPage(node)
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Selection",
+                    systemImage: "sidebar.trailing",
+                    description: Text("Select a node to edit its title, note, links, icons, and style.")
+                )
+                Spacer()
+            }
+        }
+        .onChange(of: session.revision) { _, _ in
+            syncFromSelection(force: false)
+        }
+        .onAppear {
+            syncFromSelection(force: true)
+        }
+    }
+
+    // MARK: - Pages
+
+    /// Title, full-height note preview, links.
+    private func contentPage(_ node: Node) -> some View {
+        Form {
+            Section("Node") {
                     TextField("Title", text: $titleDraft)
                         .font(.body.weight(.medium))
                         .focused($titleFocused)
@@ -146,23 +203,30 @@ struct InspectorView: View {
                     }
                 }
 
-                Section("Icons") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 28))], spacing: 8) {
-                        ForEach(NodeIcon.catalog) { icon in
-                            let on = node.icons.contains(icon)
-                            Button {
-                                toggleIcon(icon, on: node)
-                            } label: {
-                                Image(systemName: NodeIcon.sfSymbolNames[icon.id] ?? "questionmark")
-                                    .font(.title3)
-                                    .symbolVariant(on ? .fill : .none)
-                                    .foregroundStyle(on ? Color.accentColor : Color.secondary)
-                                    .frame(width: 28, height: 28)
-                            }
-                            .buttonStyle(.plain)
-                            .help(icon.id)
+
+        }
+        .formStyle(.grouped)
+        .accessibilityIdentifier("inspectorContentPage")
+    }
+
+    /// Named style + typography/colors + map-level style rules, one page.
+    private func stylePage(_ node: Node) -> some View {
+        Form {
+            Section("Named Style") {
+                    Picker("Style", selection: Binding(
+                        get: { node.styleName ?? "" },
+                        set: { newValue in
+                            let name: String? = newValue.isEmpty ? nil : newValue
+                            guard name != node.styleName else { return }
+                            session.applyQuiet(SetStyleNameCommand(nodeID: node.id, styleName: name))
+                        }
+                    )) {
+                        Text("None").tag("")
+                        ForEach(namedStyleKeys, id: \.self) { key in
+                            Text(key.capitalized).tag(key)
                         }
                     }
+                    .accessibilityIdentifier("namedStylePicker")
                 }
 
                 Section("Style") {
@@ -232,7 +296,52 @@ struct InspectorView: View {
                         Text("Fill").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Section("Attributes") {
+            Section("Style Rules") {
+                StyleRulesSection(session: session)
+            }
+
+        }
+        .formStyle(.grouped)
+        .accessibilityIdentifier("inspectorStylePage")
+    }
+
+    /// The whole categorized catalog — a dedicated page, no scrolling hunt.
+    private func iconsPage(_ node: Node) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(NodeIcon.categories, id: \.name) { category in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(category.name)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 30), spacing: 6)], spacing: 8) {
+                            ForEach(category.icons) { icon in
+                                let on = node.icons.contains(icon)
+                                Button {
+                                    toggleIcon(icon, on: node)
+                                } label: {
+                                    Image(systemName: NodeIcon.sfSymbolNames[icon.id] ?? "questionmark")
+                                        .font(.title3)
+                                        .symbolVariant(on ? .fill : .none)
+                                        .foregroundStyle(on ? Color.accentColor : Color.secondary)
+                                        .frame(width: 28, height: 28)
+                                }
+                                .buttonStyle(.plain)
+                                .help(icon.id)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .accessibilityIdentifier("inspectorIconsPage")
+    }
+
+    /// Attributes + formula.
+    private func dataPage(_ node: Node) -> some View {
+        Form {
+            Section("Attributes") {
                     AttributeInspectorSection(session: session, node: node)
                 }
 
@@ -240,43 +349,10 @@ struct InspectorView: View {
                     FormulaInspectorSection(session: session, node: node)
                 }
 
-                Section("Named Style") {
-                    Picker("Style", selection: Binding(
-                        get: { node.styleName ?? "" },
-                        set: { newValue in
-                            let name: String? = newValue.isEmpty ? nil : newValue
-                            guard name != node.styleName else { return }
-                            session.applyQuiet(SetStyleNameCommand(nodeID: node.id, styleName: name))
-                        }
-                    )) {
-                        Text("None").tag("")
-                        ForEach(namedStyleKeys, id: \.self) { key in
-                            Text(key.capitalized).tag(key)
-                        }
-                    }
-                    .accessibilityIdentifier("namedStylePicker")
-                }
 
-            } else {
-                ContentUnavailableView(
-                    "No Selection",
-                    systemImage: "sidebar.trailing",
-                    description: Text("Select a node to edit its title, note, links, icons, and style.")
-                )
-            }
-
-            Section("Style Rules") {
-                StyleRulesSection(session: session)
-            }
         }
         .formStyle(.grouped)
-        .padding(.top, 4)
-        .onChange(of: session.revision) { _, _ in
-            syncFromSelection(force: false)
-        }
-        .onAppear {
-            syncFromSelection(force: true)
-        }
+        .accessibilityIdentifier("inspectorDataPage")
     }
 
     // MARK: - Sync
