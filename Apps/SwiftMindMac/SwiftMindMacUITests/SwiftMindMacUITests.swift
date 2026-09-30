@@ -1295,6 +1295,23 @@ extension SwiftMindMacUITests {
         }
     }
 
+    /// 'd' OPENS the board and never closes it — only Esc / Done close, so a
+    /// stray keypress cannot throw away the user's place mid-drawing.
+    func testSketchDKeyOpensOnly() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("d"), modifierFlags: [])
+        let editor = element("sketchEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "d should open the board")
+
+        app.typeKey(.init("d"), modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(editor.exists, "d while the board is open must NOT close it")
+
+        app.typeKey(.escape, modifierFlags: [])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertFalse(editor.exists, "Esc must close the board")
+    }
+
     /// Board tool shortcuts (Photoshop conventions): V/B/H/E/T switch
     /// tools, U cycles the shape library (first press from a non-shape tool
     /// lands on Rectangle). Must not fire while a text session is open.

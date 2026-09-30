@@ -543,7 +543,8 @@ struct MapCanvasView: View {
             // (not .onKeyPress) because SwiftUI focus can be lost after the
             // editor closes; the AppKit path is reliable. Never while a text
             // session is open on the board — "d" is just a letter there.
-            if event.keyCode == 2, bare, !SketchEventGuard.textEditingActive {
+            if event.keyCode == 2, bare, !SketchEventGuard.textEditingActive,
+               !SketchEventGuard.editorIsActive {
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .swiftMindCanvasSketchToggle, object: nil)
                 }
@@ -1733,12 +1734,11 @@ struct MapCanvasView: View {
 
     // MARK: - Sketch editor (large borderless board, trim-to-content on commit)
 
-    /// `d` / ⇧⌘D: convert-or-edit. Closing is Esc / Done / scrim tap.
+    /// `d` / ⇧⌘D: convert-or-edit — OPEN only. Closing is exclusively
+    /// Esc / Done / scrim tap; 'd' mid-session is a no-op so an accidental
+    /// keypress can never throw away the user's place on the board.
     private func toggleSketchMode() {
-        if drawingNodeID != nil {
-            closeSketchEditor()
-            return
-        }
+        guard drawingNodeID == nil else { return }
         guard let primary = session.store.selection.primary,
               session.store.map.node(id: primary) != nil else { return }
         beginSketch(on: primary)
