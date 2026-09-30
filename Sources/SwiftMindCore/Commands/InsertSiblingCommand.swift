@@ -4,6 +4,9 @@ public final class InsertSiblingCommand: MapCommand {
     public let newNodeID: NodeID
     public let text: String
     public let side: NodeSide
+    /// Style for the new node; nil = NodeStyle.default. Carries the
+    /// sticky colors the user last picked in the inspector.
+    public let style: NodeStyle?
     private var parentID: NodeID?
     private var didInsert = false
 
@@ -11,12 +14,14 @@ public final class InsertSiblingCommand: MapCommand {
         siblingID: NodeID,
         newNodeID: NodeID = .generate(),
         text: String,
-        side: NodeSide = .auto
+        side: NodeSide = .auto,
+        style: NodeStyle? = nil
     ) {
         self.siblingID = siblingID
         self.newNodeID = newNodeID
         self.text = text
         self.side = side
+        self.style = style
     }
 
     public func execute(on map: inout MindMap) throws {
@@ -30,7 +35,7 @@ public final class InsertSiblingCommand: MapCommand {
             throw MapCommandError.invalidParent
         }
         self.parentID = parentID
-        let child = Node(id: newNodeID, text: text, side: side)
+        let child = Node(id: newNodeID, text: text, side: side, style: style ?? .default)
         let insertIndex = siblingIndex + 1
         let ok = map.updateNode(id: parentID) { parent in
             parent.children.insert(child, at: min(insertIndex, parent.children.count))

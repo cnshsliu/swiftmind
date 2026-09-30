@@ -218,21 +218,43 @@ struct InspectorView: View {
                             commitStyleIfUser(for: node.id)
                         }
 
-                    ColorPicker("Text Color", selection: $textColor, supportsOpacity: false)
-                        .onChange(of: textColor) { _, _ in
-                            commitStyleIfUser(for: node.id)
-                        }
+                    // Shared picker pair (same as the sketch board): text
+                    // color + optional fill, presets or custom RGB. Choices
+                    // become sticky for NEW nodes (see noteStickyStyle).
+                    HStack(spacing: 8) {
+                        SketchColorPicker(
+                            title: "Text Color",
+                            selection: Binding(
+                                get: { hexOf(textColor) },
+                                set: { hex in
+                                    textColor = hex.map { Color(nsColor: SketchTextSupport.hexColor($0)) } ?? .primary
+                                    commitStyleIfUser(for: node.id)
+                                    noteStickyStyle()
+                                }
+                            ),
+                            identifier: "inspectorTextColor"
+                        )
+                        Text("Text").font(.caption).foregroundStyle(.secondary)
 
-                    Toggle("Fill Color", isOn: $hasFill)
-                        .onChange(of: hasFill) { _, _ in
-                            commitStyleIfUser(for: node.id)
-                        }
-
-                    if hasFill {
-                        ColorPicker("Fill", selection: $fillColor, supportsOpacity: false)
-                            .onChange(of: fillColor) { _, _ in
-                                commitStyleIfUser(for: node.id)
-                            }
+                        SketchColorPicker(
+                            title: "Fill Color",
+                            supportsNone: true,
+                            selection: Binding(
+                                get: { hasFill ? hexOf(fillColor) : nil },
+                                set: { hex in
+                                    if let hex {
+                                        hasFill = true
+                                        fillColor = Color(nsColor: SketchTextSupport.hexColor(hex))
+                                    } else {
+                                        hasFill = false
+                                    }
+                                    commitStyleIfUser(for: node.id)
+                                    noteStickyStyle()
+                                }
+                            ),
+                            identifier: "inspectorFillColor"
+                        )
+                        Text("Fill").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             } else {
@@ -345,6 +367,23 @@ struct InspectorView: View {
             style.fillBlue = fillRGB.b
         }
         return style
+    }
+
+    private func hexOf(_ color: Color) -> String {
+        SketchTextSupport.hex(from: NSColor(color))
+    }
+
+    /// Sticky style for NEW nodes: remember the last text/fill colors the
+    /// user chose (UserDefaults; cross-session). Insert commands read this.
+    private func noteStickyStyle() {
+        let rgb = rgbComponents(of: textColor)
+        UserDefaults.standard.set(
+            [rgb.r, rgb.g, rgb.b, hasFill ? 1 : 0,
+             hasFill ? rgbComponents(of: fillColor).r : 0,
+             hasFill ? rgbComponents(of: fillColor).g : 0,
+             hasFill ? rgbComponents(of: fillColor).b : 0],
+            forKey: "swiftmind.stickyNodeColors"
+        )
     }
 
     private func rgbComponents(of color: Color) -> (r: Double, g: Double, b: Double) {
@@ -806,5 +845,26 @@ struct AttributeInspectorSection: View {
     private func removeAttribute(named name: String) {
         let next = node.attributes.filter { $0.name != name }
         session.apply(SetAttributesCommand(nodeID: node.id, attributes: next))
+    }
+}
+
+/// Sticky colors for NEW nodes: the last text/fill colors chosen in the
+/// inspector (UserDefaults, cross-session). User-facing insert paths pass
+/// this into the insert commands — agent/CLI inserts keep defaults.
+enum StickyNodeStyle {
+    static let key = "swiftmind.stickyNodeColors"
+
+    static func read() -> NodeStyle? {
+        guard let values = UserDefaults.standard.array(forKey: key) as? [Double],
+              values.count == 7 else { return nil }
+        var style = NodeStyle(
+            textRed: values[0], textGreen: values[1], textBlue: values[2]
+        )
+        if values[3] > 0 {
+            style.fillRed = values[4]
+            style.fillGreen = values[5]
+            style.fillBlue = values[6]
+        }
+        return style
     }
 }

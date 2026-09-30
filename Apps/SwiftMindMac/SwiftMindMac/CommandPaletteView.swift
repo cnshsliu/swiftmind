@@ -25,14 +25,14 @@ enum PaletteBuilder {
 
         items.append(PaletteItem(id: "add-child", title: "Add Child", subtitle: "⌘T", systemImage: "plus.circle") {
             let parent = session.store.selection.primary ?? session.store.map.root.id
-            session.apply(InsertChildCommand(parentID: parent, text: "New Idea", side: .auto))
+            session.apply(InsertChildCommand(parentID: parent, text: "New Idea", side: .auto, style: StickyNodeStyle.read()))
             dismiss()
         })
 
         items.append(PaletteItem(id: "add-sibling", title: "Add Sibling", subtitle: "⇧⌘T", systemImage: "plus.square.on.square") {
             guard let primary = session.store.selection.primary,
                   primary != session.store.map.root.id else { return }
-            session.apply(InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto))
+            session.apply(InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto, style: StickyNodeStyle.read()))
             dismiss()
         })
 

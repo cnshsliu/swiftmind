@@ -2155,9 +2155,9 @@ struct MapCanvasView: View {
         let root = session.store.map.root
         let newID = NodeID.generate()
         if sibling, primary != root.id {
-            session.apply(InsertSiblingCommand(siblingID: primary, newNodeID: newID, text: ""))
+            session.apply(InsertSiblingCommand(siblingID: primary, newNodeID: newID, text: "", style: StickyNodeStyle.read()))
         } else {
-            session.apply(InsertChildCommand(parentID: primary, newNodeID: newID, text: ""))
+            session.apply(InsertChildCommand(parentID: primary, newNodeID: newID, text: "", style: StickyNodeStyle.read()))
         }
         beginTitleEdit(nodeID: newID, snapshot: session.store.snapshot())
         return .handled

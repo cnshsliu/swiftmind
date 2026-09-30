@@ -13,12 +13,12 @@ struct NodeContextMenu: View {
 
         Button("Add Child") {
             session.select(nodeID)
-            session.apply(InsertChildCommand(parentID: nodeID, text: "New Idea", side: .auto))
+            session.apply(InsertChildCommand(parentID: nodeID, text: "New Idea", side: .auto, style: StickyNodeStyle.read()))
         }
         if !isRoot {
             Button("Add Sibling") {
                 session.select(nodeID)
-                session.apply(InsertSiblingCommand(siblingID: nodeID, text: "New Idea", side: .auto))
+                session.apply(InsertSiblingCommand(siblingID: nodeID, text: "New Idea", side: .auto, style: StickyNodeStyle.read()))
             }
         }
         Divider()

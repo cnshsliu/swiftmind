@@ -268,7 +268,7 @@ private struct SessionNodeCommands: View {
         Button("Add Child") {
             guard let session, !session.isBrainMode else { return }
             let parent = session.store.selection.primary ?? session.store.map.root.id
-            session.apply(InsertChildCommand(parentID: parent, text: "New Idea", side: .auto))
+            session.apply(InsertChildCommand(parentID: parent, text: "New Idea", side: .auto, style: StickyNodeStyle.read()))
         }
         .keyboardShortcut("t", modifiers: .command)
         .disabled(session == nil || (session?.isBrainMode ?? false))
@@ -277,7 +277,7 @@ private struct SessionNodeCommands: View {
             guard let session, !session.isBrainMode,
                   let primary = session.store.selection.primary,
                   primary != session.store.map.root.id else { return }
-            session.apply(InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto))
+            session.apply(InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto, style: StickyNodeStyle.read()))
         }
         .keyboardShortcut("t", modifiers: [.command, .shift])
         .disabled(session == nil || (session?.isBrainMode ?? false))

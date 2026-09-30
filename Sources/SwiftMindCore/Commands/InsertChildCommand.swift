@@ -4,17 +4,21 @@ public final class InsertChildCommand: MapCommand {
     public let newNodeID: NodeID
     public let text: String
     public let side: NodeSide
+    /// Style for the new node; nil = NodeStyle.default. Carries the
+    /// sticky colors the user last picked in the inspector.
+    public let style: NodeStyle?
     private var didInsert = false
 
-    public init(parentID: NodeID, newNodeID: NodeID = .generate(), text: String, side: NodeSide = .auto) {
+    public init(parentID: NodeID, newNodeID: NodeID = .generate(), text: String, side: NodeSide = .auto, style: NodeStyle? = nil) {
         self.parentID = parentID
         self.newNodeID = newNodeID
         self.text = text
         self.side = side
+        self.style = style
     }
 
     public func execute(on map: inout MindMap) throws {
-        let child = Node(id: newNodeID, text: text, side: side)
+        let child = Node(id: newNodeID, text: text, side: side, style: style ?? .default)
         var inserted = false
         let ok = map.updateNode(id: parentID) { parent in
             parent.children.append(child)

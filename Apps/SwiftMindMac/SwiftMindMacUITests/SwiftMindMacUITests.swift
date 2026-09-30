@@ -1474,6 +1474,37 @@ extension SwiftMindMacUITests {
         XCTAssertFalse(editor.exists, "Esc must close the board")
     }
 
+    /// Node colors are sticky too: picking a fill in the inspector makes
+    /// subsequently inserted nodes (⌘T) inherit it.
+    func testNodeFillColorStickyForNewNodes() throws {
+        focusCanvasWithSelection() // a fresh child node is selected
+
+        // Give the selected node a fill via the inspector picker (the style
+        // section can sit below the fold — scroll the inspector if needed).
+        let fill = element("inspectorFillColor")
+        XCTAssertTrue(fill.waitForExistence(timeout: 3), "inspector fill picker")
+        if !fill.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        }
+        fill.click()
+        let swatch = element("inspectorFillColor-#FFD1E8")
+        XCTAssertTrue(swatch.waitForExistence(timeout: 3), "palette should offer pink")
+        swatch.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+
+        // Insert a child — it must inherit the fill.
+        app.typeKey("t", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+
+        let scratch = NSHomeDirectory()
+            + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
+        let html = try String(contentsOfFile: scratch, encoding: .utf8)
+        let hits = html.components(separatedBy: "data-fill-color=\"#FFD1E8\"").count - 1
+        XCTAssertGreaterThanOrEqual(hits, 2,
+            "the styled node AND the new ⌘T child must both carry the sticky fill")
+    }
+
     /// Board tool shortcuts (Photoshop conventions): V/B/H/E/T switch
     /// tools, U cycles the shape library (first press from a non-shape tool
     /// lands on Rectangle). Must not fire while a text session is open.

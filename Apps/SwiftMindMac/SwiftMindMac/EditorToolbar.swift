@@ -93,14 +93,14 @@ struct EditorToolbar: ToolbarContent {
     private func addChild() {
         let parentID = primary ?? rootID
         session.apply(
-            InsertChildCommand(parentID: parentID, text: "New Idea", side: .auto)
+            InsertChildCommand(parentID: parentID, text: "New Idea", side: .auto, style: StickyNodeStyle.read())
         )
     }
 
     private func addSibling() {
         guard let primary, primary != rootID else { return }
         session.apply(
-            InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto)
+            InsertSiblingCommand(siblingID: primary, text: "New Idea", side: .auto, style: StickyNodeStyle.read())
         )
     }
 
