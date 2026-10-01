@@ -388,7 +388,6 @@ struct SketchEditorView: View {
                         // match the preview to the COMMITTED look.
                         width: effectiveInkWidth * fitScale * 5 / 3
                     )
-                    .drawingGroup()
                 }
                 if let drag = shapeDrag, tool.isShape {
                     ShapePreview(
