@@ -156,9 +156,6 @@ struct SketchEditorView: View {
     @Binding var inkColor: NSColor
     /// Pen/shape stroke width in content points.
     @Binding var inkWidth: CGFloat
-    /// Marker has its own width memory (a highlighter needs to be WIDE to
-    /// read as one at the same 1.5/3/6 settings as the pen).
-    @State private var markerWidth: CGFloat = 8
     /// Called after every committed stroke/text/erase (drives the debounced commit).
     let onStrokeChange: () -> Void
     let onDone: () -> Void
@@ -259,7 +256,7 @@ struct SketchEditorView: View {
     @State private var boardSize: CGSize = .zero
 
     private static let eraserRadius: CGFloat = 8
-    static let widths: [CGFloat] = [1.5, 3, 6, 9]
+    static let widths: [CGFloat] = [1.5, 3, 6]
     private static let toolbarHeight: CGFloat = 36
     /// Content-space margin kept around existing strokes when fitting.
     private static let fitPadding: CGFloat = 24
@@ -385,7 +382,7 @@ struct SketchEditorView: View {
                 if tool == .pen || tool == .marker, !livePoints.isEmpty || !liveRawPoints.isEmpty {
                     StrokePreview(
                         points: livePoints.map { boardPoint(from: $0) } + liveRawPoints,
-                        color: Color(nsColor: inkColor).opacity(tool == .marker ? 0.4 : 1),
+                        color: Color(nsColor: inkColor).opacity(tool == .marker ? 0.45 : 1),
                         width: effectiveInkWidth * fitScale
                     )
                 }
@@ -570,9 +567,10 @@ struct SketchEditorView: View {
             || CGEventSource.keyState(.combinedSessionState, key: 0x31)
     }
 
-    /// Width for the current tool — the marker remembers its own.
+    /// Width for the current tool — the marker is always 4× the pen width
+    /// (same slider, highlighter scale).
     private var effectiveInkWidth: CGFloat {
-        tool == .marker ? markerWidth : inkWidth
+        tool == .marker ? inkWidth * 4 : inkWidth
     }
 
     /// Ink color in sRGB for PKInK. Grayscale catalog colors (.black/.white/
@@ -800,8 +798,11 @@ struct SketchEditorView: View {
             )
         }
         let path = PKStrokePath(controlPoints: strokePoints, creationDate: Date())
+        let inkColor: NSColor = tool == .marker
+            ? inkColorForPencilKit.withAlphaComponent(0.45) // stays translucent
+            : inkColorForPencilKit
         drawing.strokes.append(PKStroke(
-            ink: PKInk(tool == .marker ? .marker : .pen, color: inkColorForPencilKit),
+            ink: PKInk(tool == .marker ? .marker : .pen, color: inkColor),
             path: path
         ))
         syncToModel()
@@ -1861,18 +1862,14 @@ struct SketchEditorView: View {
 
             ForEach(Array(Self.widths.enumerated()), id: \.offset) { _, width in
                 Button {
-                    if tool == .marker {
-                        markerWidth = width
-                    } else {
-                        inkWidth = width
-                    }
+                    inkWidth = width
                 } label: {
                     Circle()
                         .fill(Color.primary.opacity(0.75))
                         .frame(width: 4 + width, height: 4 + width)
                         .overlay(
                             Circle().strokeBorder(
-                                effectiveInkWidth == width ? Color.accentColor : Color.clear,
+                                inkWidth == width ? Color.accentColor : Color.clear,
                                 lineWidth: 2
                             )
                     )
