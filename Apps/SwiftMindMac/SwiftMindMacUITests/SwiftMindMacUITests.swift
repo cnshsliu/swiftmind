@@ -1327,22 +1327,35 @@ extension SwiftMindMacUITests {
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
     }
 
-    /// PPT-style colors: board background (preset swatch) persists on the
-    /// node (data-sketch-bg) and shape fill (custom RGB) persists on the shape.
+    /// PPT-style colors: the BOARD BACKGROUND is the sketch node's Style →
+    /// Fill (inspector); shape fill comes from the toolbar's Shape Fill
+    /// picker (custom RGB).
     func testSketchBoardBackgroundAndShapeFill() throws {
         focusCanvasWithSelection()
         let editor = element("sketchEditor")
+
+        // Create the sketch node (open + close the board).
         app.typeKey(.init("d"), modifierFlags: [])
         XCTAssertTrue(editor.waitForExistence(timeout: 3))
-
-        // Board background: cream preset.
-        element("sketchBoardBackground").click()
-        let cream = element("sketchBoardBackground-#FFF8E1")
-        XCTAssertTrue(cream.waitForExistence(timeout: 3), "board palette should open")
-        cream.click()
+        app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
-        // Shape + custom RGB fill (deep sky-ish 64/156/255).
+        // Board background via the inspector's Style → Fill on that node.
+        let styleTab = app.radioButtons["Style"]
+        XCTAssertTrue(styleTab.waitForExistence(timeout: 3))
+        styleTab.click()
+        let fill = element("inspectorFillColor")
+        XCTAssertTrue(fill.waitForExistence(timeout: 3), "inspector fill picker")
+        fill.click()
+        let cream = element("inspectorFillColor-#FFF8E1")
+        XCTAssertTrue(cream.waitForExistence(timeout: 3), "palette should offer cream")
+        cream.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+
+        // Reopen the board; draw a triangle and fill it via custom RGB.
+        app.activate()
+        app.typeKey(.init("d"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
         let menu = element("sketchShapesMenu")
         XCTAssertTrue(menu.waitForExistence(timeout: 2))
         menu.click()
@@ -1354,14 +1367,12 @@ extension SwiftMindMacUITests {
         start.press(forDuration: 0.05, thenDragTo: end)
         RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
 
-        app.activate()
         element("sketchToolSelect").click()
         editor.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6)).click()
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
         element("sketchShapeFill").click()
         let r = element("sketchShapeFillApplyRGB")
         XCTAssertTrue(r.waitForExistence(timeout: 3), "fill picker should open")
-        // Three RGB fields precede the Apply button in the picker panel.
         let fields = app.textFields.matching(
             NSPredicate(format: "placeholderValue IN {'R', 'G', 'B'}")
         ).allElementsBoundByIndex
@@ -1370,19 +1381,18 @@ extension SwiftMindMacUITests {
         fields[1].click(); fields[1].typeText("156")
         fields[2].click(); fields[2].typeText("255")
         r.click()
-        RunLoop.current.run(until: Date().addingTimeInterval(1.5)) // debounce
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
 
         app.typeKey(.escape, modifierFlags: [])
         RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
 
-        // Board background persisted on the node.
+        // Board background persisted as the NODE's style fill.
         let scratch = NSHomeDirectory()
             + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"
         let html = try String(contentsOfFile: scratch, encoding: .utf8)
-        XCTAssertTrue(html.contains("data-sketch-bg=\"#FFF8E1\""),
-                      "board background should persist as data-sketch-bg")
+        XCTAssertTrue(html.contains("data-fill-color=\"#FFF8E1\""),
+                      "board background should persist as the node's fill")
 
-        // Shape fill persisted with the custom RGB.
         let shapes = try decodePersistedShapes()
         let filled = shapes.first {
             $0["kind"] as? String == "triangle" && $0["fillColor"] as? String == "#409CFF"

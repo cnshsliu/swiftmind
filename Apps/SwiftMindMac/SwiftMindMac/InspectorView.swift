@@ -684,7 +684,7 @@ struct SketchNotePreview: View {
             texts: node.sketchTexts ?? [],
             shapes: node.sketchShapes ?? [],
             images: node.sketchImages ?? [],
-            background: node.sketchBackground,
+            background: MapCanvasView.boardBackground(of: node),
             boardSize: size,
             scale: 2
         )

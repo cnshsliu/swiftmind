@@ -200,9 +200,29 @@ struct SketchEditorView: View {
     @State private var textFontSize = SketchTextSupport.defaultFontSize
     /// Sticky background; nil = plain text box.
     @State private var textSticky: String? = nil
-    /// Active corner-resize of the single selected shape (driven by the
-    /// board's MAIN gesture — child gestures on handle views froze mid-drag).
-    @State private var resizeActive: (id: String, corner: ResizeCorner, anchor: CGPoint, isLine: Bool)?
+    /// Active corner-resize of the single selected ELEMENT (shape, text,
+    /// image, or stroke — driven by the board's MAIN gesture; child gestures
+    /// on handle views froze mid-drag).
+    @State private var resizeActive: ResizeSession?
+
+    fileprivate struct ResizeSession {
+        enum Target {
+            case shape(id: String)
+            case text(id: String)
+            case image(id: String)
+            case stroke(index: Int)
+        }
+        var target: Target
+        var corner: ResizeCorner
+        /// Fixed opposite corner (bbox kinds) — content coords.
+        var anchor: CGPoint
+        /// Frame at drag START (scale ratios for texts/strokes reference it).
+        var originalFrame: CGRect
+        /// Stroke control points at drag START.
+        var originalPoints: [PKStrokePoint]?
+        /// Text font size at drag START.
+        var originalFontSize: CGFloat?
+    }
     /// In-board clipboard for ⌘C/⌘V.
     @State private var boardClipboard: (shapes: [SketchShape], texts: [SketchText], strokes: [PKStroke]) =
         ([], [], [])
@@ -260,7 +280,8 @@ struct SketchEditorView: View {
                 return .handled
             }
             if press.key == .delete, tool == .select,
-               !selectedIndices.isEmpty || !selectedTextIDs.isEmpty {
+               !selectedIndices.isEmpty || !selectedTextIDs.isEmpty
+                || !selectedShapeIDs.isEmpty || !selectedImageIDs.isEmpty {
                 deleteSelection()
                 return .handled
             }
@@ -371,12 +392,8 @@ struct SketchEditorView: View {
                    (!selectedIndices.isEmpty || !selectedTextIDs.isEmpty || !selectedShapeIDs.isEmpty), fitComputed {
                     selectionChrome
                 }
-                if tool == .select, !selectedShapeIDs.isEmpty {
-                    shapeFillBar
-                }
-                if tool == .select, selectedShapeIDs.count == 1, fitComputed,
-                   let shape = shapes.first(where: { $0.id == selectedShapeIDs.first }) {
-                    resizeHandles(for: shape)
+                if tool == .select, fitComputed, let frame = singleSelectionFrame {
+                    resizeHandles(at: frame)
                 }
                 // Marquee rect — only for a REAL marquee (drag on empty
                 // space); a move-drag already shows the selection chrome.
@@ -599,14 +616,28 @@ struct SketchEditorView: View {
                 if selectDrag == nil {
                     selectDrag = (start: content, current: content)
                     if let corner = grabbedResizeCorner(at: content),
-                       let shape = shapes.first(where: { $0.id == selectedShapeIDs.first }) {
-                        // Corner grab resizes (single selected shape only).
-                        let frame = Self.contentFrame(of: shape)
-                        resizeActive = (
-                            id: shape.id, corner: corner,
+                       let target = selectionTarget(),
+                       let frame = singleSelectionFrame {
+                        // Corner grab resizes the single selected element.
+                        var session = ResizeSession(
+                            target: target, corner: corner,
                             anchor: anchorFor(corner, of: frame),
-                            isLine: shape.kind == .line || shape.kind == .arrow
+                            originalFrame: frame,
+                            originalPoints: nil, originalFontSize: nil
                         )
+                        switch target {
+                        case .stroke(let index):
+                            let stroke = drawing.strokes[index]
+                            session.originalPoints = (0..<stroke.path.count).map {
+                                stroke.path[$0]
+                            }
+                        case .text(let id):
+                            session.originalFontSize = texts
+                                .first { $0.id == id }.map { CGFloat($0.fontSize) }
+                        default:
+                            break
+                        }
+                        resizeActive = session
                         pushUndo()
                     } else {
                         // Dragging FROM a selected stroke moves it; otherwise marquee.
@@ -880,6 +911,27 @@ struct SketchEditorView: View {
         syncToModel()
     }
 
+    /// Four visual corner grips for the single selected ELEMENT. Hit-testing
+    /// happens in the board's MAIN gesture (grabbedResizeCorner); gestures on
+    /// these child views froze mid-drag on re-render.
+    @ViewBuilder
+    private func resizeHandles(at frame: CGRect) -> some View {
+        let corners: [(CGPoint, ResizeCorner)] = [
+            (CGPoint(x: frame.minX, y: frame.minY), .tl),
+            (CGPoint(x: frame.maxX, y: frame.minY), .tr),
+            (CGPoint(x: frame.maxX, y: frame.maxY), .br),
+            (CGPoint(x: frame.minX, y: frame.maxY), .bl),
+        ]
+        ForEach(corners, id: \.1) { corner, _ in
+            ResizeHandle()
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .position(x: (corner.x - contentRect.minX) * fitScale,
+                          y: (corner.y - contentRect.minY) * fitScale)
+                .allowsHitTesting(false)
+        }
+    }
+
     /// Four visual corner grips for the single selected shape. Hit-testing
     /// happens in the board's MAIN gesture (grabbedResizeCorner); gestures on
     /// these child views froze mid-drag on re-render.
@@ -928,17 +980,51 @@ struct SketchEditorView: View {
         }
     }
 
-    private enum ResizeCorner: Hashable { case tl, tr, br, bl }
+    enum ResizeCorner: Hashable { case tl, tr, br, bl }
+
+    /// The bbox of the SINGLE selected element, whatever its type.
+    private var singleSelectionFrame: CGRect? {
+        if selectedIndices.count == 1,
+           let index = selectedIndices.first, index < drawing.strokes.count {
+            return Self.bounds(of: drawing.strokes[index])
+        }
+        if selectedTextIDs.count == 1,
+           let element = texts.first(where: { $0.id == selectedTextIDs.first! }) {
+            return Self.textFrame(of: element)
+        }
+        if selectedImageIDs.count == 1,
+           let image = images.first(where: { $0.id == selectedImageIDs.first! }) {
+            return CGRect(x: image.x, y: image.y, width: image.width, height: image.height)
+        }
+        if selectedShapeIDs.count == 1,
+           let shape = shapes.first(where: { $0.id == selectedShapeIDs.first! }) {
+            return Self.contentFrame(of: shape)
+        }
+        return nil
+    }
+
+    private func selectionTarget() -> ResizeSession.Target? {
+        if selectedIndices.count == 1, let index = selectedIndices.first,
+           index < drawing.strokes.count {
+            return .stroke(index: index)
+        }
+        if selectedTextIDs.count == 1, let id = selectedTextIDs.first {
+            return .text(id: id)
+        }
+        if selectedImageIDs.count == 1, let id = selectedImageIDs.first {
+            return .image(id: id)
+        }
+        if selectedShapeIDs.count == 1, let id = selectedShapeIDs.first {
+            return .shape(id: id)
+        }
+        return nil
+    }
 
     /// True when the content point sits within a corner's grab radius of the
-    /// single selected shape (resize beats select/marquee).
+    /// single selected element (resize beats select/marquee).
     private func grabbedResizeCorner(at content: CGPoint) -> ResizeCorner? {
-        guard selectedShapeIDs.count == 1,
-              let shape = shapes.first(where: { $0.id == selectedShapeIDs.first }) else {
-            return nil
-        }
-        let frame = Self.contentFrame(of: shape)
-        let radius: CGFloat = max(14, CGFloat(shape.strokeWidth) * 3)
+        guard let frame = singleSelectionFrame else { return nil }
+        let radius: CGFloat = 14
         let corners: [(CGPoint, ResizeCorner)] = [
             (CGPoint(x: frame.minX, y: frame.minY), .tl),
             (CGPoint(x: frame.maxX, y: frame.minY), .tr),
@@ -960,29 +1046,95 @@ struct SketchEditorView: View {
         }
     }
 
-    /// Re-frame the resizing shape between its anchor and the pointer.
+    /// Frame between the anchor and the pointer (min size 12).
+    static func rectBetween(anchor: CGPoint, pointer: CGPoint) -> CGRect {
+        let minX = min(anchor.x, pointer.x), maxX = max(anchor.x, pointer.x)
+        let minY = min(anchor.y, pointer.y), maxY = max(anchor.y, pointer.y)
+        return CGRect(
+            x: minX, y: minY,
+            width: max(maxX - minX, 12),
+            height: max(maxY - minY, 12)
+        )
+    }
+
+    /// Re-frame / re-scale the resizing element between its anchor and the
+    /// pointer. Shapes re-frame; texts scale their font with the height;
+    /// images re-frame; strokes rescale their ORIGINAL control points into
+    /// the new bbox (snapshot taken at drag start).
     private func applyResize(pointer: CGPoint) {
-        guard let drag = resizeActive,
-              let index = shapes.firstIndex(where: { $0.id == drag.id }) else { return }
-        var updated = shapes[index]
-        if drag.isLine {
-            // tl/bl grip the start point, tr/br the end.
-            let startIsAnchor = (drag.corner == .tr || drag.corner == .br)
-            let start = startIsAnchor ? drag.anchor : pointer
-            let end = startIsAnchor ? pointer : drag.anchor
-            updated.x = Double(start.x)
-            updated.y = Double(start.y)
-            updated.width = Double(end.x - start.x)
-            updated.height = Double(end.y - start.y)
-        } else {
-            let minX = min(drag.anchor.x, pointer.x), maxX = max(drag.anchor.x, pointer.x)
-            let minY = min(drag.anchor.y, pointer.y), maxY = max(drag.anchor.y, pointer.y)
-            updated.x = Double(minX)
-            updated.y = Double(minY)
-            updated.width = Double(max(maxX - minX, 12))
-            updated.height = Double(max(maxY - minY, 12))
+        guard let session = resizeActive else { return }
+        switch session.target {
+        case .shape(let id):
+            guard let index = shapes.firstIndex(where: { $0.id == id }) else { return }
+            var updated = shapes[index]
+            if updated.kind == .line || updated.kind == .arrow {
+                let startIsAnchor = (session.corner == .tr || session.corner == .br)
+                let start = startIsAnchor ? session.anchor : pointer
+                let end = startIsAnchor ? pointer : session.anchor
+                updated.x = Double(start.x)
+                updated.y = Double(start.y)
+                updated.width = Double(end.x - start.x)
+                updated.height = Double(end.y - start.y)
+            } else {
+                let rect = Self.rectBetween(anchor: session.anchor, pointer: pointer)
+                updated.x = Double(rect.minX)
+                updated.y = Double(rect.minY)
+                updated.width = Double(rect.width)
+                updated.height = Double(rect.height)
+            }
+            shapes[index] = updated
+
+        case .image(let id):
+            guard let index = images.firstIndex(where: { $0.id == id }) else { return }
+            let rect = Self.rectBetween(anchor: session.anchor, pointer: pointer)
+            images[index].x = Double(rect.minX)
+            images[index].y = Double(rect.minY)
+            images[index].width = Double(rect.width)
+            images[index].height = Double(rect.height)
+
+        case .text(let id):
+            guard let index = texts.firstIndex(where: { $0.id == id }) else { return }
+            let rect = Self.rectBetween(anchor: session.anchor, pointer: pointer)
+            var updated = texts[index]
+            if let originalSize = session.originalFontSize,
+               session.originalFrame.height > 1 {
+                let ratio = rect.height / session.originalFrame.height
+                updated.fontSize = min(96, max(6, originalSize * ratio))
+            }
+            updated.x = Double(rect.minX)
+            updated.y = Double(rect.minY)
+            updated.width = Double(rect.width)
+            updated.height = Double(rect.height)
+            texts[index] = updated
+
+        case .stroke(let index):
+            guard index < drawing.strokes.count,
+                  let original = session.originalPoints else { return }
+            let rect = Self.rectBetween(anchor: session.anchor, pointer: pointer)
+            let oldW = session.originalFrame.width, oldH = session.originalFrame.height
+            let sx = oldW > 1 ? rect.width / oldW : 1
+            let sy = oldH > 1 ? rect.height / oldH : 1
+            let origin = session.originalFrame.origin
+            let moved = original.map { pt in
+                PKStrokePoint(
+                    location: CGPoint(
+                        x: rect.minX + (pt.location.x - origin.x) * sx,
+                        y: rect.minY + (pt.location.y - origin.y) * sy
+                    ),
+                    timeOffset: pt.timeOffset,
+                    size: pt.size,
+                    opacity: pt.opacity,
+                    force: pt.force,
+                    azimuth: pt.azimuth,
+                    altitude: pt.altitude
+                )
+            }
+            guard moved.count > 1 else { return }
+            drawing.strokes[index] = PKStroke(
+                ink: drawing.strokes[index].ink,
+                path: PKStrokePath(controlPoints: moved, creationDate: Date())
+            )
         }
-        shapes[index] = updated
     }
 
     /// ⌘C on the board: stash the selected elements (internal clipboard —
@@ -1706,9 +1858,15 @@ struct SketchEditorView: View {
                 identifier: "sketchInk"
             )
             SketchColorPicker(
-                title: "Board Background",
-                selection: $boardBackground,
-                identifier: "sketchBoardBackground"
+                title: "Shape Fill",
+                supportsNone: true,
+                selection: Binding(
+                    get: {
+                        shapes.last { selectedShapeIDs.contains($0.id) }?.fillColor ?? lastShapeFill
+                    },
+                    set: { applyShapeFill($0) }
+                ),
+                identifier: "sketchShapeFill"
             )
 
             Divider().frame(height: 14)

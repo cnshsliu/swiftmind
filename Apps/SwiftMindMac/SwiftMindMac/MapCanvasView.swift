@@ -402,10 +402,8 @@ struct MapCanvasView: View {
                         sketchShapesDraft = node.sketchShapes ?? []
                         lastCommittedSketchShapes = sketchShapesDraft
                     }
-                    if node.sketchBackground != sketchBackgroundDraft {
-                        sketchBackgroundDraft = node.sketchBackground
-        sketchImagesDraft = node.sketchImages ?? []
-        lastCommittedSketchImages = sketchImagesDraft
+                    if Self.boardBackground(of: node) != sketchBackgroundDraft {
+                        sketchBackgroundDraft = Self.boardBackground(of: node)
                     }
                     if (node.sketchImages ?? []) != lastCommittedSketchImages {
                         sketchImagesDraft = node.sketchImages ?? []
@@ -1180,10 +1178,10 @@ struct MapCanvasView: View {
                 )
                 // Board background: explicit color, else the system text
                 // background (light card keeps black ink legible in dark mode).
-                let boardBackground = session.store.map.node(id: node.id)?.sketchBackground
-                let boardFill = boardBackground.map {
-                    Color(nsColor: SketchTextSupport.hexColor($0))
-                } ?? Color(nsColor: .textBackgroundColor)
+                let boardFill = session.store.map.node(id: node.id)
+                    .flatMap { Self.boardBackground(of: $0) }
+                    .map { Color(nsColor: SketchTextSupport.hexColor($0)) }
+                    ?? Color(nsColor: .textBackgroundColor)
                 context.fill(Path(roundedRect: boardRect, cornerRadius: 4), with: .color(boardFill))
                 if let model = session.store.map.node(id: node.id),
                    let data = model.sketch,
@@ -1197,7 +1195,7 @@ struct MapCanvasView: View {
                        texts: model.sketchTexts ?? [],
                        shapes: model.sketchShapes ?? [],
                        images: model.sketchImages ?? [],
-                       background: model.sketchBackground,
+                       background: Self.boardBackground(of: model),
                        boardSize: CGSize(width: contentW, height: contentH),
                        scale: scale
                    ) {
@@ -1765,6 +1763,18 @@ struct MapCanvasView: View {
 
     // MARK: - Sketch editor (large borderless board, trim-to-content on commit)
 
+    /// Board background = the node's STYLE FILL (the inspector's Style →
+    /// Fill on a sketch node), with the legacy data-sketch-bg as fallback.
+    static func boardBackground(of node: Node) -> String? {
+        if let r = node.style.fillRed,
+           let g = node.style.fillGreen,
+           let b = node.style.fillBlue {
+            func channel(_ v: Double) -> Int { Int(round(min(max(v, 0), 1) * 255)) }
+            return String(format: "#%02X%02X%02X", channel(r), channel(g), channel(b))
+        }
+        return node.sketchBackground
+    }
+
     /// `d` / ⇧⌘D: convert-or-edit — OPEN only. Closing is exclusively
     /// Esc / Done / scrim tap; 'd' mid-session is a no-op so an accidental
     /// keypress can never throw away the user's place on the board.
@@ -1833,7 +1843,9 @@ struct MapCanvasView: View {
         lastCommittedSketchTexts = sketchTextsDraft
         sketchShapesDraft = node.sketchShapes ?? []
         lastCommittedSketchShapes = sketchShapesDraft
-        sketchBackgroundDraft = node.sketchBackground
+        sketchBackgroundDraft = Self.boardBackground(of: node)
+        sketchImagesDraft = node.sketchImages ?? []
+        lastCommittedSketchImages = sketchImagesDraft
         sketchIsDirty = false
         drawingNodeID = nodeID
         SketchEventGuard.editorIsActive = true
@@ -1997,14 +2009,6 @@ struct MapCanvasView: View {
         .shadow(color: .black.opacity(0.25), radius: 10, y: 2)
         .position(x: centerX, y: centerY)
         .onExitCommand { closeSketchEditor() }
-        .onChange(of: sketchBackgroundDraft) { _, newValue in
-            // Immediate + undoable; external changes (⌘Z) resync via the
-            // content-revision handler below.
-            guard let id = drawingNodeID,
-                  let node = session.store.map.node(id: id),
-                  node.sketchBackground != newValue else { return }
-            session.applyQuiet(SetSketchBackgroundCommand(nodeID: id, background: newValue))
-        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sketchEditor")
     }
