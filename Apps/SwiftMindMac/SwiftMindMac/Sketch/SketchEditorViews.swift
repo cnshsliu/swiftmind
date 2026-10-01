@@ -24,6 +24,10 @@ enum SketchEventGuard {
     /// (especially "d") belong to the text field, never the canvas shortcuts.
     static var textEditingActive = false
 
+    /// True while Space is physically held — event-tracked (keyDown/keyUp
+    /// monitors in MapCanvasView); CGEventSource polling proved unreliable.
+    static var spaceHeld = false
+
     /// Session of the key window's document (set by AppModel). Key-down
     /// monitors are installed per window — only the active session's
     /// monitor may eat keys; background windows' monitors pass through.
@@ -556,9 +560,11 @@ struct SketchEditorView: View {
         )
     }
 
-    /// True while space is physically held (kVK_Space = 0x31).
+    /// True while space is physically held: event-tracked flag OR the HID
+    /// poll (belt and suspenders).
     private func isSpaceKeyDown() -> Bool {
-        CGEventSource.keyState(.combinedSessionState, key: 0x31)
+        SketchEventGuard.spaceHeld
+            || CGEventSource.keyState(.combinedSessionState, key: 0x31)
     }
 
     /// Ink color in sRGB for PKInK. Grayscale catalog colors (.black/.white/

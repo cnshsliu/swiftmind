@@ -70,6 +70,7 @@ struct MapCanvasView: View {
     /// Fallback when SwiftUI focus does not deliver key events to the canvas.
     @State private var keyMonitor: Any?
     @State private var scrollMonitor: Any?
+    @State private var spaceUpMonitor: Any?
     /// Spatial navigation memory: parent → last focused child (h/l returns to it).
     @State private var lastChildByParent: [NodeID: NodeID] = [:]
     /// Follow mode (F): the active node is always panned to the viewport center.
@@ -510,6 +511,7 @@ struct MapCanvasView: View {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [session] event in
             // One monitor per window — only the key window's canvas eats keys.
             guard SketchEventGuard.activeSession === session else { return event }
+            if event.keyCode == 49 { SketchEventGuard.spaceHeld = true }
             // ⌘Return commits & closes the open note editor — posted as a
             // notification because this monitor holds a stale View copy, and
             // placed before the text-editing guard because the editor's
@@ -593,6 +595,13 @@ struct MapCanvasView: View {
             }
             return event
         }
+        // Space-hold tracking for the sketch board's temporary-select mode.
+        // Local keyDown monitor (already installed) sets the flag; keyUp
+        // needs its own registration.
+        spaceUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
+            if event.keyCode == 49 { SketchEventGuard.spaceHeld = false }
+            return event
+        }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [session] event in
             guard session.pointerIsOverCanvas else { return event }
             if session.isBrainMode { return event }
@@ -654,6 +663,10 @@ struct MapCanvasView: View {
         if let scrollMonitor {
             NSEvent.removeMonitor(scrollMonitor)
             self.scrollMonitor = nil
+        }
+        if let spaceUpMonitor {
+            NSEvent.removeMonitor(spaceUpMonitor)
+            self.spaceUpMonitor = nil
         }
     }
 
