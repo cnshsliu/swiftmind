@@ -226,6 +226,9 @@ struct SketchEditorView: View {
     /// In-board clipboard for ⌘C/⌘V.
     @State private var boardClipboard: (shapes: [SketchShape], texts: [SketchText], strokes: [PKStroke]) =
         ([], [], [])
+    /// True while Space is physically held (temporary select — see
+    /// handleDrag). Refreshed on pointer/drag events.
+    @State private var spaceSelectActive = false
     @State private var pastedImages: [SketchImageElement] = []
     /// Last fill applied to a shape — new fillable shapes inherit it
     /// (PPT behavior). nil = outline only. Line/arrow are never filled.
@@ -395,6 +398,19 @@ struct SketchEditorView: View {
                 if tool == .select, fitComputed, let frame = singleSelectionFrame {
                     resizeHandles(at: frame)
                 }
+                if spaceSelectActive, tool != .select {
+                    VStack {
+                        Label("Select", systemImage: "cursorarrow.rays")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.regularMaterial, in: Capsule())
+                            .foregroundStyle(.secondary)
+                            .padding(8)
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                }
                 // Marquee rect — only for a REAL marquee (drag on empty
                 // space); a move-drag already shows the selection chrome.
                 if let drag = selectDrag, tool == .select, !draggingSelection {
@@ -540,7 +556,12 @@ struct SketchEditorView: View {
         )
     }
 
-    /// Ink color in sRGB for PKInk. Grayscale catalog colors (.black/.white/
+    /// True while space is physically held (kVK_Space = 0x31).
+    private func isSpaceKeyDown() -> Bool {
+        CGEventSource.keyState(.combinedSessionState, key: 0x31)
+    }
+
+    /// Ink color in sRGB for PKInK. Grayscale catalog colors (.black/.white/
     /// .darkGray) break PKDrawing.image() rasterization — the renderer reads
     /// the single gray channel as ALPHA: black strokes vanish (they show the
     /// card behind) and white strokes render black. Converting to sRGB first
@@ -578,6 +599,10 @@ struct SketchEditorView: View {
             if phase == .ended { commitTextEditing() }
             return
         }
+        // Space-hold = temporary SELECT (Photoshop convention): select, move,
+        // and resize without leaving the drawing tool; release restores it.
+        spaceSelectActive = isSpaceKeyDown()
+        let tool = spaceSelectActive ? SketchTool.select : self.tool
         if tool == .text {
             guard fitComputed else { return }
             if phase == .ended { beginTextEditing(at: contentPoint(location)) }
@@ -665,6 +690,7 @@ struct SketchEditorView: View {
                     selectDrag = nil
                     draggingSelection = false
                     movedOnce = false
+                    spaceSelectActive = isSpaceKeyDown()
                 }
                 if resizeActive != nil {
                     resizeActive = nil

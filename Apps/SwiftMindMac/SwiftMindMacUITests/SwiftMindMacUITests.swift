@@ -1097,6 +1097,9 @@ extension SwiftMindMacUITests {
     }
 
     func focusCanvasWithSelection() {
+        // Mid-test re-entry: force ASCII again (the IME can get switched by
+        // system/user interaction between tests despite the setUp call).
+        _ = InputSourceHelper.selectASCII()
         let canvas = element("mapCanvas")
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "map canvas should exist")
         canvas.click()
