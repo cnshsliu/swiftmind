@@ -1875,7 +1875,7 @@ struct SketchEditorView: View {
             } label: {
                 Image(systemName: tool.isShape ? tool.icon : "square.on.square.dashed")
                     .font(.system(size: 14, weight: tool.isShape ? .semibold : .regular))
-                    .frame(width: 30, height: 22)
+                    .toolbarHit()
                     .background {
                         if tool.isShape {
                             Capsule().fill(Color.accentColor.opacity(0.16))
@@ -1911,6 +1911,7 @@ struct SketchEditorView: View {
                                 lineWidth: 2
                             )
                     )
+                    .toolbarHit()
                 }
                 .buttonStyle(.borderless)
                 .help("Stroke width")
@@ -1920,6 +1921,7 @@ struct SketchEditorView: View {
 
             Button(action: insertImage) {
                 Image(systemName: "photo")
+                    .toolbarHit()
             }
             .buttonStyle(.borderless)
             .help("Insert Image")
@@ -1952,6 +1954,7 @@ struct SketchEditorView: View {
 
             Button(action: undo) {
                 Image(systemName: "arrow.uturn.backward")
+                    .toolbarHit()
             }
             .buttonStyle(.borderless)
             .disabled(undoStack.isEmpty)
@@ -1959,12 +1962,14 @@ struct SketchEditorView: View {
 
             Button(action: redo) {
                 Image(systemName: "arrow.uturn.forward")
+                    .toolbarHit()
             }
             .buttonStyle(.borderless)
             .disabled(redoStack.isEmpty)
 
             Button(action: clear) {
                 Image(systemName: "trash")
+                    .toolbarHit()
             }
             .buttonStyle(.borderless)
             .accessibilityIdentifier("sketchClear")
@@ -1991,7 +1996,7 @@ struct SketchEditorView: View {
             Image(systemName: candidate.icon)
                 .font(.system(size: 14, weight: active ? .semibold : .regular))
                 .scaleEffect(active ? 1.12 : 1)
-                .frame(width: 30, height: 22)
+                .toolbarHit()
                 .background {
                     if active {
                         Capsule().fill(Color.accentColor.opacity(0.16))
@@ -2098,6 +2103,15 @@ private struct SketchRightPanCatcher: NSViewRepresentable {
         }
 
         override func rightMouseUp(with event: NSEvent) {}
+    }
+}
+
+/// Uniform toolbar hit target: square, row-height, centered content —
+/// tiny visuals (the width dots) stay easy to click.
+extension View {
+    func toolbarHit(_ side: CGFloat = 28) -> some View {
+        frame(width: side, height: side)
+            .contentShape(Rectangle())
     }
 }
 

@@ -32,6 +32,7 @@ struct SketchColorPicker: View {
             RoundedRectangle(cornerRadius: 4)
                 .fill(swatchColor)
                 .frame(width: 18, height: 18)
+                .toolbarHit(26)
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
                         .strokeBorder(Color.secondary.opacity(0.6), lineWidth: 1)
