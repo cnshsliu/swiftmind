@@ -382,9 +382,10 @@ struct SketchEditorView: View {
                 if tool == .pen || tool == .marker, !livePoints.isEmpty || !liveRawPoints.isEmpty {
                     StrokePreview(
                         points: livePoints.map { boardPoint(from: $0) } + liveRawPoints,
-                        color: Color(nsColor: inkColor).opacity(tool == .marker ? 0.45 : 1),
+                        color: markerPreviewColor,
                         width: effectiveInkWidth * fitScale
                     )
+                    .drawingGroup()
                 }
                 if let drag = shapeDrag, tool.isShape {
                     ShapePreview(
@@ -565,6 +566,28 @@ struct SketchEditorView: View {
     private func isSpaceKeyDown() -> Bool {
         SketchEventGuard.spaceHeld
             || CGEventSource.keyState(.combinedSessionState, key: 0x31)
+    }
+
+    /// Preview color for the current tool. The marker pre-blends its 45%
+    /// translucency with the board background into an OPAQUE color — visually
+    /// identical, but no per-frame alpha compositing of the growing path
+    /// (that was the marker's perceptible lag).
+    private var markerPreviewColor: Color {
+        guard tool == .marker else { return Color(nsColor: inkColor) }
+        let ink = (try? inkColor.usingColorSpace(.sRGB)) ?? inkColor
+        let baseHex = boardBackground ?? "#FFFFFF"
+        let scanner = Scanner(string: String(baseHex.dropFirst()))
+        var value: UInt64 = 0
+        scanner.scanHexInt64(&value)
+        let bg = (
+            CGFloat((value >> 16) & 0xFF) / 255,
+            CGFloat((value >> 8) & 0xFF) / 255,
+            CGFloat(value & 0xFF) / 255
+        )
+        func blend(_ fg: CGFloat, _ b: CGFloat) -> CGFloat { fg * 0.45 + b * 0.55 }
+        return Color(red: Double(blend(ink.redComponent, bg.0)),
+                     green: Double(blend(ink.greenComponent, bg.1)),
+                     blue: Double(blend(ink.blueComponent, bg.2)))
     }
 
     /// Width for the current tool — the marker is always 4× the pen width
@@ -798,11 +821,14 @@ struct SketchEditorView: View {
             )
         }
         let path = PKStrokePath(controlPoints: strokePoints, creationDate: Date())
+        // Highlighter = round pen ink + translucent color: uniform width in
+        // every direction (marker ink renders a chisel nib — wide across,
+        // narrow along) and true translucency that survives rasterization.
         let inkColor: NSColor = tool == .marker
-            ? inkColorForPencilKit.withAlphaComponent(0.45) // stays translucent
+            ? inkColorForPencilKit.withAlphaComponent(0.45)
             : inkColorForPencilKit
         drawing.strokes.append(PKStroke(
-            ink: PKInk(tool == .marker ? .marker : .pen, color: inkColor),
+            ink: PKInk(.pen, color: inkColor),
             path: path
         ))
         syncToModel()

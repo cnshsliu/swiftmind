@@ -1794,11 +1794,16 @@ extension SwiftMindMacUITests {
         for match in matches {
             guard let data = Data(base64Encoded: String(match.output.1)),
                   let drawing = try? PKDrawing(data: data) else { continue }
-            if drawing.strokes.contains(where: { $0.ink.inkType == .marker }) {
+            // Highlighter = pen ink + translucent color (uniform width in
+            // every direction): look for an alpha < 0.9 stroke.
+            if drawing.strokes.contains(where: { stroke in
+                let color = stroke.ink.color.usingColorSpace(.sRGB) ?? stroke.ink.color
+                return color.alphaComponent < 0.9
+            }) {
                 markerFound = true
             }
         }
-        XCTAssertTrue(markerFound, "the marker tool must commit a marker-ink stroke")
+        XCTAssertTrue(markerFound, "the marker must commit a translucent (alpha ~0.45) stroke")
     }
 
     /// Moving a shape with the select tool keeps its geometry by
