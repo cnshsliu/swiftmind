@@ -28,6 +28,11 @@ enum SketchEventGuard {
     /// monitors in MapCanvasView); CGEventSource polling proved unreliable.
     static var spaceHeld = false
 
+    /// True while a pen/marker stroke is being drawn. The debounced autosave
+    /// must NOT run mid-stroke (trim + re-encode on the main thread = the
+    /// visible hitch during long highlighter sweeps).
+    static var strokeInProgress = false
+
     /// Session of the key window's document (set by AppModel). Key-down
     /// monitors are installed per window — only the active session's
     /// monitor may eat keys; background windows' monitors pass through.
@@ -753,6 +758,7 @@ struct SketchEditorView: View {
             // point goes to the raw tail, converted at commit when the fit
             // necessarily exists (gating input on the fit race dropped whole
             // drags on slow layouts).
+            SketchEventGuard.strokeInProgress = true
             if fitComputed {
                 livePoints.append(contentPoint(location))
             } else {
@@ -786,6 +792,7 @@ struct SketchEditorView: View {
         defer {
             livePoints.removeAll()
             liveRawPoints.removeAll()
+            SketchEventGuard.strokeInProgress = false
         }
         computeFitIfNeeded() // last chance: the drag hit the board, so it exists
         let points = livePoints + liveRawPoints.map(contentPoint)

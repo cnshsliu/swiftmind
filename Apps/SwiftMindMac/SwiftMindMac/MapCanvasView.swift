@@ -1901,6 +1901,13 @@ struct MapCanvasView: View {
         sketchCommitTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
+            // Never commit mid-stroke: trim + re-encode runs on the main
+            // thread and hitches the live drag (long highlighter sweeps).
+            let strokeDeadline = Date().addingTimeInterval(10)
+            while SketchEventGuard.strokeInProgress, Date() < strokeDeadline {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+            guard !Task.isCancelled else { return }
             commitSketchDraft(keepFrame: true)
             sketchCommitTask = nil
         }
