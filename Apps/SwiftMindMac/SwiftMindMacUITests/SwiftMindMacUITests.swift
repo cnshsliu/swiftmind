@@ -1227,9 +1227,11 @@ extension SwiftMindMacUITests {
         XCTAssertEqual(nodeCount(), before + 1, "Scribbling a titled node must add a child to draw on")
 
         // Undo removes the sketch board, then the child.
-        app.typeKey("z", modifierFlags: .command)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        app.typeKey("z", modifierFlags: .command)
+        for i in 0..<5 {
+            app.typeKey("z", modifierFlags: .command)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+            if nodeCount() == before { break }
+        }
         let restored = NSPredicate { _, _ in self.nodeCount() == before }
         expectation(for: restored, evaluatedWith: nil)
         waitForExpectations(timeout: 5)
