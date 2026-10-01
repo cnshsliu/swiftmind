@@ -156,6 +156,9 @@ struct SketchEditorView: View {
     @Binding var inkColor: NSColor
     /// Pen/shape stroke width in content points.
     @Binding var inkWidth: CGFloat
+    /// Marker has its own width memory (a highlighter needs to be WIDE to
+    /// read as one at the same 1.5/3/6 settings as the pen).
+    @State private var markerWidth: CGFloat = 8
     /// Called after every committed stroke/text/erase (drives the debounced commit).
     let onStrokeChange: () -> Void
     let onDone: () -> Void
@@ -256,7 +259,7 @@ struct SketchEditorView: View {
     @State private var boardSize: CGSize = .zero
 
     private static let eraserRadius: CGFloat = 8
-    static let widths: [CGFloat] = [1.5, 3, 6]
+    static let widths: [CGFloat] = [1.5, 3, 6, 9]
     private static let toolbarHeight: CGFloat = 36
     /// Content-space margin kept around existing strokes when fitting.
     private static let fitPadding: CGFloat = 24
@@ -383,7 +386,7 @@ struct SketchEditorView: View {
                     StrokePreview(
                         points: livePoints.map { boardPoint(from: $0) } + liveRawPoints,
                         color: Color(nsColor: inkColor).opacity(tool == .marker ? 0.4 : 1),
-                        width: inkWidth * fitScale
+                        width: effectiveInkWidth * fitScale
                     )
                 }
                 if let drag = shapeDrag, tool.isShape {
@@ -565,6 +568,11 @@ struct SketchEditorView: View {
     private func isSpaceKeyDown() -> Bool {
         SketchEventGuard.spaceHeld
             || CGEventSource.keyState(.combinedSessionState, key: 0x31)
+    }
+
+    /// Width for the current tool — the marker remembers its own.
+    private var effectiveInkWidth: CGFloat {
+        tool == .marker ? markerWidth : inkWidth
     }
 
     /// Ink color in sRGB for PKInK. Grayscale catalog colors (.black/.white/
@@ -784,7 +792,7 @@ struct SketchEditorView: View {
             PKStrokePoint(
                 location: location,
                 timeOffset: now,
-                size: CGSize(width: inkWidth, height: inkWidth),
+                size: CGSize(width: effectiveInkWidth, height: effectiveInkWidth),
                 opacity: 1,
                 force: 1,
                 azimuth: 0,
@@ -1853,14 +1861,18 @@ struct SketchEditorView: View {
 
             ForEach(Array(Self.widths.enumerated()), id: \.offset) { _, width in
                 Button {
-                    inkWidth = width
+                    if tool == .marker {
+                        markerWidth = width
+                    } else {
+                        inkWidth = width
+                    }
                 } label: {
                     Circle()
                         .fill(Color.primary.opacity(0.75))
                         .frame(width: 4 + width, height: 4 + width)
                         .overlay(
                             Circle().strokeBorder(
-                                inkWidth == width ? Color.accentColor : Color.clear,
+                                effectiveInkWidth == width ? Color.accentColor : Color.clear,
                                 lineWidth: 2
                             )
                     )
