@@ -383,7 +383,10 @@ struct SketchEditorView: View {
                     StrokePreview(
                         points: livePoints.map { boardPoint(from: $0) } + liveRawPoints,
                         color: markerPreviewColor,
-                        width: effectiveInkWidth * fitScale
+                        // PencilKit renders pen ink ≈ 5/3 × the nominal point
+                        // size (measured: nominal 12 → 20px solid core) —
+                        // match the preview to the COMMITTED look.
+                        width: effectiveInkWidth * fitScale * 5 / 3
                     )
                     .drawingGroup()
                 }
