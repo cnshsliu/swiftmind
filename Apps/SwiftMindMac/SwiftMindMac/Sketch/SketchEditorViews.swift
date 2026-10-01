@@ -261,7 +261,10 @@ struct SketchEditorView: View {
     @State private var boardSize: CGSize = .zero
 
     private static let eraserRadius: CGFloat = 8
-    static let widths: [CGFloat] = [1.5, 3, 6]
+    // Measured: PencilKit pen ink renders NOTHING below ~3pt nominal
+    // (nominal 1.5 → maxAlpha 0.0; 2.5 → 0.5 ghost). Keep every option
+    // clearly visible.
+    static let widths: [CGFloat] = [3, 5, 8]
     private static let toolbarHeight: CGFloat = 36
     /// Content-space margin kept around existing strokes when fitting.
     private static let fitPadding: CGFloat = 24
