@@ -1548,27 +1548,24 @@ struct MapCanvasView: View {
     }
 
     /// Panel host: floating right of the node or covering it in place, with
-    /// the insertion toolbar row on top.
+    /// the insertion toolbar row on top. The floating panel is NEAR-FULL
+    /// CANVAS (24pt margins, sketch-board parity) — maximum writing surface.
     @ViewBuilder
     private func panelNoteEditor(frame: CGRect, viewSize: CGSize) -> some View {
         let inPlace = noteEditorPlacement == .inPlace
-        let width: CGFloat = inPlace ? max(frame.width, 320) : Self.noteEditorWidth
+        let width: CGFloat = inPlace ? max(frame.width, 320) : max(320, viewSize.width - 48)
         let height: CGFloat = {
             if inPlace {
                 return min(max(frame.height, 220), max(160, viewSize.height - 24))
             }
-            return min(480, max(200, viewSize.height - frame.minY - 24))
+            return max(200, viewSize.height - 48)
         }()
         let centerX: CGFloat = inPlace
             ? frame.minX + width / 2
-            : frame.maxX + 16 + width / 2
-        // Top-aligned with the node, but clamped into the viewport: a node
-        // near the window edge must never push the editor off-screen
-        // (unreachable = unclosable, and XCTest can't hit-test it).
-        let rawCenterY = frame.minY + height / 2
-        let minCenterY = height / 2 + 16
-        let maxCenterY = max(minCenterY, viewSize.height - height / 2 - 16)
-        let centerY = min(max(rawCenterY, minCenterY), maxCenterY)
+            : viewSize.width / 2
+        let centerY = inPlace
+            ? frame.minY + height / 2
+            : viewSize.height / 2
         noteEditorView(chromeIdentifier: "noteEditorPanel")
             .frame(width: width, height: height)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -1658,9 +1655,8 @@ struct MapCanvasView: View {
         lastCommittedNoteDocument = noteEditorDraft
         noteEditorBaseline = noteEditorDraft
         session.liveNoteDocument = (nodeID, noteEditorDraft)
-        if placement == .floatingRight {
-            stashAndPanForEditor()
-        }
+        // No side-pan for the near-full panel — it covers the canvas like
+        // the sketch board does.
     }
 
     /// `committing == false` is the Esc/cancel path: instead of committing the
