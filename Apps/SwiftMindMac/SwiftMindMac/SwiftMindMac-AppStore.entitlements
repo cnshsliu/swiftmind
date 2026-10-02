@@ -5,6 +5,8 @@
 	<!-- App Store variant: no temporary exceptions (App Review rejects them).
 	     The default library lives in the container's Documents directory;
 	     real-folder access still works via user-selected files + bookmarks. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>

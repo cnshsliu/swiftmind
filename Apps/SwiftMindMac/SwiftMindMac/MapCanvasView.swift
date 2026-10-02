@@ -96,6 +96,9 @@ struct MapCanvasView: View {
     @State private var noteEditorBaseline: String?
     /// One-shot toolbar insertion (image/math/link), consumed by the editor.
     @State private var pendingNoteInsertion: MarkdownInsertion?
+    /// Retains the open NSOpenPanel while it presents — a panel owned only
+    /// by the local scope is deallocated before `begin` can show it.
+    @State private var activeImagePanel: NSOpenPanel?
     /// Canvas offset stashed when the editor opened (restored on close).
     @State private var preEditorPan: CGSize?
     /// The offset we panned to; restore only if the user hasn't panned since.
@@ -459,7 +462,7 @@ struct MapCanvasView: View {
             beginTitleEditPreferringHover(snapshot: session.store.snapshot())
         }
         // ⌘Enter while the note editor is open (from the key monitor).
-        .onReceive(NotificationCenter.default.publisher(for: .swiftMindCanvasCommitNoteEditor)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindNoteEditorCommit)) { _ in
             guard noteEditorNodeID != nil else { return }
             closeNoteEditor(committing: true)
         }
@@ -521,7 +524,7 @@ struct MapCanvasView: View {
                event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
                session.liveNoteDocument != nil {
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .swiftMindCanvasCommitNoteEditor, object: nil)
+                    NotificationCenter.default.post(name: .swiftMindNoteEditorCommit, object: nil)
                 }
                 return nil
             }
@@ -1603,7 +1606,12 @@ struct MapCanvasView: View {
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.message = "Choose an image to embed in the note"
-        panel.begin { response in
+        activeImagePanel = panel
+        guard let window = NSApp.keyWindow else {
+            activeImagePanel = nil
+            return
+        }
+        panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url,
                   let data = try? Data(contentsOf: url),
                   let png = ClipboardService.normalizeImage(data) else { return }
@@ -1611,6 +1619,7 @@ struct MapCanvasView: View {
             let markdown = "![\(name)](data:image/png;base64,\(png.base64EncodedString()))"
             DispatchQueue.main.async {
                 pendingNoteInsertion = MarkdownInsertion(payload: .image(markdown: markdown))
+                activeImagePanel = nil
             }
         }
     }
@@ -2518,7 +2527,6 @@ private extension Notification.Name {
     static let swiftMindCanvasDelete = Notification.Name("swiftMind.canvas.delete")
     static let swiftMindCanvasSketchToggle = Notification.Name("swiftMind.canvas.sketchToggle")
     static let swiftMindCanvasFoldAll = Notification.Name("swiftMind.canvas.foldAll")
-    static let swiftMindCanvasCommitNoteEditor = Notification.Name("swiftMind.canvas.commitNoteEditor")
 }
 
 #Preview {

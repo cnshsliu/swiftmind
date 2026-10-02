@@ -40,7 +40,23 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> MarkdownEditorHost {
         let textView = MarkdownSourceTextView(frame: .zero)
+        let coordinator = context.coordinator
         textView.onCancel = onCancel
+        textView.onPasteImage = { [weak coordinator] raw in
+            guard let png = ClipboardService.normalizeImage(raw) else { return }
+            let markdown = "![pasted](data:image/png;base64,\(png.base64EncodedString()))"
+            coordinator?.insertImageMarkdown(markdown)
+        }
+        textView.onPasteImageURL = { [weak coordinator] url in
+            URLSession.shared.dataTask(with: url) { data, _, _ in
+                guard let data else { return }
+                DispatchQueue.main.async {
+                    guard let png = ClipboardService.normalizeImage(data) else { return }
+                    let markdown = "![image](data:image/png;base64,\(png.base64EncodedString()))"
+                    coordinator?.insertImageMarkdown(markdown)
+                }
+            }.resume()
+        }
         textView.delegate = context.coordinator
         textView.isRichText = false // storage stays plain Markdown source
         textView.allowsUndo = true  // text-level ⌘Z (see undoFocusedTextIfPossible)
@@ -85,7 +101,18 @@ struct MarkdownEditorView: NSViewRepresentable {
                                target: coord, action: #selector(Coordinator.insertMathClicked)),
             Self.toolbarButton("link", id: "noteEditorInsertLink", help: "Insert link",
                                target: coord, action: #selector(Coordinator.insertLinkClicked)),
+            doneButton(coord),
         ])
+        // Done: commit & close — same path as ⌘Enter (discoverability: Esc
+        // alone reverts, which surprised users).
+        func doneButton(_ coord: Coordinator) -> NSButton {
+            let button = Self.toolbarButton("checkmark.circle.fill", id: "noteEditorDone",
+                                            help: "Save & close (⌘↩)",
+                                            target: coord,
+                                            action: #selector(Coordinator.doneClicked))
+            button.title = " Done"
+            return button
+        }
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
         toolbar.spacing = 4
@@ -280,6 +307,17 @@ struct MarkdownEditorView: NSViewRepresentable {
             parent.onInsertImage()
         }
 
+        /// Insert an image markdown block at the caret (paste paths).
+        func insertImageMarkdown(_ markdown: String) {
+            guard let textView = textView else { return }
+            textView.applyInsertion(.image(markdown: markdown))
+        }
+
+        /// Done = commit & close. Same path as ⌘Enter.
+        @objc func doneClicked() {
+            NotificationCenter.default.post(name: .swiftMindNoteEditorCommit, object: nil)
+        }
+
         @objc func boldClicked() { textView?.onFormat?("**") }
         @objc func italicClicked() { textView?.onFormat?("*") }
         @objc func strikeClicked() { textView?.onFormat?("~~") }
@@ -439,8 +477,17 @@ final class MarkdownEditorHost: NSView {
 /// plus Esc forwarding. All edits go through insertText / the
 /// shouldChangeText → replaceCharacters → didChangeText cycle so they are
 /// undoable and flow into the binding via the delegate.
+/// Commit-and-close signal shared with MapCanvasView's key monitor.
+extension Notification.Name {
+    static let swiftMindNoteEditorCommit = Notification.Name("swiftMind.noteEditor.commit")
+}
+
 final class MarkdownSourceTextView: NSTextView {
     var onCancel: (() -> Void)?
+    /// Pasted image data / image URL — handled by the coordinator
+    /// (normalize → data-URI markdown at the caret).
+    var onPasteImage: ((Data) -> Void)?
+    var onPasteImageURL: ((URL) -> Void)?
 
     enum Command {
         case backspace
@@ -467,6 +514,31 @@ final class MarkdownSourceTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         drawKeyCaps(in: dirtyRect)
         super.draw(dirtyRect)
+    }
+
+    /// Images paste as data-URI markdown; an image-looking URL pastes as a
+    /// downloaded embed; everything else stays a normal text paste.
+    override func paste(_ sender: Any?) {
+        let board = NSPasteboard.general
+        let types = board.types ?? []
+        if types.contains(.png) || types.contains(.tiff),
+           let raw = board.data(forType: .png) ?? board.data(forType: .tiff) {
+            onPasteImage?(raw)
+            return
+        }
+        if let text = board.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https",
+           isImageURL(url) {
+            onPasteImageURL?(url)
+            return
+        }
+        super.paste(sender)
+    }
+
+    private func isImageURL(_ url: URL) -> Bool {
+        ["png", "jpg", "jpeg", "gif", "webp", "heic", "avif", "bmp"]
+            .contains(url.pathExtension.lowercased())
     }
 
     /// Rounded key cap behind each `<kbd>` label. The glyphs are the key name.

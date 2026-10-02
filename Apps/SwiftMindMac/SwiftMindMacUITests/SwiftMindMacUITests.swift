@@ -903,6 +903,91 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: "/tmp/uitest_shot.png"))
     }
 
+    /// Path 1: the Insert Image toolbar button must present the Open panel.
+    /// (The original bug: the locally-owned NSOpenPanel deallocated before
+    /// `begin` could present — nothing appeared. Selecting a file inside
+    /// the panel isn't automatable; the insert pipeline itself is covered
+    /// by the paste/URL tests.)
+    func testNoteEditorImageInsertViaFinder() throws {
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+
+        let button = element("noteEditorInsertImage")
+        XCTAssertTrue(button.waitForExistence(timeout: 3), "insert-image toolbar button")
+        button.click()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+
+        // The open panel is a SHEET on the window.
+        let openDialog = app.sheets.firstMatch
+        XCTAssertTrue(openDialog.waitForExistence(timeout: 5),
+                      "the Open panel should appear when the button is clicked")
+
+        app.typeKey(.escape, modifierFlags: []) // dismiss the panel
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.typeKey(.escape, modifierFlags: []) // close the editor
+    }
+
+    /// Image insert paths (all three): Finder panel, clipboard paste, and a
+    /// pasted image URL (local HTTP server; the app now has network.client).
+    func testNoteEditorImageInsertPaths() throws {
+        // --- Path 2: paste an image from the clipboard ---
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        let editor = element("noteEditor")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        let png = try Data(contentsOf: URL(fileURLWithPath: "/tmp/test-image.png"))
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(png, forType: .png)
+        app.typeKey("v", modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        app.typeKey(.return, modifierFlags: .command) // commit & close
+        RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
+        XCTAssertTrue(
+            waitForScratchMap { $0.contains("data:image/png;base64") },
+            "a pasted clipboard image must embed as a data URI"
+        )
+        NSPasteboard.general.clearContents()
+
+        // --- Path 3: paste a public image URL (local server) ---
+        let server = try startLocalImageServer()
+        defer { server.terminate() }
+        focusCanvasWithSelection()
+        app.typeKey(.init("e"), modifierFlags: [])
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.click()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(
+            "http://127.0.0.1:\(testServerPort)/test-image.png", forType: .string)
+        app.typeKey("v", modifierFlags: .command)
+        // download + insert is async
+        let urlLanded = NSPredicate { _, _ in
+            (try? String(contentsOf: URL(fileURLWithPath:
+                NSHomeDirectory() + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"),
+                encoding: .utf8))?.contains("![image](data:image/png") == true
+        }
+        expectation(for: urlLanded, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+        app.typeKey(.return, modifierFlags: .command)
+        RunLoop.current.run(until: Date().addingTimeInterval(2.0))
+    }
+
+    private var testServerPort: Int { 8765 }
+
+    /// Serves /tmp/test-image.png on 127.0.0.1 for the URL-paste path
+    /// (python http.server: instant start, no compile wait).
+    private func startLocalImageServer() throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-m", "http.server", "8765", "--bind", "127.0.0.1",
+                              "--directory", "/tmp"]
+        try process.run()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        return process
+    }
+
     /// Bug repro (reported 2026-09-24): create node, type short text,
     /// confirm; then re-edit and replace with very long text — the frame
     /// stays short and the text overflows. Screenshots land in

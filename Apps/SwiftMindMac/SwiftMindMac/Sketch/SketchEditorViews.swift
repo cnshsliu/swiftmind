@@ -232,6 +232,9 @@ struct SketchEditorView: View {
         /// Text font size at drag START.
         var originalFontSize: CGFloat?
     }
+    /// Retains the open NSOpenPanel while it presents (a locally owned
+    /// panel deallocates before `begin` can show it).
+    @State private var activeImagePanel: NSOpenPanel?
     /// In-board clipboard for ⌘C/⌘V.
     @State private var boardClipboard: (shapes: [SketchShape], texts: [SketchText], strokes: [PKStroke]) =
         ([], [], [])
@@ -1329,11 +1332,19 @@ struct SketchEditorView: View {
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.message = "Choose an image to place on the board"
-        panel.begin { response in
-            guard response == .OK, let url = panel.url,
-                  let raw = try? Data(contentsOf: url),
-                  let png = ClipboardService.normalizeImage(raw) else { return }
+        activeImagePanel = panel
+        guard let window = NSApp.keyWindow else {
+            activeImagePanel = nil
+            return
+        }
+        panel.beginSheetModal(for: window) { response in
+            let outcome: Data? = {
+                guard response == .OK, let url = panel.url else { return nil }
+                return try? Data(contentsOf: url)
+            }()
             DispatchQueue.main.async {
+                activeImagePanel = nil
+                guard let raw = outcome, let png = ClipboardService.normalizeImage(raw) else { return }
                 insertImageData(png)
             }
         }
