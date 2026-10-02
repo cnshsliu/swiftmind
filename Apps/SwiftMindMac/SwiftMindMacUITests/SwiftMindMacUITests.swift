@@ -924,6 +924,10 @@ final class SwiftMindMacUITests: XCTestCase {
         XCTAssertTrue(openDialog.waitForExistence(timeout: 5),
                       "the Open panel should appear when the button is clicked")
 
+        // In-panel selection (⌘⇧G → clear field with ⌘A FIRST — typeText
+        // alone appends to existing content → then path → Return) proved
+        // too flaky to automate; the panel presenting is the regression
+        // guard, manual flow verification covers the rest.
         app.typeKey(.escape, modifierFlags: []) // dismiss the panel
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         app.typeKey(.escape, modifierFlags: []) // close the editor
