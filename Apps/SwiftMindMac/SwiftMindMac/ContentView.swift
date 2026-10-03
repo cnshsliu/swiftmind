@@ -7,7 +7,7 @@ import SwiftMindCore
 /// in which case this placeholder dismisses itself.
 struct MapWindowRoot: View {
     @ObservedObject var appModel: AppModel
-    let url: URL?
+    @Binding var url: URL?
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var document: MapDocument?
@@ -42,6 +42,13 @@ struct MapWindowRoot: View {
             if url == nil, opened, appModel.launchDocument == nil {
                 dismissWindow()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindMapFileRenamed)) { note in
+            guard let old = note.userInfo?["old"] as? String,
+                  let new = note.userInfo?["new"] as? String,
+                  url?.standardizedFileURL.path == URL(fileURLWithPath: old).standardizedFileURL.path
+            else { return }
+            url = URL(fileURLWithPath: new)
         }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindOpenMapURL)) { note in
             if let url = note.object as? URL {
@@ -99,7 +106,7 @@ private struct SessionWorkspace: View {
         self.appModel = appModel
         self.document = document
         self.session = document.session
-        _mapTitleDraft = State(initialValue: document.session.store.map.title)
+        _mapTitleDraft = State(initialValue: Self.fileStem(of: document))
     }
 
     private var nodeCount: Int {
@@ -123,14 +130,18 @@ private struct SessionWorkspace: View {
 
     private var windowTitle: String {
         if document.isBrain { return "My Brain" }
-        if let url = document.url {
-            var name = url.lastPathComponent
-            if name.hasSuffix(".swiftmind.html") {
-                name = String(name.dropLast(".swiftmind.html".count))
-            }
-            return name
+        return Self.fileStem(of: document)
+    }
+
+    /// The name of the file, without `.swiftmind.html`. This is the map's name.
+    private static func fileStem(of document: MapDocument) -> String {
+        guard let url = document.url else { return document.session.store.map.title }
+        var name = url.lastPathComponent
+        let suffix = ".swiftmind.html"
+        if name.lowercased().hasSuffix(suffix) {
+            name = String(name.dropLast(suffix.count))
         }
-        return session.store.map.title
+        return name
     }
 
     var body: some View {
@@ -151,10 +162,9 @@ private struct SessionWorkspace: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: session.toast?.id)
-        .onChange(of: session.contentRevision) { _, _ in
-            let title = session.store.map.title
-            if !mapTitleFocused, mapTitleDraft != title {
-                mapTitleDraft = title
+        .onChange(of: document.url) { _, _ in
+            if !mapTitleFocused {
+                mapTitleDraft = Self.fileStem(of: document)
             }
         }
         .sheet(isPresented: $palettePresented) {
@@ -237,6 +247,33 @@ private struct SessionWorkspace: View {
                 onWillClose: { appModel.documentWindowClosed(document) }
             )
         )
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindDetachVault)) { note in
+            guard session.isBrainMode, let path = note.userInfo?["path"] as? String else { return }
+            appModel.detachVault(URL(fileURLWithPath: path))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindTransferMap)) { note in
+            guard session.isBrainMode,
+                  let path = note.userInfo?["path"] as? String,
+                  let move = note.userInfo?["move"] as? Bool else { return }
+            appModel.mapTransfer = MapTransferRequest(source: URL(fileURLWithPath: path), move: move)
+        }
+        .sheet(item: $appModel.mapTransfer) { request in
+            let folders: [(title: String, url: URL)] = {
+                for vault in appModel.library.vaultURLs {
+                    _ = appModel.library.startAccessing(vault)
+                }
+                return MindMapBundle.destinationFolders(vaults: appModel.library.vaultURLs)
+            }()
+            MapTransferSheet(
+                source: request.source,
+                move: request.move,
+                folders: folders,
+                onCommit: { directory, name in
+                    appModel.transferMap(from: request.source, to: directory, baseName: name, move: request.move)
+                },
+                onCancel: { appModel.mapTransfer = nil }
+            )
+        }
         .modifier(MapSearchableModifier(
             enabled: !session.isBrainMode,
             query: $searchQuery,
@@ -282,6 +319,7 @@ private struct SessionWorkspace: View {
                         .focused($mapTitleFocused)
                         .accessibilityLabel("Map title")
                         .accessibilityIdentifier("mapTitleField")
+                        .help("This name is the file name. Press Return to rename the file and its images folder.")
                         .onSubmit { commitMapTitle() }
                         .onChange(of: mapTitleFocused) { _, focused in
                             if !focused { commitMapTitle() }
@@ -486,9 +524,17 @@ private struct SessionWorkspace: View {
 
     private func commitMapTitle() {
         guard !session.isBrainMode else { return }
-        let trimmed = mapTitleDraft
-        guard trimmed != session.store.map.title else { return }
-        session.applyQuiet(SetMapTitleCommand(newTitle: trimmed))
+        let trimmed = mapTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            mapTitleDraft = Self.fileStem(of: document)
+            return
+        }
+        if trimmed != session.store.map.title {
+            session.applyQuiet(SetMapTitleCommand(newTitle: trimmed))
+        }
+        if trimmed != Self.fileStem(of: document) {
+            appModel.renameMapFile(for: document, to: trimmed)
+        }
     }
 
     private func countNodes(_ node: Node) -> Int {

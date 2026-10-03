@@ -202,6 +202,26 @@ public final class MapStore {
         formulaEngine.results(in: map)
     }
 
+    /// Replace `from` with `to` in every note. Used when the file is renamed
+    /// and asset paths must follow the new `.swiftmind.assets` folder.
+    public func replaceInNotes(from: String, to: String) {
+        guard !from.isEmpty, from != to else { return }
+        var changed = false
+        func walk(_ node: inout Node) {
+            if node.noteMarkdown.contains(from) {
+                node.noteMarkdown = node.noteMarkdown.replacingOccurrences(of: from, with: to)
+                changed = true
+            }
+            for index in node.children.indices {
+                walk(&node.children[index])
+            }
+        }
+        walk(&map.root)
+        guard changed else { return }
+        invalidateGeometry()
+        contentRevision &+= 1
+    }
+
     public func replaceMap(_ map: MindMap) {
         self.map = map
         bus.clearHistory()

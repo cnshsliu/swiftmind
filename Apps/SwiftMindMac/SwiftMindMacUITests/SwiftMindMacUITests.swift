@@ -950,8 +950,8 @@ final class SwiftMindMacUITests: XCTestCase {
         app.typeKey(.return, modifierFlags: .command) // commit & close
         RunLoop.current.run(until: Date().addingTimeInterval(3.0)) // autosave
         XCTAssertTrue(
-            waitForScratchMap { $0.contains("data:image/png;base64") },
-            "a pasted clipboard image must embed as a data URI"
+            waitForScratchMap { $0.contains(".swiftmind.assets/img-") },
+            "a pasted clipboard image must be stored as a file next to the map"
         )
         NSPasteboard.general.clearContents()
 
@@ -970,7 +970,7 @@ final class SwiftMindMacUITests: XCTestCase {
         let urlLanded = NSPredicate { _, _ in
             (try? String(contentsOf: URL(fileURLWithPath:
                 NSHomeDirectory() + "/Library/Containers/app.swiftmind.mac.dev/Data/tmp/uitesting.swiftmind.html"),
-                encoding: .utf8))?.contains("![image](data:image/png") == true
+                encoding: .utf8))?.contains("![image](uitesting.swiftmind.assets/img-") == true
         }
         expectation(for: urlLanded, evaluatedWith: nil)
         waitForExpectations(timeout: 10)

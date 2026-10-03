@@ -11,6 +11,9 @@ public struct MarkdownEditingSession: Equatable {
     public private(set) var caret: Int
     /// UTF-16 range in `display.text`. Empty means a caret.
     public private(set) var selection: Range<Int>
+    /// Image alt texts (original http URLs) currently shown as the address
+    /// instead of the picture. Display-only; the markdown still holds the image.
+    public private(set) var shownImageURLs: Set<String> = []
 
     public init(markdown: String, caretAtEnd: Bool = true) {
         let end = (markdown as NSString).length
@@ -30,7 +33,7 @@ public struct MarkdownEditingSession: Equatable {
         let next = MarkdownDisplay.reveal(atUTF16: sourceCaret, in: markdown)
         if next != reveal {
             reveal = next
-            display = MarkdownDisplay.project(markdown, reveal: reveal)
+            display = projected()
             caret = min(display.displayIndex(forSourceUTF16: sourceCaret), displayLength)
         }
         selection = caret..<caret
@@ -61,6 +64,78 @@ public struct MarkdownEditingSession: Equatable {
 
     public mutating func insert(_ text: String) {
         replaceDisplay(utf16: editingRange, with: text)
+    }
+
+    /// Put an image markdown line on its own line at the caret's line, then
+    /// leave the caret after it. A selection is replaced first. The display
+    /// projects the picture (U+FFFC), not the data URI.
+    /// Insert image markdown at the caret, on the current line. A newline
+    /// before or after it is only there when the user typed one.
+    public mutating func insertImageLine(_ imageMarkdown: String) {
+        if !selection.isEmpty {
+            replaceDisplay(utf16: selection, with: "")
+        }
+        let ns = self.markdown as NSString
+        let at = min(max(sourceOffset(at: caret), 0), ns.length)
+        var block = imageMarkdown
+        while block.hasSuffix("\n") || block.hasSuffix("\r") { block.removeLast() }
+        replaceSource(utf16: at..<at, with: block)
+    }
+
+    /// Swap one pasted http(s) address, still sitting as plain text, for an
+    /// image line. Skips addresses that already live inside an image. Used
+    /// when a URL paste finishes downloading.
+    @discardableResult
+    public mutating func replacePlainImageURL(_ url: String, withImage imageMarkdown: String) -> Bool {
+        guard !url.isEmpty else { return false }
+        let ns = self.markdown as NSString
+        let occupied = Self.imageSourceUTF16Ranges(in: self.markdown)
+        var search = 0
+        while search < ns.length {
+            let found = ns.range(of: url, range: NSRange(location: search, length: ns.length - search))
+            guard found.location != NSNotFound else { return false }
+            let end = found.location + found.length
+            let inside = occupied.contains { range in
+                range.location < end && found.location < range.location + range.length
+            }
+            if !inside {
+                var block = imageMarkdown
+                while block.hasSuffix("\n") || block.hasSuffix("\r") { block.removeLast() }
+                replaceSource(utf16: found.location..<end, with: block)
+                return true
+            }
+            search = end
+        }
+        return false
+    }
+
+    /// Click an embedded image (or the address it is showing) to flip between
+    /// the picture and its original http URL. Images without an http alt stay
+    /// pictures. Returns false when the click missed such an image.
+    @discardableResult
+    public mutating func toggleShownImageURL(atDisplay index: Int) -> Bool {
+        guard let url = httpImageAlt(atDisplay: index) else { return false }
+        if shownImageURLs.contains(url) {
+            shownImageURLs.remove(url)
+        } else {
+            shownImageURLs.insert(url)
+        }
+        let sourceCaret = sourceOffset(at: min(max(index, 0), displayLength))
+        reveal = MarkdownDisplay.reveal(atUTF16: sourceCaret, in: markdown)
+        display = projected()
+        caret = min(display.displayIndex(forSourceUTF16: sourceCaret), displayLength)
+        selection = caret..<caret
+        return true
+    }
+
+    /// Line start stays put. Anywhere else in the line inserts after that
+    /// line, so a picture never splits a heading or a sentence.
+    private static func imageLineInsertOffset(_ caret: Int, in ns: NSString) -> Int {
+        if ns.length == 0 || caret <= 0 { return 0 }
+        if caret >= ns.length { return ns.length }
+        let line = ns.lineRange(for: NSRange(location: caret, length: 0))
+        if caret == line.location { return line.location }
+        return min(line.location + line.length, ns.length)
     }
 
     public mutating func backspace() {
@@ -284,8 +359,9 @@ public struct MarkdownEditingSession: Equatable {
     ) {
         let (text, caret) = MarkdownDocument.renumberOrderedLists(updated, caret: sourceCaret)
         markdown = text
+        shownImageURLs = shownImageURLs.intersection(Self.httpImageAlts(in: text))
         reveal = MarkdownDisplay.reveal(atUTF16: caret, in: text)
-        display = MarkdownDisplay.project(text, reveal: reveal)
+        display = projected()
         self.caret = min(display.displayIndex(forSourceUTF16: caret), displayLength)
         if let sourceSelection, !sourceSelection.isEmpty {
             let (_, start) = MarkdownDocument.renumberOrderedLists(updated, caret: sourceSelection.lowerBound)
@@ -446,6 +522,134 @@ public struct MarkdownEditingSession: Equatable {
         var count = 0
         while count < min(max, ns.length), ns.character(at: count) == 32 { count += 1 }
         return count
+    }
+
+    private func projected() -> MarkdownDisplay {
+        MarkdownDisplay.project(markdown, reveal: reveal, shownImageURLs: shownImageURLs)
+    }
+
+    private func httpImageAlt(atDisplay index: Int) -> String? {
+        guard displayLength > 0 else { return nil }
+        let clamped = min(max(index, 0), displayLength - 1)
+        let sourceOff = sourceOffset(at: clamped)
+        let ns = markdown as NSString
+        guard sourceOff < ns.length else { return nil }
+        let idx = String.Index(utf16Offset: sourceOff, in: markdown)
+        return Self.httpImageAlt(containing: idx, in: markdown)
+    }
+
+    private static func httpImageAlt(containing index: String.Index, in source: String) -> String? {
+        func altText(_ alt: Range<String.Index>) -> String? {
+            let text = String(source[alt])
+            guard text.hasPrefix("http://") || text.hasPrefix("https://") else { return nil }
+            return text
+        }
+        func walkInlines(_ inlines: [MarkdownInline]) -> String? {
+            for inline in inlines {
+                switch inline {
+                case .image(let alt, let url):
+                    if alt.contains(index) || url.contains(index), let text = altText(alt) {
+                        return text
+                    }
+                case .strong(_, let content, _), .emphasis(_, let content, _),
+                     .strikethrough(_, let content, _), .highlight(_, let content, _),
+                     .link(_, let content, _, _, _):
+                    if let found = walkInlines(content) { return found }
+                default:
+                    break
+                }
+            }
+            return nil
+        }
+        func walk(_ blocks: [MarkdownBlock]) -> String? {
+            for block in blocks {
+                if let found = walk(block.children) { return found }
+                if let found = walkInlines(block.inlines) { return found }
+                if block.source.contains(index), case .image(let alt, _) = block.kind,
+                   let text = altText(alt) {
+                    return text
+                }
+            }
+            return nil
+        }
+        return walk(MarkdownDocument.parse(source).blocks)
+    }
+
+    private static func httpImageAlts(in source: String) -> Set<String> {
+        var alts: Set<String> = []
+        func walkInlines(_ inlines: [MarkdownInline]) {
+            for inline in inlines {
+                switch inline {
+                case .image(let alt, _):
+                    let text = String(source[alt])
+                    if text.hasPrefix("http://") || text.hasPrefix("https://") {
+                        alts.insert(text)
+                    }
+                case .strong(_, let content, _), .emphasis(_, let content, _),
+                     .strikethrough(_, let content, _), .highlight(_, let content, _),
+                     .link(_, let content, _, _, _):
+                    walkInlines(content)
+                default:
+                    break
+                }
+            }
+        }
+        func walk(_ blocks: [MarkdownBlock]) {
+            for block in blocks {
+                if case .image(let alt, _) = block.kind {
+                    let text = String(source[alt])
+                    if text.hasPrefix("http://") || text.hasPrefix("https://") {
+                        alts.insert(text)
+                    }
+                }
+                walkInlines(block.inlines)
+                walk(block.children)
+            }
+        }
+        walk(MarkdownDocument.parse(source).blocks)
+        return alts
+    }
+
+    private static func imageSourceUTF16Ranges(in source: String) -> [NSRange] {
+        var ranges: [NSRange] = []
+        func add(_ startIndex: String.Index, _ endIndex: String.Index) {
+            guard let start = utf16Offset(of: startIndex, in: source),
+                  let end = utf16Offset(of: endIndex, in: source),
+                  end >= start else { return }
+            ranges.append(NSRange(location: start, length: end - start))
+        }
+        func walkInlines(_ inlines: [MarkdownInline]) {
+            for inline in inlines {
+                switch inline {
+                case .image(let alt, let url):
+                    let bang = source.index(alt.lowerBound, offsetBy: -2, limitedBy: source.startIndex) ?? alt.lowerBound
+                    let close = source.index(url.upperBound, offsetBy: 1, limitedBy: source.endIndex) ?? url.upperBound
+                    add(bang, close)
+                case .strong(_, let content, _), .emphasis(_, let content, _),
+                     .strikethrough(_, let content, _), .highlight(_, let content, _),
+                     .link(_, let content, _, _, _):
+                    walkInlines(content)
+                default:
+                    break
+                }
+            }
+        }
+        func walk(_ blocks: [MarkdownBlock]) {
+            for block in blocks {
+                if case .image = block.kind {
+                    add(block.source.lowerBound, block.source.upperBound)
+                }
+                walkInlines(block.inlines)
+                walk(block.children)
+            }
+        }
+        walk(MarkdownDocument.parse(source).blocks)
+        return ranges
+    }
+
+    private static func utf16Offset(of index: String.Index, in source: String) -> Int? {
+        guard let utf16Index = index.samePosition(in: source.utf16) else { return nil }
+        return source.utf16.distance(from: source.utf16.startIndex, to: utf16Index)
     }
 
     private func sourceOffset(at displayIndex: Int) -> Int {

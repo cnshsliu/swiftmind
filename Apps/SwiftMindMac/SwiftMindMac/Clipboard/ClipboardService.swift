@@ -196,7 +196,7 @@ enum ClipboardService {
             session.showToast("Couldn't read that image", kind: .error)
             return
         }
-        let uri = "![pasted](data:image/png;base64,\(png.base64EncodedString()))"
+        let uri = session.noteAssets.markdown(alt: "pasted", png: png)
         if point == nil, let node = session.store.map.node(id: parent) {
             // Append into the existing note (the note editor reconciles via
             // its contentRevision watcher).
@@ -309,24 +309,237 @@ enum ClipboardService {
     // MARK: - Payload helpers
 
     private static func isImageFile(_ url: URL) -> Bool {
-        let exts: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "tiff", "heic", "bmp"]
+        let exts: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "tiff", "heic", "bmp", "svg", "svgz"]
         guard let ext = url.pathExtension.lowercased() as String? else { return false }
         return exts.contains(ext)
     }
 
-    private static func imageData(from board: NSPasteboard) -> Data? {
-        if let tiff = board.data(forType: .tiff) { return tiff }
-        if let png = board.data(forType: .png) { return png }
+    /// Bitmap bytes from a pasteboard: png/tiff/jpeg/gif/webp, an `NSImage`
+    /// promise, or a copied image file. Screenshot and browser copies rarely
+    /// agree on a single type, so the first readable one wins.
+    static func pastedImageData(from board: NSPasteboard) -> Data? {
+        imageData(from: board)
+    }
+
+    /// A paste that is nothing but an image URL (extension, `format=` query,
+    /// or a common image-CDN path).
+    static func pastedImageURL(from board: NSPasteboard) -> URL? {
+        var raws: [String] = []
+        if let string = board.string(forType: .string) { raws.append(string) }
+        if let string = board.string(forType: .URL) { raws.append(string) }
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            for url in urls where !url.isFileURL {
+                raws.append(url.absoluteString)
+            }
+        }
+        for raw in raws {
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+                  let url = URL(string: text),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https",
+                  looksLikeImageURL(url) else { continue }
+            return url
+        }
         return nil
+    }
+
+    static func looksLikeImageURL(_ url: URL) -> Bool {
+        let exts: Set<String> = [
+            "png", "jpg", "jpeg", "gif", "webp", "heic", "avif", "bmp", "tif", "tiff", "svg", "svgz",
+        ]
+        if exts.contains(url.pathExtension.lowercased()) { return true }
+        let query = (url.query ?? "").lowercased()
+        for ext in exts {
+            if query.contains("format=\(ext)") || query.contains("wx_fmt=\(ext)")
+                || query.contains("fm=\(ext)") || query.contains("type=\(ext)") {
+                return true
+            }
+        }
+        let path = url.path.lowercased()
+        if path.contains("/image/") || path.contains("/images/")
+            || path.contains("mmbiz_png") || path.contains("mmbiz_jpg")
+            || path.contains("mmbiz_jpeg") || path.contains("mmbiz_gif") {
+            return true
+        }
+        return false
+    }
+
+    /// Download `url` and return the body when it is an image. The caller
+    /// decides what to do on failure (typically paste the URL as text).
+    static func fetchImageData(at url: URL, completion: @escaping (Data?) -> Void) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            completion(nil)
+            return
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("SwiftMind", forHTTPHeaderField: "User-Agent")
+        request.setValue("image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? 200
+            let mime = http?.mimeType?.lowercased() ?? ""
+            guard (200..<300).contains(status),
+                  let data, !data.isEmpty, data.count < 15 * 1024 * 1024,
+                  mime.hasPrefix("image/") || mime.contains("svg")
+                    || mime == "application/octet-stream"
+                    || looksLikeImageData(data) || isSVG(data)
+            else {
+                completion(nil)
+                return
+            }
+            // octet-stream still has to look like an image or an SVG document.
+            if !mime.hasPrefix("image/"), !mime.contains("svg"),
+               !looksLikeImageData(data), !isSVG(data) {
+                completion(nil)
+                return
+            }
+            completion(data)
+        }.resume()
+    }
+
+    /// Bytes of a file the user just picked in an open panel. The panel's
+    /// own access is tried first; a nested security-scope start/stop can
+    /// revoke that access and make the read look like a silent failure.
+    static func dataOfUserSelectedFile(_ url: URL) -> Data? {
+        if let data = readFile(url) { return data }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if let data = readFile(url) { return data }
+        var coordinated: Data?
+        var error: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &error) { readURL in
+            coordinated = readFile(readURL)
+        }
+        return coordinated
+    }
+
+    private static func readFile(_ url: URL) -> Data? {
+        if let data = try? Data(contentsOf: url), !data.isEmpty { return data }
+        if let image = NSImage(contentsOf: url),
+           let tiff = image.tiffRepresentation, !tiff.isEmpty {
+            return tiff
+        }
+        return nil
+    }
+
+    /// `![alt](data:image/png;base64,…)` with alt text that cannot break the
+    /// markdown image syntax.
+    static func imageMarkdown(alt: String, png: Data) -> String {
+        let cleaned = alt
+            .replacingOccurrences(of: "]", with: "")
+            .replacingOccurrences(of: "[", with: "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = cleaned.isEmpty ? "image" : String(cleaned.prefix(80))
+        return "![\(name)](data:image/png;base64,\(png.base64EncodedString()))"
+    }
+
+    private static let imagePasteboardTypes: [NSPasteboard.PasteboardType] = [
+        .png, .tiff,
+        NSPasteboard.PasteboardType("public.jpeg"),
+        NSPasteboard.PasteboardType("public.gif"),
+        NSPasteboard.PasteboardType("com.compuserve.gif"),
+        NSPasteboard.PasteboardType("public.webp"),
+        NSPasteboard.PasteboardType("public.heic"),
+    ]
+
+    private static func imageData(from board: NSPasteboard) -> Data? {
+        for type in imagePasteboardTypes {
+            if let data = board.data(forType: type), NSImage(data: data) != nil {
+                return data
+            }
+        }
+        // A copied image address often carries a favicon-sized NSImage too.
+        // Leave that paste for the URL downloader.
+        if pastedImageURL(from: board) == nil,
+           let images = board.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+           let image = images.first,
+           image.size.width >= 2, image.size.height >= 2,
+           let tiff = image.tiffRepresentation {
+            return tiff
+        }
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true,
+        ]) as? [URL] {
+            for url in urls where isImageFile(url) {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if let data = try? Data(contentsOf: url), NSImage(data: data) != nil {
+                    return data
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func looksLikeImageData(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        let bytes = [UInt8](data.prefix(16))
+        if bytes.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return true }
+        if bytes.starts(with: [0xFF, 0xD8, 0xFF]) { return true }
+        if bytes.starts(with: [0x47, 0x49, 0x46]) { return true }
+        if bytes.starts(with: [0x42, 0x4D]) { return true }
+        if bytes.starts(with: [0x52, 0x49, 0x46, 0x46]) { return true }
+        if let brand = String(data: data.subdata(in: 4..<12), encoding: .ascii), brand.contains("ftyp") {
+            return true
+        }
+        return false
+    }
+
+    /// SVG is XML, so the raster magic-byte check misses it. Servers also
+    /// label it `text/xml` or `image/svg+xml`.
+    private static func isSVG(_ data: Data) -> Bool {
+        guard let head = String(data: data.prefix(512), encoding: .utf8)?.lowercased() else { return false }
+        return head.contains("<svg")
+    }
+
+    private static func decodedImage(_ data: Data) -> NSImage? {
+        if let image = NSImage(data: data) {
+            if image.size.width >= 1, image.size.height >= 1 { return image }
+            let pixels = image.representations.reduce(NSSize.zero) { best, rep in
+                let candidate = NSSize(width: CGFloat(rep.pixelsWide), height: CGFloat(rep.pixelsHigh))
+                return candidate.width * candidate.height > best.width * best.height ? candidate : best
+            }
+            if pixels.width >= 1, pixels.height >= 1 {
+                image.size = pixels
+                return image
+            }
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              cg.width > 0, cg.height > 0 else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 
     /// Downscale to ≤720pt longest side and re-encode as PNG.
     static func normalizeImage(_ data: Data) -> Data? {
-        guard let image = NSImage(data: data) else { return nil }
+        guard let image = decodedImage(data) else { return nil }
         let maxSide: CGFloat = 720
         var size = image.size
-        if size.width > 0, size.height > 0,
-           max(size.width, size.height) > maxSide {
+        if size.width < 1 || size.height < 1 {
+            let pixels = image.representations.reduce(NSSize.zero) { best, rep in
+                let candidate = NSSize(width: CGFloat(rep.pixelsWide), height: CGFloat(rep.pixelsHigh))
+                return candidate.width * candidate.height > best.width * best.height ? candidate : best
+            }
+            if pixels.width >= 1, pixels.height >= 1 {
+                size = pixels
+                image.size = pixels
+            }
+        }
+        // A viewBox-only SVG often reports a zero point size.
+        if (size.width < 1 || size.height < 1), isSVG(data) {
+            size = NSSize(width: 512, height: 512)
+            image.size = size
+        }
+        guard size.width >= 1, size.height >= 1 else { return nil }
+        // Draw small SVGs at 2× so the embedded PNG stays sharp. The cap below
+        // still limits the longest side to 720pt.
+        if isSVG(data) {
+            size = NSSize(width: size.width * 2, height: size.height * 2)
+        }
+        if max(size.width, size.height) > maxSide {
             let scale = maxSide / max(size.width, size.height)
             size = NSSize(width: size.width * scale, height: size.height * scale)
         }
@@ -343,6 +556,7 @@ enum ClipboardService {
             bitsPerPixel: 0
         ) else { return nil }
         rep.size = size
+        if isSVG(data) { image.size = size }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         image.draw(
@@ -355,9 +569,15 @@ enum ClipboardService {
         )
         NSGraphicsContext.current = nil
         NSGraphicsContext.restoreGraphicsState()
-        guard let out = rep.representation(using: .png, properties: [:]) else { return nil }
-        guard out.count < 10 * 1024 * 1024 else { return nil }
-        return out
+        if let out = rep.representation(using: .png, properties: [:]),
+           out.count > 32, out.count < 10 * 1024 * 1024 {
+            return out
+        }
+        // Re-encode failed. A PNG the decoder already accepted can be embedded as-is.
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]), data.count < 10 * 1024 * 1024 {
+            return data
+        }
+        return nil
     }
 
     private static func urlLabel(_ url: URL) -> String {

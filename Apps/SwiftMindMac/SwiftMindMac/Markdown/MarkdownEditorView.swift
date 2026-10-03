@@ -30,7 +30,13 @@ struct MarkdownEditorView: NSViewRepresentable {
     /// in the canvas so it can reuse `ClipboardService.normalizeImage`.
     @Binding var insertion: MarkdownInsertion?
     var onCancel: () -> Void
-    var onInsertImage: () -> Void = {}
+    /// Turns normalized PNG bytes into note markdown. The map stores a file
+    /// next to the document instead of a data URI.
+    var makeImageMarkdown: (_ alt: String, _ png: Data) -> String = { alt, png in
+        ClipboardService.imageMarkdown(alt: alt, png: png)
+    }
+    /// Loads a picture referenced by a relative asset path.
+    var resolveImage: (String) -> NSImage? = { _ in nil }
     /// XCUITest host id: `noteEditorPanel` or `noteEditorOnCard`.
     var chromeIdentifier: String = "noteEditorPanel"
 
@@ -42,23 +48,40 @@ struct MarkdownEditorView: NSViewRepresentable {
         let textView = MarkdownSourceTextView(frame: .zero)
         let coordinator = context.coordinator
         textView.onCancel = onCancel
-        textView.onPasteImage = { [weak coordinator] raw in
-            guard let png = ClipboardService.normalizeImage(raw) else { return }
-            let markdown = "![pasted](data:image/png;base64,\(png.base64EncodedString()))"
+        textView.onInsertImageMarkdown = { [weak coordinator] markdown in
             coordinator?.insertImageMarkdown(markdown)
         }
+        textView.onPasteImage = { [weak coordinator] raw in
+            guard let png = ClipboardService.normalizeImage(raw) else { return }
+            coordinator?.insertImageMarkdown(coordinator?.parent.makeImageMarkdown("pasted", png) ?? "")
+        }
         textView.onPasteImageURL = { [weak coordinator] url in
-            URLSession.shared.dataTask(with: url) { data, _, _ in
-                guard let data else { return }
+            let address = url.absoluteString
+            // Show the address at once. The download replaces it with the
+            // picture when it finishes; a failed download leaves the address.
+            coordinator?.insertPlainText(address)
+            ClipboardService.fetchImageData(at: url) { data in
                 DispatchQueue.main.async {
-                    guard let png = ClipboardService.normalizeImage(data) else { return }
-                    let markdown = "![image](data:image/png;base64,\(png.base64EncodedString()))"
-                    coordinator?.insertImageMarkdown(markdown)
+                    guard let coordinator,
+                          let data, let png = ClipboardService.normalizeImage(data) else { return }
+                    coordinator.replacePlainImageURL(
+                        address,
+                        withImage: coordinator.parent.makeImageMarkdown("image", png)
+                    )
                 }
-            }.resume()
+            }
+        }
+        textView.onToggleImage = { [weak coordinator] index in
+            coordinator?.toggleImage(at: index)
         }
         textView.delegate = context.coordinator
-        textView.isRichText = false // storage stays plain Markdown source
+        // Rich so image attachments lay out. The session still owns the
+        // markdown; attributes are a display pass and get reapplied.
+        textView.isRichText = true
+        textView.importsGraphics = true
+        textView.usesFontPanel = false
+        textView.usesRuler = false
+        textView.allowsImageEditing = false
         textView.allowsUndo = true  // text-level ⌘Z (see undoFocusedTextIfPossible)
         textView.font = MarkdownStyler.baseFont
         textView.textColor = .labelColor
@@ -101,24 +124,16 @@ struct MarkdownEditorView: NSViewRepresentable {
                                target: coord, action: #selector(Coordinator.insertMathClicked)),
             Self.toolbarButton("link", id: "noteEditorInsertLink", help: "Insert link",
                                target: coord, action: #selector(Coordinator.insertLinkClicked)),
-            doneButton(coord),
         ])
-        // Done: commit & close — same path as ⌘Enter (discoverability: Esc
-        // alone reverts, which surprised users).
-        func doneButton(_ coord: Coordinator) -> NSButton {
-            let button = Self.toolbarButton("checkmark.circle.fill", id: "noteEditorDone",
-                                            help: "Save & close (⌘↩)",
-                                            target: coord,
-                                            action: #selector(Coordinator.doneClicked))
-            button.title = " Done"
-            return button
-        }
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
         toolbar.spacing = 4
         toolbar.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
         toolbar.setAccessibilityIdentifier("noteEditorToolbar")
         toolbar.translatesAutoresizingMaskIntoConstraints = false
+        // Done sits on the trailing edge (same place as the sketch board).
+        // Esc still reverts; Done commits and closes, same as ⌘↩.
+        let done = Self.doneButton(target: coord, action: #selector(Coordinator.doneClicked))
 
         let host = MarkdownEditorHost()
         host.scrollView = scroll
@@ -126,12 +141,15 @@ struct MarkdownEditorView: NSViewRepresentable {
         host.setAccessibilityRole(.group)
         host.setAccessibilityIdentifier(chromeIdentifier)
         host.addSubview(toolbar)
+        host.addSubview(done)
         host.addSubview(scroll)
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: host.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            toolbar.trailingAnchor.constraint(lessThanOrEqualTo: done.leadingAnchor, constant: -8),
             toolbar.heightAnchor.constraint(equalToConstant: MarkdownEditorHost.toolbarHeight),
+            done.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -8),
+            done.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             scroll.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: host.trailingAnchor),
@@ -179,6 +197,22 @@ struct MarkdownEditorView: NSViewRepresentable {
         return button
     }
 
+    /// Trailing commit button. Same path as ⌘↩.
+    private static func doneButton(target: AnyObject, action: Selector) -> NSButton {
+        let button = NSButton(title: "Done", target: target, action: action)
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Done")
+        button.imagePosition = .imageLeading
+        button.toolTip = "Save & close (⌘↩)"
+        button.setAccessibilityIdentifier("noteEditorDone")
+        button.setAccessibilityLabel("Save & close (⌘↩)")
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return button
+    }
+
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownEditorView
@@ -200,6 +234,9 @@ struct MarkdownEditorView: NSViewRepresentable {
         /// The caret we just placed. The text view often jumps to the end
         /// once textDidChange returns; the next selection change snaps back.
         private var pinnedCaret: Int?
+        /// Retains the open panel until its callback has read the file.
+        /// A locally owned panel is released before `begin` presents it.
+        private var imagePanel: NSOpenPanel?
 
         init(parent: MarkdownEditorView) {
             self.parent = parent
@@ -303,14 +340,83 @@ struct MarkdownEditorView: NSViewRepresentable {
             return start..<max(start, end)
         }
 
+        /// The photo button. Reads the chosen file in the panel callback and
+        /// inserts it here. The editor object outlives the sheet; SwiftUI
+        /// state updated from that callback does not.
         @objc func insertImageClicked() {
-            parent.onInsertImage()
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.image]
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.prompt = "Insert"
+            panel.message = "Choose an image to embed in the note"
+            imagePanel = panel
+            let window = textView?.window ?? NSApp.keyWindow ?? NSApp.mainWindow
+            let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+                let picked: (name: String, data: Data)? = {
+                    guard response == .OK, let url = panel.url,
+                          let data = ClipboardService.dataOfUserSelectedFile(url) else { return nil }
+                    return (url.deletingPathExtension().lastPathComponent, data)
+                }()
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.imagePanel = nil
+                    guard let picked, let png = ClipboardService.normalizeImage(picked.data) else { return }
+                    self.insertImageMarkdown(self.parent.makeImageMarkdown(picked.name, png))
+                    if let textView = self.textView {
+                        textView.window?.makeFirstResponder(textView)
+                    }
+                }
+            }
+            if let window {
+                panel.beginSheetModal(for: window, completionHandler: finish)
+            } else {
+                panel.begin(completionHandler: finish)
+            }
         }
 
-        /// Insert an image markdown block at the caret (paste paths).
+        /// Insert an image markdown block on its own line. Goes through the
+        /// session so the text view never has to lay out the data URI.
         func insertImageMarkdown(_ markdown: String) {
-            guard let textView = textView else { return }
-            textView.applyInsertion(.image(markdown: markdown))
+            guard let textView else { return }
+            ingestTextViewEdits()
+            let sel = textView.selectedRange()
+            session.setSelection(sel.location..<(sel.location + sel.length))
+            session.insertImageLine(markdown)
+            commitPresentedSession(in: textView)
+        }
+
+        /// Plain text at the caret. Used when an image URL did not download.
+        func insertPlainText(_ text: String) {
+            guard let textView else { return }
+            ingestTextViewEdits()
+            let sel = textView.selectedRange()
+            session.setSelection(sel.location..<(sel.location + sel.length))
+            session.insert(text)
+            commitPresentedSession(in: textView)
+        }
+
+        /// Download finished: the plain address becomes the embedded picture.
+        func replacePlainImageURL(_ url: String, withImage markdown: String) {
+            guard let textView else { return }
+            ingestTextViewEdits()
+            guard session.replacePlainImageURL(url, withImage: markdown) else { return }
+            commitPresentedSession(in: textView)
+        }
+
+        /// Click flips an http image between the picture and its address.
+        func toggleImage(at index: Int) {
+            guard let textView else { return }
+            guard session.toggleShownImageURL(atDisplay: index) else { return }
+            commitPresentedSession(in: textView)
+        }
+
+        private func commitPresentedSession(in textView: MarkdownSourceTextView) {
+            markdown = session.markdown
+            reveal = session.reveal
+            parent.text = session.markdown
+            present(session, in: textView)
         }
 
         /// Done = commit & close. Same path as ⌘Enter.
@@ -409,9 +515,14 @@ struct MarkdownEditorView: NSViewRepresentable {
             MarkdownDisplayStyler.apply(
                 to: textView,
                 markdown: session.markdown,
-                sourceUTF16: session.display.sourceUTF16
+                sourceUTF16: session.display.sourceUTF16,
+                resolveImage: parent.resolveImage
             )
             placeSelection(session.selection, in: textView)
+            textView.typingAttributes = [
+                .font: NSFont.systemFont(ofSize: 13),
+                .foregroundColor: NSColor.labelColor,
+            ]
             isProgrammaticUpdate = false
         }
 
@@ -469,7 +580,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
 /// Scrollable Markdown source plus the insertion toolbar (image / math / link).
 final class MarkdownEditorHost: NSView {
-    static let toolbarHeight: CGFloat = 28
+    static let toolbarHeight: CGFloat = 34
     var scrollView = NSScrollView()
 }
 
@@ -488,6 +599,11 @@ final class MarkdownSourceTextView: NSTextView {
     /// (normalize → data-URI markdown at the caret).
     var onPasteImage: ((Data) -> Void)?
     var onPasteImageURL: ((URL) -> Void)?
+    /// Session-side image insert. Set by the coordinator so a toolbar
+    /// insertion does not dump the data URI into the text storage.
+    var onInsertImageMarkdown: ((String) -> Void)?
+    /// Click on an embedded http image, or on the address it is showing.
+    var onToggleImage: ((Int) -> Void)?
 
     enum Command {
         case backspace
@@ -516,29 +632,19 @@ final class MarkdownSourceTextView: NSTextView {
         super.draw(dirtyRect)
     }
 
-    /// Images paste as data-URI markdown; an image-looking URL pastes as a
-    /// downloaded embed; everything else stays a normal text paste.
+    /// Images paste as data-URI markdown; an image URL is downloaded and
+    /// embedded; everything else stays a normal text paste.
     override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
-        let types = board.types ?? []
-        if types.contains(.png) || types.contains(.tiff),
-           let raw = board.data(forType: .png) ?? board.data(forType: .tiff) {
+        if let raw = ClipboardService.pastedImageData(from: board) {
             onPasteImage?(raw)
             return
         }
-        if let text = board.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let url = URL(string: text), let scheme = url.scheme?.lowercased(),
-           scheme == "http" || scheme == "https",
-           isImageURL(url) {
+        if let url = ClipboardService.pastedImageURL(from: board) {
             onPasteImageURL?(url)
             return
         }
         super.paste(sender)
-    }
-
-    private func isImageURL(_ url: URL) -> Bool {
-        ["png", "jpg", "jpeg", "gif", "webp", "heic", "avif", "bmp"]
-            .contains(url.pathExtension.lowercased())
     }
 
     /// Rounded key cap behind each `<kbd>` label. The glyphs are the key name.
@@ -574,7 +680,29 @@ final class MarkdownSourceTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         enforcedCaret = nil
+        let index = imageCharacterIndex(at: convert(event.locationInWindow, from: nil))
         super.mouseDown(with: event)
+        // A drag selects text (so the address can be copied). A single click
+        // flips the picture and its URL. The first click of a double-click
+        // still flips; the second click is left to select the word.
+        guard event.clickCount == 1, selectedRange().length <= 1, let index else { return }
+        onToggleImage?(index)
+    }
+
+    /// Character under the pointer, when the pointer is actually on that glyph.
+    private func imageCharacterIndex(at point: NSPoint) -> Int? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        var fraction: CGFloat = 0
+        let glyph = layout.glyphIndex(for: local, in: container, fractionOfDistanceThroughGlyph: &fraction)
+        let count = layout.numberOfGlyphs
+        guard count > 0, glyph < count else { return nil }
+        let rect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        guard rect.insetBy(dx: -2, dy: -2).contains(local) else { return nil }
+        let character = layout.characterIndexForGlyph(at: glyph)
+        guard character < (string as NSString).length else { return nil }
+        return character
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -745,7 +873,11 @@ final class MarkdownSourceTextView: NSTextView {
     func applyInsertion(_ payload: MarkdownInsertion.Payload) {
         switch payload {
         case .image(let markdown):
-            insertImageBlock(markdown)
+            if let onInsertImageMarkdown {
+                onInsertImageMarkdown(markdown)
+            } else {
+                insertImageBlock(markdown)
+            }
         case .math:
             insertMathTemplate()
         case .link:
@@ -939,7 +1071,12 @@ enum MarkdownDisplayStyler {
     private static let headingSizes: [CGFloat] = [20, 17, 15, 14, 13, 13]
     private static let codeBackground = NSColor.labelColor.withAlphaComponent(0.08)
 
-    static func apply(to textView: NSTextView, markdown: String, sourceUTF16: [Int]) {
+    static func apply(
+        to textView: NSTextView,
+        markdown: String,
+        sourceUTF16: [Int],
+        resolveImage: ((String) -> NSImage?)? = nil
+    ) {
         guard let storage = textView.textStorage else { return }
         let length = (storage.string as NSString).length
         guard length == sourceUTF16.count else { return }
@@ -953,6 +1090,10 @@ enum MarkdownDisplayStyler {
         for block in document.blocks {
             style(block, source: markdown, map: sourceUTF16, storage: storage)
         }
+        attachImages(
+            in: document.blocks, source: markdown, map: sourceUTF16,
+            storage: storage, resolveImage: resolveImage
+        )
         storage.endEditing()
         textView.undoManager?.enableUndoRegistration()
     }
@@ -996,13 +1137,101 @@ enum MarkdownDisplayStyler {
             add(block.marker, source: source, map: map, storage: storage, attributes: [
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
-        case .paragraph, .quote, .image:
+        case .paragraph, .quote:
             break
+        case .image(let alt, _):
+            let altText = String(source[alt])
+            if altText.hasPrefix("http://") || altText.hasPrefix("https://") {
+                add(alt, source: source, map: map, storage: storage, attributes: [
+                    .foregroundColor: NSColor.controlAccentColor,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                ])
+            }
         }
         style(inlines: block.inlines, source: source, map: map, storage: storage)
         for child in block.children {
             style(child, source: source, map: map, storage: storage)
         }
+    }
+
+    /// The display uses U+FFFC for an image. Attach the decoded picture so
+    /// the line is the image, not an empty box or the data URI.
+    private static func attachImages(
+        in blocks: [MarkdownBlock],
+        source: String,
+        map: [Int],
+        storage: NSTextStorage,
+        resolveImage: ((String) -> NSImage?)?
+    ) {
+        let ns = storage.string as NSString
+        let cap = CGFloat(MediaSizeLevel.current.points)
+        func attach(alt: Range<String.Index>, urlRange: Range<String.Index>) {
+            let altText = String(source[alt])
+            guard let anchor = utf16(alt.lowerBound, in: source),
+                  let index = map.firstIndex(of: anchor),
+                  index < ns.length,
+                  ns.character(at: index) == 0xFFFC,
+                  let image = picture(in: source, url: urlRange, resolveImage: resolveImage) else { return }
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            let side = max(image.size.width, image.size.height)
+            let scale = side > 0 ? min(1, cap / side) : 1
+            let width = max(1, image.size.width * scale)
+            let height = max(1, image.size.height * scale)
+            attachment.bounds = CGRect(
+                x: 0, y: body.descender, width: width, height: height
+            )
+            image.accessibilityDescription = altText.isEmpty ? "Image" : altText
+            storage.replaceCharacters(
+                in: NSRange(location: index, length: 1),
+                with: NSAttributedString(attachment: attachment)
+            )
+        }
+        func walkInlines(_ inlines: [MarkdownInline]) {
+            for inline in inlines {
+                switch inline {
+                case .image(let alt, let url):
+                    attach(alt: alt, urlRange: url)
+                case .strong(_, let content, _), .emphasis(_, let content, _),
+                     .strikethrough(_, let content, _), .highlight(_, let content, _),
+                     .link(_, let content, _, _, _):
+                    walkInlines(content)
+                default:
+                    break
+                }
+            }
+        }
+        func walk(_ blocks: [MarkdownBlock]) {
+            for block in blocks {
+                if case .image(let alt, let urlRange) = block.kind {
+                    attach(alt: alt, urlRange: urlRange)
+                }
+                walkInlines(block.inlines)
+                walk(block.children)
+            }
+        }
+        walk(blocks)
+    }
+
+    private static func picture(
+        in source: String,
+        url: Range<String.Index>,
+        resolveImage: ((String) -> NSImage?)?
+    ) -> NSImage? {
+        let urlString = String(source[url])
+        if urlString.hasPrefix("data:") {
+            return MarkdownImageCache.shared.image(in: source, url: url)
+        }
+        return resolveImage?(urlString)
+    }
+
+    private static func image(from urlString: String) -> NSImage? {
+        guard urlString.hasPrefix("data:"),
+              let comma = urlString.firstIndex(of: ","),
+              let data = Data(base64Encoded: String(urlString[urlString.index(after: comma)...]),
+                              options: .ignoreUnknownCharacters)
+        else { return nil }
+        return MarkdownImageCache.shared.image(for: urlString, data: data)
     }
 
     private static func style(
@@ -1054,6 +1283,14 @@ enum MarkdownDisplayStyler {
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
                 ])
                 style(inlines: label, source: source, map: map, storage: storage)
+            case .image(let alt, _):
+                let altText = String(source[alt])
+                if altText.hasPrefix("http://") || altText.hasPrefix("https://") {
+                    add(alt, source: source, map: map, storage: storage, attributes: [
+                        .foregroundColor: NSColor.controlAccentColor,
+                        .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    ])
+                }
             }
         }
     }
@@ -1073,6 +1310,8 @@ enum MarkdownDisplayStyler {
                 range = open.lowerBound..<close.upperBound
             case .link(let open, _, _, _, let close):
                 range = open.lowerBound..<close.upperBound
+            case .image(let alt, let url):
+                range = alt.lowerBound..<url.upperBound
             }
             if range.lowerBound < lower { lower = range.lowerBound }
             if range.upperBound > upper { upper = range.upperBound }

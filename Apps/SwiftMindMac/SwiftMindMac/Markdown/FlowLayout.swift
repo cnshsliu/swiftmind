@@ -17,6 +17,7 @@ struct ParagraphFlowLayout: Layout {
     enum ItemKind {
         case text(fontSize: CGFloat)
         case math(latex: String, fontSize: CGFloat)
+        case image
     }
 
     let items: [ItemKind]
@@ -53,6 +54,8 @@ struct ParagraphFlowLayout: Layout {
             guard box.height > 0 else { return 0 }
             // Scale the estimated baseline to the actually-measured height.
             return box.baseline / box.height * height
+        case .image:
+            return height
         }
     }
 

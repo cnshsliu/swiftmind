@@ -37,6 +37,16 @@ final class MarkdownDisplayTests: XCTestCase {
         XCTAssertEqual(display.text, "title2\n")
     }
 
+    func testTwoImagesOnOneLineStayTogether() {
+        let display = MarkdownDisplay.project("![a](u)![b](v)\n", reveal: .none)
+        XCTAssertEqual(display.text, "\u{FFFC}\u{FFFC}\n")
+    }
+
+    func testNewlinePutsImagesOnSeparateLines() {
+        let display = MarkdownDisplay.project("![a](u)\n![b](v)\n", reveal: .none)
+        XCTAssertEqual(display.text, "\u{FFFC}\n\u{FFFC}\n")
+    }
+
     func testImageBecomesObjectCharacter() {
         let display = MarkdownDisplay.project("![sketch](data:image/png;base64,QQ==)", reveal: .none)
         XCTAssertEqual(display.text, "\u{FFFC}")
@@ -267,6 +277,24 @@ final class MarkdownDisplayTests: XCTestCase {
         let previous = MarkdownDisplay.project(source, reveal: .none)
         let deleted = previous.splicing(source: source, displayReplacement: "", displayUTF16: 5..<11)
         XCTAssertEqual(deleted, "Ship .")
+    }
+
+    func testShownImageURLDisplaysTheAddressNotTheDataURI() {
+        let url = "https://example.com/a.png"
+        let source = "![\(url)](data:image/png;base64,QQ==)\n"
+        let display = MarkdownDisplay.project(source, reveal: .none, shownImageURLs: [url])
+        XCTAssertEqual(display.text, url + "\n")
+        XCTAssertFalse(display.text.contains("data:image"))
+        XCTAssertFalse(display.text.contains("\u{FFFC}"))
+    }
+
+    func testCaretOnImageStaysThePicture() {
+        let source = "![ab](data:image/png;base64,QQ==)\n"
+        let reveal = MarkdownDisplay.reveal(atUTF16: 4, in: source)
+        XCTAssertEqual(reveal, .none)
+        let display = MarkdownDisplay.project(source, reveal: reveal)
+        XCTAssertEqual(display.text, "\u{FFFC}\n")
+        XCTAssertFalse(display.text.contains("data:image"))
     }
 
     func testRevealImageMarkerIsTheRawLine() {

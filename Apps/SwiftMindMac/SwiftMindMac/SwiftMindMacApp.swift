@@ -28,7 +28,7 @@ struct SwiftMindMacApp: App {
         // window arrives with a nil URL, bootstrap opens the launch-behavior
         // map, and the placeholder closes itself.
         WindowGroup(for: URL.self) { $url in
-            MapWindowRoot(appModel: appModel, url: url)
+            MapWindowRoot(appModel: appModel, url: $url)
                 .environmentObject(appModel)
         }
         .windowToolbarStyle(.unified)

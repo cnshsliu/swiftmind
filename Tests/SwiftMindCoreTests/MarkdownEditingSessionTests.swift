@@ -418,4 +418,107 @@ final class MarkdownEditingSessionTests: XCTestCase {
             }
         }
     }
+
+    func testClickTogglesImageAndURL() {
+        let url = "https://example.com/a.png"
+        let source = "![\(url)](data:image/png;base64,QQ==)\n"
+        var session = MarkdownEditingSession(markdown: source, caretAtEnd: false)
+        XCTAssertEqual(session.display.text, "\u{FFFC}\n")
+        XCTAssertTrue(session.toggleShownImageURL(atDisplay: 0))
+        XCTAssertEqual(session.display.text, url + "\n")
+        XCTAssertTrue(session.toggleShownImageURL(atDisplay: 0))
+        XCTAssertEqual(session.display.text, "\u{FFFC}\n")
+    }
+
+    func testReplacePlainImageURLBecomesThePicture() {
+        let url = "https://example.com/a.png"
+        var session = MarkdownEditingSession(markdown: "# Title\n\(url)\n")
+        XCTAssertTrue(session.display.text.contains(url))
+        XCTAssertTrue(session.replacePlainImageURL(
+            url, withImage: "![\(url)](data:image/png;base64,QQ==)"
+        ))
+        XCTAssertTrue(session.markdown.contains("![\(url)](data:image/png;base64,QQ==)"))
+        XCTAssertTrue(session.display.text.contains("\u{FFFC}"))
+        XCTAssertFalse(session.display.text.contains(url))
+        XCTAssertFalse(session.display.text.contains("data:image"))
+    }
+
+    func testReplacePlainImageURLSkipsAnExistingImage() {
+        let url = "https://example.com/a.png"
+        let source = "![\(url)](data:image/png;base64,QQ==)\n"
+        var session = MarkdownEditingSession(markdown: source)
+        let before = session.markdown
+        XCTAssertFalse(session.replacePlainImageURL(url, withImage: "![x](u)"))
+        XCTAssertEqual(session.markdown, before)
+    }
+
+    func testDeletingShownImageURLRemovesTheImage() {
+        let url = "https://example.com/a.png"
+        var session = MarkdownEditingSession(
+            markdown: "before\n![\(url)](data:image/png;base64,QQ==)\nafter\n",
+            caretAtEnd: false
+        )
+        let picture = (session.display.text as NSString).range(of: "\u{FFFC}")
+        XCTAssertTrue(session.toggleShownImageURL(atDisplay: picture.location))
+        let shown = session.display.text as NSString
+        let range = shown.range(of: url)
+        XCTAssertNotEqual(range.location, NSNotFound)
+        session.setSelection(range.location..<range.location + range.length)
+        session.deleteSelection()
+        XCTAssertFalse(session.markdown.contains(url))
+        XCTAssertFalse(session.markdown.contains("data:image"))
+        XCTAssertTrue(session.markdown.contains("before"))
+        XCTAssertTrue(session.markdown.contains("after"))
+    }
+
+    func testInsertImageLineShowsThePictureNotTheDataURI() {
+        var session = MarkdownEditingSession(markdown: "# Title\nhello")
+        session.insertImageLine("![pasted](data:image/png;base64,QQ==)")
+        XCTAssertTrue(session.markdown.contains("![pasted](data:image/png;base64,QQ==)"))
+        XCTAssertFalse(session.display.text.contains("data:image"), session.display.text)
+        XCTAssertTrue(session.display.text.contains("\u{FFFC}"))
+        XCTAssertEqual(session.display.sourceUTF16.count, session.display.text.utf16.count)
+    }
+
+    func testInsertImageLineBelowTheCaretLine() {
+        var session = MarkdownEditingSession(markdown: "hello", caretAtEnd: false)
+        session.moveCaret(to: 2)
+        session.insertImageLine("![a](u)")
+        XCTAssertEqual(session.markdown, "he![a](u)llo")
+        XCTAssertEqual(session.display.text, "he\u{FFFC}llo")
+    }
+
+    func testKeystrokeCostWithEmbeddedImage() {
+        let payload = String(repeating: "A", count: 400_000)
+        let image = "![shot](data:image/png;base64,\(payload))"
+        var session = MarkdownEditingSession(markdown: "# Title\nhello")
+        let insertStart = Date()
+        session.insertImageLine(image)
+        let insert = Date().timeIntervalSince(insertStart)
+        let backspaceStart = Date()
+        session.backspace()
+        let backspace = Date().timeIntervalSince(backspaceStart)
+        var enter = 0.0
+        for _ in 0..<5 {
+            let start = Date()
+            session.newline()
+            enter += Date().timeIntervalSince(start)
+        }
+        XCTAssertLessThan(insert, 0.08, "insert took \(insert)")
+        XCTAssertLessThan(backspace, 0.08, "backspace took \(backspace)")
+        XCTAssertLessThan(enter, 0.05, "five enters took \(enter)")
+        XCTAssertFalse(session.markdown.contains("base64"))
+        XCTAssertTrue(session.markdown.hasPrefix("# Title\nhello"))
+    }
+
+    func testTwoImagesStayOnOneLineUntilANewline() {
+        var session = MarkdownEditingSession(markdown: "hello", caretAtEnd: true)
+        session.insertImageLine("![a](u)")
+        session.insertImageLine("![b](v)")
+        XCTAssertEqual(session.markdown, "hello![a](u)![b](v)")
+        XCTAssertEqual(session.display.text, "hello\u{FFFC}\u{FFFC}")
+        session.insert("\n")
+        session.insertImageLine("![c](w)")
+        XCTAssertTrue(session.display.text.contains("\u{FFFC}\u{FFFC}\n\u{FFFC}"), session.display.text)
+    }
 }

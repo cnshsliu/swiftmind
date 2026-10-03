@@ -10,6 +10,11 @@ struct OutlineMapView: View {
         }
         .listStyle(.sidebar)
         .accessibilityIdentifier("outlineList")
+        .onKeyPress(.return) {
+            guard session.isBrainMode else { return .ignored }
+            session.activatePrimary()
+            return .handled
+        }
         // Intentionally no .id(session.revision): full List remount stole scroll/focus.
         // Rows observe session and refresh via store-driven redraws.
     }
@@ -39,7 +44,11 @@ struct OutlineRow: View {
             set: { expanded in
                 let folded = !expanded
                 guard folded != node.isFolded else { return }
-                session.apply(SetFoldedCommand(nodeID: node.id, isFolded: folded))
+                if session.isBrainMode, let onBrainFold = session.onBrainFold {
+                    onBrainFold(node.id, folded)
+                } else {
+                    session.apply(SetFoldedCommand(nodeID: node.id, isFolded: folded))
+                }
             }
         )
     }
@@ -104,11 +113,21 @@ struct OutlineRow: View {
                     .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
             )
             .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                session.select(node.id)
+                if session.isBrainMode {
+                    session.activatePrimary()
+                }
+            }
             .onTapGesture {
                 session.select(node.id)
             }
             .contextMenu {
-                if !session.isBrainMode {
+                if session.isBrainMode,
+                   let kind = BrainMapBuilder.kind(of: node),
+                   kind == .map || kind == .vault {
+                    BrainMapFileMenu(node: node)
+                } else if !session.isBrainMode {
                     NodeContextMenu(session: session, nodeID: node.id)
                 }
             }

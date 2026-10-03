@@ -22,6 +22,9 @@ public struct MarkdownMeasure: Equatable, Sendable {
         switch block.kind {
         case .image:
             own = imageHeight
+        case .paragraph, .listItem, .quote:
+            let text = wrapped(plain(block.inlines, in: source))
+            own = containsImage(block.inlines) ? max(text, imageHeight) : text
         case .codeFence, .mathBlock:
             let text = block.inlines.compactMap { inline -> String? in
                 guard case .text(let range) = inline else { return nil }
@@ -31,7 +34,9 @@ public struct MarkdownMeasure: Equatable, Sendable {
             own = Double(rows) * lineHeight
         case .heading(let level):
             let scale = level == 1 ? 1.4 : (level == 2 ? 1.2 : 1.0)
-            own = lineHeight * scale
+            let text = wrapped(plain(block.inlines, in: source))
+            let base = lineHeight * scale
+            own = containsImage(block.inlines) ? max(text, imageHeight, base) : base
         default:
             own = wrapped(plain(block.inlines, in: source))
         }
@@ -59,7 +64,25 @@ public struct MarkdownMeasure: Equatable, Sendable {
                 return plain(content, in: source)
             case .link(_, let label, _, _, _):
                 return plain(label, in: source)
+            case .image:
+                return ""
             }
         }.joined()
+    }
+
+    private func containsImage(_ inlines: [MarkdownInline]) -> Bool {
+        for inline in inlines {
+            switch inline {
+            case .image:
+                return true
+            case .strong(_, let content, _), .emphasis(_, let content, _),
+                 .strikethrough(_, let content, _), .highlight(_, let content, _),
+                 .link(_, let content, _, _, _):
+                if containsImage(content) { return true }
+            default:
+                break
+            }
+        }
+        return false
     }
 }

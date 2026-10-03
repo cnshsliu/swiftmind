@@ -41,12 +41,14 @@ enum BrainMapBuilder {
         for (index, vaultURL) in library.vaultURLs.enumerated() {
             _ = library.startAccessing(vaultURL)
             let side: NodeSide = index % 2 == 0 ? .left : .right
+            var seen = Set<String>()
             let node = makeDirectoryNode(
                 url: vaultURL,
                 kind: .vault,
                 side: side,
                 library: library,
-                depth: 0
+                depth: 0,
+                seen: &seen
             )
             children.append(node)
         }
@@ -70,7 +72,8 @@ enum BrainMapBuilder {
         kind: Kind,
         side: NodeSide,
         library: VaultLibrary,
-        depth: Int
+        depth: Int,
+        seen: inout Set<String>
     ) -> Node {
         let path = url.standardizedFileURL.path
         let name = url.lastPathComponent
@@ -78,7 +81,7 @@ enum BrainMapBuilder {
 
         var childNodes: [Node] = []
         if !folded {
-            childNodes = listChildren(of: url, library: library, depth: depth + 1)
+            childNodes = listChildren(of: url, library: library, depth: depth + 1, seen: &seen)
         }
 
         let icon: NodeIcon? = {
@@ -103,37 +106,32 @@ enum BrainMapBuilder {
         )
     }
 
-    private static func listChildren(of directory: URL, library: VaultLibrary, depth: Int) -> [Node] {
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey, .nameKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        let sorted = contents.sorted {
-            $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
-        }
-
+    private static func listChildren(
+        of directory: URL,
+        library: VaultLibrary,
+        depth: Int,
+        seen: inout Set<String>
+    ) -> [Node] {
+        let canonical = MindMapBundle.canonicalPath(directory)
+        guard seen.insert(canonical).inserted else { return [] }
+        guard depth <= 16 else { return [] }
         var folders: [Node] = []
         var maps: [Node] = []
-
-        for item in sorted {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: item.path, isDirectory: &isDir) else { continue }
-            if isDir.boolValue {
-                // Skip deep stacks beyond a reasonable depth for layout (still navigable via fold).
+        for child in MindMapBundle.children(of: directory) {
+            switch child.kind {
+            case .folder:
                 folders.append(
                     makeDirectoryNode(
-                        url: item,
+                        url: child.url,
                         kind: .folder,
                         side: .auto,
                         library: library,
-                        depth: depth
+                        depth: depth,
+                        seen: &seen
                     )
                 )
-            } else if VaultLibrary.isMindMapFile(item) {
-                maps.append(makeMapNode(url: item, side: .auto))
+            case .map:
+                maps.append(makeMapNode(url: child.url, side: .auto))
             }
         }
         return folders + maps
@@ -163,8 +161,7 @@ enum BrainMapBuilder {
 
     /// Stable IDs so selection/fold survive rebuilds.
     static func stableID(path: String, kind: Kind) -> NodeID {
-        let digest = path.utf8.reduce(UInt64(5381)) { ($0 &<< 5) &+ $0 &+ UInt64($1) }
-        return NodeID(rawValue: "brain_\(kind.rawValue)_\(String(digest, radix: 16))")
+        NodeID(rawValue: "brain_\(kind.rawValue)_\(path)")
     }
 
     static func kind(of node: Node) -> Kind? {

@@ -8,8 +8,15 @@ public struct MarkdownDocument: Equatable, Sendable {
     }
 
     public static func parse(_ source: String) -> MarkdownDocument {
-        MarkdownParser.parse(source)
+        // One keystroke parses the same note several times (reveal, project,
+        // styler). A data-URI image makes that string huge; reuse the last tree.
+        if let cached = parseCache, cached.key == source { return cached.document }
+        let document = MarkdownParser.parse(source)
+        parseCache = (source, document)
+        return document
     }
+
+    private static var parseCache: (key: String, document: MarkdownDocument)?
 
     /// Display label for one sibling in a list run. `nextOrdered` is 0 at the
     /// start of a run; the first ordered item sets it, and each following
@@ -46,6 +53,8 @@ public struct MarkdownDocument: Equatable, Sendable {
     public static func renumberOrderedLists(_ source: String, caret: Int) -> (String, Int) {
         let ns = source as NSString
         guard ns.length > 0 else { return (source, 0) }
+        let caret = min(max(caret, 0), ns.length)
+        guard Self.mightContainOrderedList(ns) else { return (source, caret) }
         var runs: [(indent: Int, next: Int)] = []
         var output = ""
         var written = 0
@@ -78,6 +87,33 @@ public struct MarkdownDocument: Equatable, Sendable {
             newCaret = min(max(caret, 0) + (written - ns.length), written)
         }
         return (output, min(max(newCaret, 0), written))
+    }
+
+    /// Ordered markers look like `1. ` at the start of a line. A data-URI
+    /// image has no `". "`, so this search returns before the line is copied.
+    private static func mightContainOrderedList(_ ns: NSString) -> Bool {
+        var search = NSRange(location: 0, length: ns.length)
+        while true {
+            let found = ns.range(of: ". ", range: search)
+            if found.location == NSNotFound { return false }
+            var lineStart = found.location
+            while lineStart > 0 {
+                let previous = ns.character(at: lineStart - 1)
+                if previous == 10 || previous == 13 { break }
+                lineStart -= 1
+            }
+            var cursor = lineStart
+            while cursor < found.location, ns.character(at: cursor) == 32 || ns.character(at: cursor) == 9 {
+                cursor += 1
+            }
+            if cursor < found.location {
+                let digit = ns.character(at: cursor)
+                if digit >= 48 && digit <= 57 { return true }
+            }
+            let next = found.location + found.length
+            if next >= ns.length { return false }
+            search = NSRange(location: next, length: ns.length - next)
+        }
     }
 
     private static func renumberedLine(_ content: String, runs: inout [(indent: Int, next: Int)]) -> String {
@@ -192,6 +228,9 @@ public enum MarkdownInline: Equatable, Sendable {
         url: Range<String.Index>,
         close: Range<String.Index>
     )
+    /// `![alt](url)` inside a line. Several of these stay on that line; a
+    /// newline after one is what starts the next line.
+    case image(alt: Range<String.Index>, url: Range<String.Index>)
     case math(open: Range<String.Index>, latex: Range<String.Index>, close: Range<String.Index>)
     /// `~~x~~`. Rendered struck through; markers hidden like strong/emphasis.
     case strikethrough(open: Range<String.Index>, content: [MarkdownInline], close: Range<String.Index>)
@@ -312,6 +351,9 @@ enum MarkdownParser {
                 index = end
                 continue
             }
+            // A line that is only one image stays an image block. Anything
+            // else on the line (`![a](u)![b](v)`, or text beside an image)
+            // is a paragraph so the pictures share the line.
             if let image = imageBlock(source, start: start, lineEnd: lineEnd, blockEnd: end) {
                 blocks.append(image)
                 index = end
@@ -539,20 +581,56 @@ enum MarkdownParser {
         lineEnd: String.Index,
         blockEnd: String.Index
     ) -> MarkdownBlock? {
-        let line = source[start..<lineEnd]
-        guard line.hasPrefix("![") else { return nil }
-        guard let altEnd = line.range(of: "]("), let close = line.lastIndex(of: ")"), close > altEnd.upperBound else {
-            return nil
-        }
-        let alt = source.index(start, offsetBy: 2)..<source.index(start, offsetBy: line.distance(from: line.startIndex, to: altEnd.lowerBound))
-        let urlStart = source.index(start, offsetBy: line.distance(from: line.startIndex, to: altEnd.upperBound))
-        let urlEnd = source.index(start, offsetBy: line.distance(from: line.startIndex, to: close))
+        guard let token = imageToken(source, from: start, limit: lineEnd) else { return nil }
+        let rest = source[token.end..<lineEnd].drop { $0 == " " || $0 == "\t" }
+        guard rest.isEmpty else { return nil }
         return MarkdownBlock(
-            kind: .image(alt: alt, url: urlStart..<urlEnd),
+            kind: .image(alt: token.alt, url: token.url),
             source: start..<blockEnd,
-            marker: start..<lineEnd,
+            marker: start..<token.end,
             inlines: []
         )
+    }
+
+    /// The first `![alt](url)` at `index`, not crossing `limit` or a newline.
+    /// `end` is the index just after the closing `)`.
+    static func imageToken(
+        _ source: String, from index: String.Index, limit: String.Index
+    ) -> (alt: Range<String.Index>, url: Range<String.Index>, end: String.Index)? {
+        let ns = source as NSString
+        guard let start = utf16Offset(of: index, in: source),
+              let endLimit = utf16Offset(of: limit, in: source),
+              start + 1 < endLimit,
+              ns.character(at: start) == 0x21, // !
+              ns.character(at: start + 1) == 0x5B // [
+        else { return nil }
+        let bracket = ns.range(
+            of: "](",
+            range: NSRange(location: start + 2, length: endLimit - (start + 2))
+        )
+        guard bracket.location != NSNotFound else { return nil }
+        let urlLocation = bracket.location + bracket.length
+        guard urlLocation < endLimit else { return nil }
+        let close = ns.range(
+            of: ")",
+            range: NSRange(location: urlLocation, length: endLimit - urlLocation)
+        )
+        guard close.location != NSNotFound, close.location > urlLocation else { return nil }
+        let between = NSRange(location: start, length: close.location - start)
+        if ns.rangeOfCharacter(from: .newlines, options: [], range: between).location != NSNotFound {
+            return nil
+        }
+        let altStart = String.Index(utf16Offset: start + 2, in: source)
+        let altEnd = String.Index(utf16Offset: bracket.location, in: source)
+        let urlStart = String.Index(utf16Offset: urlLocation, in: source)
+        let urlEnd = String.Index(utf16Offset: close.location, in: source)
+        let tokenEnd = String.Index(utf16Offset: close.location + 1, in: source)
+        return (altStart..<altEnd, urlStart..<urlEnd, tokenEnd)
+    }
+
+    private static func utf16Offset(of index: String.Index, in source: String) -> Int? {
+        guard let utf16 = index.samePosition(in: source.utf16) else { return nil }
+        return source.utf16.distance(from: source.utf16.startIndex, to: utf16)
     }
 
     static func quoteBlock(
@@ -581,6 +659,13 @@ enum MarkdownParser {
             textStart = end
         }
         while index < range.upperBound {
+            if let token = imageToken(source, from: index, limit: range.upperBound) {
+                flushText(to: index)
+                output.append(.image(alt: token.alt, url: token.url))
+                index = token.end
+                textStart = index
+                continue
+            }
             if source[index] == "`",
                let found = closedSpan(source, from: index, limit: range.upperBound, marker: "`") {
                 flushText(to: index)

@@ -4,6 +4,11 @@ import AppKit
 import PencilKit
 import UniformTypeIdentifiers
 
+/// Editor text that keystrokes mutate without invalidating `MapCanvasView`.
+private final class NoteEditorDraft: ObservableObject {
+    var text: String = ""
+}
+
 struct MapCanvasView: View {
     @ObservedObject var session: DocumentSession
     @Environment(\.colorScheme) private var colorScheme
@@ -82,7 +87,12 @@ struct MapCanvasView: View {
 
     // MARK: Floating note editor
     @State private var noteEditorNodeID: NodeID?
-    @State private var noteEditorDraft: String = ""
+    /// The live editor text. A class so keystrokes do not publish a new
+    /// @State value and rebuild the whole map (a data-URI image makes that
+    /// rebuild stall every Enter).
+    @State private var noteDraft = NoteEditorDraft()
+    /// Bumped only when an external change must reload the editor.
+    @State private var noteEditorEpoch = 0
     /// `.floatingRight` is `e` / ⇧⌘E; `.inPlace` is ⌘E on any
     /// non-sketch node; `.onCard` (Settings → Notes) hosts the editor at an
     /// expanded card's frame. Double-click renames, the same as Return.
@@ -96,9 +106,6 @@ struct MapCanvasView: View {
     @State private var noteEditorBaseline: String?
     /// One-shot toolbar insertion (image/math/link), consumed by the editor.
     @State private var pendingNoteInsertion: MarkdownInsertion?
-    /// Retains the open NSOpenPanel while it presents — a panel owned only
-    /// by the local scope is deallocated before `begin` can show it.
-    @State private var activeImagePanel: NSOpenPanel?
     /// Canvas offset stashed when the editor opened (restored on close).
     @State private var preEditorPan: CGSize?
     /// The offset we panned to; restore only if the user hasn't panned since.
@@ -194,8 +201,13 @@ struct MapCanvasView: View {
                     .simultaneousGesture(magnifyGesture)
                     .simultaneousGesture(doubleTapEditGesture(snapshot: snapshot))
                     .contextMenu {
-                        if !session.isBrainMode,
-                           let id = hoveredNodeID(in: snapshot) ?? session.store.selection.primary {
+                        let id = hoveredNodeID(in: snapshot) ?? session.store.selection.primary
+                        if session.isBrainMode, let id,
+                           let node = session.store.map.node(id: id),
+                           let kind = BrainMapBuilder.kind(of: node),
+                           kind == .map || kind == .vault {
+                            BrainMapFileMenu(node: node)
+                        } else if !session.isBrainMode, let id {
                             NodeContextMenu(session: session, nodeID: id)
                         }
                     }
@@ -428,7 +440,8 @@ struct MapCanvasView: View {
                     if modelDoc != lastCommittedNoteDocument {
                         noteCommitTask?.cancel()
                         noteCommitTask = nil
-                        noteEditorDraft = modelDoc
+                        noteDraft.text = modelDoc
+                        noteEditorEpoch += 1
                         session.liveNoteDocument = (id, modelDoc)
                         lastCommittedNoteDocument = modelDoc
                     }
@@ -799,7 +812,11 @@ struct MapCanvasView: View {
         let map = session.store.map
         guard let node = map.node(id: id), !node.children.isEmpty else { return nil }
         if node.isFolded {
-            session.applyQuiet(SetFoldedCommand(nodeID: id, isFolded: false))
+            if session.isBrainMode, let onBrainFold = session.onBrainFold {
+                onBrainFold(id, false)
+            } else {
+                session.applyQuiet(SetFoldedCommand(nodeID: id, isFolded: false))
+            }
             return nil
         }
         let remembered = lastChildByParent[id]
@@ -1375,7 +1392,10 @@ struct MapCanvasView: View {
         // picture with the zoom. The visible lines stay the same at every zoom.
         let mapWidth = CGFloat(visual.frame.width)
         let mapHeight = CGFloat(visual.frame.height)
-        MarkdownTextView(markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight)
+        MarkdownTextView(
+            markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight,
+            noteAssets: session.noteAssets
+        )
             .equatable()
             .padding(10)
             .offset(y: -scroll)
@@ -1414,7 +1434,8 @@ struct MapCanvasView: View {
             markdown: markdown,
             width: CGFloat(session.store.layoutConfig.expandedNoteWidth),
             fontSize: 12,
-            maxImageHeight: mediaImageHeight
+            maxImageHeight: mediaImageHeight,
+            noteAssets: session.noteAssets
         )
         guard measured > 0 else { return }
         let revision = session.store.contentRevision
@@ -1528,21 +1549,36 @@ struct MapCanvasView: View {
                 panelNoteEditor(frame: frame, viewSize: viewSize)
             }
         }
-        .onChange(of: noteEditorDraft) { _, newValue in
-            session.liveNoteDocument = (visual.id, newValue)
-            scheduleNoteCommit()
-        }
+    }
+
+    /// Writes stay off `@State`. A large jump (image insert or delete) still
+    /// refreshes the card once; a newline does not rebuild the map.
+    private var noteDraftBinding: Binding<String> {
+        Binding(
+            get: { noteDraft.text },
+            set: { newValue in
+                let previousCount = noteDraft.text.utf16.count
+                noteDraft.text = newValue
+                scheduleNoteCommit()
+                guard let id = noteEditorNodeID else { return }
+                if abs(newValue.utf16.count - previousCount) > 200 {
+                    session.liveNoteDocument = (id, newValue)
+                }
+            }
+        )
     }
 
     /// The shared editor (panel and on-card both host it).
     private func noteEditorView(chromeIdentifier: String) -> some View {
         MarkdownEditorView(
-            text: $noteEditorDraft,
+            text: noteDraftBinding,
             insertion: $pendingNoteInsertion,
             onCancel: { closeNoteEditor(committing: false) }, // Esc
-            onInsertImage: insertImageIntoNoteEditor,
+            makeImageMarkdown: { alt, png in session.noteAssets.markdown(alt: alt, png: png) },
+            resolveImage: { session.noteAssets.image(for: $0) },
             chromeIdentifier: chromeIdentifier
         )
+        .id(noteEditorEpoch)
     }
 
     /// Node whose rendered card hides because the on-card editor covers it.
@@ -1599,31 +1635,6 @@ struct MapCanvasView: View {
         .accessibilityIdentifier("noteEditorOnCard")
     }
 
-    /// Image button: file picker → data-URI markdown line at the caret
-    /// (reuses the paste path's normalizer: ≤720pt longest side, PNG, <10 MB).
-    private func insertImageIntoNoteEditor() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose an image to embed in the note"
-        activeImagePanel = panel
-        guard let window = NSApp.keyWindow else {
-            activeImagePanel = nil
-            return
-        }
-        panel.beginSheetModal(for: window) { response in
-            guard response == .OK, let url = panel.url,
-                  let data = try? Data(contentsOf: url),
-                  let png = ClipboardService.normalizeImage(data) else { return }
-            let name = url.deletingPathExtension().lastPathComponent
-            let markdown = "![\(name)](data:image/png;base64,\(png.base64EncodedString()))"
-            DispatchQueue.main.async {
-                pendingNoteInsertion = MarkdownInsertion(payload: .image(markdown: markdown))
-                activeImagePanel = nil
-            }
-        }
-    }
-
     /// `e` / ⇧⌘E: floating editor to the right of the selected node (or the
     /// on-card editor when the mode is on and the note card is expanded).
     private func toggleNoteEditor() {
@@ -1660,10 +1671,11 @@ struct MapCanvasView: View {
         session.select(nodeID)
         noteEditorPlacement = placement
         noteEditorNodeID = nodeID
-        noteEditorDraft = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
-        lastCommittedNoteDocument = noteEditorDraft
-        noteEditorBaseline = noteEditorDraft
-        session.liveNoteDocument = (nodeID, noteEditorDraft)
+        noteDraft.text = NoteDocument.compose(title: node.text, body: node.noteMarkdown)
+        noteEditorEpoch += 1
+        lastCommittedNoteDocument = noteDraft.text
+        noteEditorBaseline = noteDraft.text
+        session.liveNoteDocument = (nodeID, noteDraft.text)
         // No side-pan for the near-full panel — it covers the canvas like
         // the sketch board does.
     }
@@ -1757,7 +1769,7 @@ struct MapCanvasView: View {
     private func commitNoteEditorDraft() {
         guard let id = noteEditorNodeID,
               let node = session.store.map.node(id: id) else { return }
-        let (title, body) = NoteDocument.split(noteEditorDraft)
+        let (title, body) = NoteDocument.split(noteDraft.text)
         var ops: [MapOp] = []
         if let title, title != node.text { ops.append(.setText(nodeID: id, text: title)) }
         if body != node.noteMarkdown { ops.append(.setNote(nodeID: id, markdown: body)) }
@@ -2439,6 +2451,12 @@ struct MapCanvasView: View {
                         session.select(id)
                     }
                     canvasFocused = true
+                    // The second click of a double-click. High-priority single
+                    // tap otherwise eats the double-tap gesture, so My Brain
+                    // never opened the map.
+                    if session.isBrainMode, NSApp.currentEvent?.clickCount == 2 {
+                        session.activatePrimary()
+                    }
                 } else {
                     // Click empty canvas: clear focus, still take keyboard focus.
                     session.clearSelection()
@@ -2454,13 +2472,7 @@ struct MapCanvasView: View {
                 if editingNodeID != nil {
                     commitEdit()
                 }
-                if session.isBrainMode {
-                    if let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) {
-                        session.select(id)
-                        session.activatePrimary()
-                    }
-                    return
-                }
+                guard !session.isBrainMode else { return }
                 guard let id = hitTest(event.location, snapshot: snapshot, viewSize: canvasSize) else {
                     return
                 }

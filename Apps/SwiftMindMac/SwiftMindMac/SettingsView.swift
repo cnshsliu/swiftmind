@@ -88,6 +88,7 @@ struct SettingsView: View {
     @AppStorage(MediaSizeLevel.defaultsKey) private var mediaSize = MediaSizeLevel.medium.rawValue
     @AppStorage(NoteEditMode.defaultsKey) private var noteEditMode = NoteEditMode.panel.rawValue
     @AppStorage("swiftmind.agentBridge") private var agentBridgeEnabled = true
+    @State private var vaultPendingRemoval: URL?
 
     var body: some View {
         TabView {
@@ -142,7 +143,7 @@ struct SettingsView: View {
 
     private var vaultsTab: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Vault folders appear in My Brain (⇧⌘B).")
+            Text("Vault folders are the places mind maps live. They show up in My Brain (⇧⌘B). The minus button only removes a folder from this list. The folder and its maps stay on disk.")
                 .foregroundStyle(.secondary)
             List {
                 ForEach(library.vaultURLs, id: \.path) { url in
@@ -152,13 +153,35 @@ struct SettingsView: View {
                             .truncationMode(.middle)
                         Spacer()
                         Button(role: .destructive) {
-                            library.removeVault(url: url)
+                            vaultPendingRemoval = url
                         } label: {
-                            Image(systemName: "minus.circle.fill")
+                            Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)
+                        .help("Remove from My Brain. The folder on disk is kept.")
+                        .accessibilityLabel("Remove from My Brain")
                     }
                 }
+            }
+            .confirmationDialog(
+                "Remove this vault from My Brain?",
+                isPresented: Binding(
+                    get: { vaultPendingRemoval != nil },
+                    set: { if !$0 { vaultPendingRemoval = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove from My Brain", role: .destructive) {
+                    if let url = vaultPendingRemoval {
+                        appModel.detachVault(url)
+                    }
+                    vaultPendingRemoval = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    vaultPendingRemoval = nil
+                }
+            } message: {
+                Text("\(vaultPendingRemoval?.path ?? "This folder") stays on disk. Mind maps inside it are not deleted.")
             }
             HStack {
                 Button("Add Vault…") { addVault() }

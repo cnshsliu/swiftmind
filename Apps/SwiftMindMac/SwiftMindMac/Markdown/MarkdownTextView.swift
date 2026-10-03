@@ -12,6 +12,7 @@ struct MarkdownTextView: View, Equatable {
     let markdown: String
     var fontSize: CGFloat = 12
     var maxImageHeight: CGFloat = 200
+    var noteAssets: NoteAssetStore? = nil
 
     static func == (lhs: MarkdownTextView, rhs: MarkdownTextView) -> Bool {
         lhs.markdown == rhs.markdown
@@ -37,6 +38,7 @@ struct MarkdownTextView: View, Equatable {
         /// One wrapping run. Key caps sit inside it so they share the line.
         case flow([Run])
         case inlineMath(String)
+        case image(alt: String, urlString: String)
     }
 
     enum Run {
@@ -98,7 +100,7 @@ struct MarkdownTextView: View, Equatable {
                 .frame(height: 1)
                 .padding(.vertical, fontSize * 0.35)
         case .image(let alt, let urlString):
-            MarkdownImageView(alt: alt, urlString: urlString, maxHeight: maxImageHeight)
+            MarkdownImageView(alt: alt, urlString: urlString, maxHeight: maxImageHeight, noteAssets: noteAssets)
         }
     }
 
@@ -160,6 +162,7 @@ struct MarkdownTextView: View, Equatable {
                 switch piece {
                 case .flow: return .text(fontSize: metricsSize)
                 case .inlineMath(let latex): return .math(latex: latex, fontSize: fontSize)
+                case .image: return .image
                 }
             },
             spacing: 0
@@ -170,6 +173,8 @@ struct MarkdownTextView: View, Equatable {
                     flowingText(runs, font: font, fontSize: metricsSize)
                 case .inlineMath(let latex):
                     LaTeXMathView(latex: latex, fontSize: fontSize)
+                case .image(let alt, let urlString):
+                    MarkdownImageView(alt: alt, urlString: urlString, maxHeight: maxImageHeight, noteAssets: noteAssets)
                 }
             }
         }
@@ -303,6 +308,8 @@ struct MarkdownTextView: View, Equatable {
             case .math(_, let latex, _):
                 let formula = String(source[latex])
                 if !formula.isEmpty { result.append(.inlineMath(formula)) }
+            case .image(let alt, let url):
+                result.append(.image(alt: String(source[alt]), urlString: String(source[url])))
             }
         }
         return result
@@ -355,7 +362,7 @@ struct MarkdownTextView: View, Equatable {
                     case .highlight(let text): appendHighlight(text, to: &result)
                     }
                 }
-            case .inlineMath:
+            case .inlineMath, .image:
                 result.append(piece)
             }
         }
@@ -373,6 +380,8 @@ struct MarkdownTextView: View, Equatable {
                 return plain(content, source: source)
             case .link(_, let label, _, _, _):
                 return plain(label, source: source)
+            case .image:
+                return ""
             }
         }.joined()
     }

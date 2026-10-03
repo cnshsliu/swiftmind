@@ -154,7 +154,10 @@ struct InspectorView: View {
                         return node.noteMarkdown
                     }()
                     if !bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        MarkdownTextView(markdown: bodyMarkdown, fontSize: 13, maxImageHeight: mediaImageHeight)
+                        MarkdownTextView(
+                            markdown: bodyMarkdown, fontSize: 13,
+                            maxImageHeight: mediaImageHeight, noteAssets: session.noteAssets
+                        )
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("notePreview")
                     } else if node.sketch == nil {

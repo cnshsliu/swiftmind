@@ -27,9 +27,25 @@ final class AgentBridge {
     private weak var appModel: AppModel?
 
     /// Container-side bridge directory (app view; sandbox-resolved to
-    /// ~/Library/Containers/<bundleID>/Data/Library/SwiftMind).
+    /// ~/Library/Containers/<bundleID>/Data/Library/SwiftMind). Testability:
+    /// `defaults write <domain> swiftmind.agentBridgeDir <path>` relocates
+    /// the bridge (e.g. into ~/Documents, which the sandbox can write and
+    /// external test drivers can read — the container path is unreadable
+    /// from outside without Full Disk Access).
     private static func bridgeDirectory() -> URL {
-        FileManager.default
+        // Launch-argument override first (`open SwiftMind.app --args
+        // --agent-bridge-dir <path>`) — works even when cfprefsd is wedged;
+        // defaults override second; container default last.
+        let args = ProcessInfo.processInfo.arguments
+        if let flag = args.firstIndex(of: "--agent-bridge-dir"), flag + 1 < args.count,
+           !args[flag + 1].isEmpty {
+            return URL(fileURLWithPath: (args[flag + 1] as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        if let override = UserDefaults.standard.string(forKey: "swiftmind.agentBridgeDir"),
+           !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return FileManager.default
             .urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("SwiftMind", isDirectory: true)
     }
@@ -306,6 +322,24 @@ final class AgentBridge {
                 throw BridgeFailure(code: "file_error", message: "could not create map")
             }
             return ["path": url.path]
+        case "transfer":
+            // Copy/move through the REAL AppModel path (document lifecycle
+            // included) — the E2E hook for the atomicity / no-auto-open fix.
+            guard let source = params["source"] as? String,
+                  let directory = params["directory"] as? String else {
+                throw BridgeFailure(code: "usage", message: "transfer requires source and directory")
+            }
+            let sourceURL = URL(fileURLWithPath: source)
+            let baseName = params["baseName"] as? String
+                ?? sourceURL.deletingPathExtension().deletingPathExtension().lastPathComponent
+            let move = (params["move"] as? Bool) ?? true
+            appModel.transferMap(
+                from: sourceURL,
+                to: URL(fileURLWithPath: directory, isDirectory: true),
+                baseName: baseName,
+                move: move
+            )
+            return ["ok": true, "moved": move]
         case "doctor":
             let issues = MapDoctor.inspect(session.store.map)
             return ["issues": issues.map { issue -> [String: Any] in

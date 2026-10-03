@@ -38,10 +38,16 @@ final class DocumentSession: ObservableObject {
     var isBrainMode: Bool = false
     /// Double-click / Return activation (open map or toggle folder in brain mode).
     var onPrimaryActivate: (() -> Void)?
+    /// My Brain fold. Persists by folder path and reloads children from disk.
+    /// A folded vault is stored with no children, so unfolding only a flag
+    /// would show an empty folder.
+    var onBrainFold: ((NodeID, Bool) -> Void)?
     /// Fired after content mutations (for autosave).
     var onContentChanged: (() -> Void)?
     /// Fired after pan/zoom (persisted separately from the map file).
     var onViewportChanged: (() -> Void)?
+    /// Picture files beside the document. Note text stores only the path.
+    let noteAssets: NoteAssetStore
 
     private var toastClearTask: Task<Void, Never>?
 
@@ -62,7 +68,8 @@ final class DocumentSession: ObservableObject {
         }
     }
 
-    init(map: MindMap) {
+    init(map: MindMap, noteAssets: NoteAssetStore? = nil) {
+        self.noteAssets = noteAssets ?? NoteAssetStore()
         self.store = MapStore(map: map)
         applyMediaSize()
         self.contentRevision = store.contentRevision
@@ -89,6 +96,15 @@ final class DocumentSession: ObservableObject {
 
     func exportMap() -> MindMap {
         store.map
+    }
+
+    /// Point note image paths at a renamed assets folder.
+    func replaceInNotes(from: String, to: String) {
+        let before = store.contentRevision
+        store.replaceInNotes(from: from, to: to)
+        if store.contentRevision != before {
+            publishContent()
+        }
     }
 
     func toggleSelection(_ id: NodeID) {

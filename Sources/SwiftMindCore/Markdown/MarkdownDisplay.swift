@@ -36,13 +36,20 @@ public struct MarkdownDisplay: Equatable, Sendable {
         return (prefix..<(oldUnits.count - suffix), replacement)
     }
 
-    public static func project(_ source: String, reveal: Reveal) -> MarkdownDisplay {
+    /// `shownImageURLs` lists image alt texts (the original http URL) that
+    /// display as that address instead of the picture. The markdown is unchanged.
+    public static func project(
+        _ source: String,
+        reveal: Reveal,
+        shownImageURLs: Set<String> = []
+    ) -> MarkdownDisplay {
         var text = ""
         var map: [Int] = []
         let end = appendBlocks(
             MarkdownDocument.parse(source).blocks,
             source: source,
             reveal: reveal,
+            shownImageURLs: shownImageURLs,
             from: source.startIndex,
             into: &text,
             map: &map
@@ -178,7 +185,11 @@ public struct MarkdownDisplay: Equatable, Sendable {
             switch block.kind {
             case .heading:
                 return .block(block.marker)
-            case .image, .codeFence, .mathBlock, .table:
+            // An image stays the picture. Revealing a data URI would replace
+            // it with a wall of base64 the moment the caret lands on it.
+            case .image:
+                break
+            case .codeFence, .mathBlock, .table:
                 return .block(block.source)
             case .quote:
                 return .block(block.marker)
@@ -232,6 +243,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
                     }
                     return inlineContaining(index, in: label) ?? item
                 }
+            case .image(let alt, let url):
+                if alt.contains(index) || url.contains(index) { return item }
             }
         }
         return nil
@@ -274,6 +287,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
         _ blocks: [MarkdownBlock],
         source: String,
         reveal: Reveal,
+        shownImageURLs: Set<String>,
         from start: String.Index,
         into text: inout String,
         map: inout [Int]
@@ -287,6 +301,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 block,
                 source: source,
                 reveal: reveal,
+                shownImageURLs: shownImageURLs,
                 anotherFollows: offset + 1 < blocks.count,
                 into: &text,
                 map: &map
@@ -302,6 +317,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
         _ block: MarkdownBlock,
         source: String,
         reveal: Reveal,
+        shownImageURLs: Set<String>,
         anotherFollows: Bool,
         into text: inout String,
         map: inout [Int]
@@ -321,9 +337,17 @@ public struct MarkdownDisplay: Equatable, Sendable {
         }
         switch block.kind {
         case .image(let alt, _):
-            // U+FFFC replaces the image syntax, not the line break after it.
-            let offset = utf16Offset(of: alt.lowerBound, in: source) ?? 0
-            appendMapped("\u{FFFC}", sourceOffset: offset, into: &text, map: &map)
+            let altText = String(source[alt])
+            // Click toggles between the picture and the original http URL.
+            // The data URI stays in the markdown either way.
+            if shownImageURLs.contains(altText),
+               altText.hasPrefix("http://") || altText.hasPrefix("https://") {
+                appendSource(alt, source: source, into: &text, map: &map)
+            } else {
+                // U+FFFC replaces the image syntax, not the line break after it.
+                let offset = utf16Offset(of: alt.lowerBound, in: source) ?? 0
+                appendMapped("\u{FFFC}", sourceOffset: offset, into: &text, map: &map)
+            }
             if sourceContainsNewline(block, source: source) || anotherFollows {
                 appendLineBreak(block, source: source, into: &text, map: &map)
             }
@@ -370,7 +394,10 @@ public struct MarkdownDisplay: Equatable, Sendable {
                     map: &map
                 )
             }
-            appendInlines(block.inlines, source: source, reveal: reveal, into: &text, map: &map)
+            appendInlines(
+                block.inlines, source: source, reveal: reveal,
+                shownImageURLs: shownImageURLs, into: &text, map: &map
+            )
             var childStart = coverageEnd(block)
             if sourceContainsNewline(block, source: source) || anotherFollows || !block.children.isEmpty {
                 childStart = appendLineBreak(block, source: source, into: &text, map: &map)
@@ -379,6 +406,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
                 block.children,
                 source: source,
                 reveal: reveal,
+                shownImageURLs: shownImageURLs,
                 from: childStart,
                 into: &text,
                 map: &map
@@ -390,6 +418,7 @@ public struct MarkdownDisplay: Equatable, Sendable {
         _ inlines: [MarkdownInline],
         source: String,
         reveal: Reveal,
+        shownImageURLs: Set<String>,
         into text: inout String,
         map: inout [Int]
     ) {
@@ -403,10 +432,10 @@ public struct MarkdownDisplay: Equatable, Sendable {
                  .highlight(let open, let content, let close):
                 if inlineRevealed(inline, reveal: reveal) {
                     appendSource(open, source: source, into: &text, map: &map)
-                    appendInlines(content, source: source, reveal: reveal, into: &text, map: &map)
+                    appendInlines(content, source: source, reveal: reveal, shownImageURLs: shownImageURLs, into: &text, map: &map)
                     appendSource(close, source: source, into: &text, map: &map)
                 } else {
-                    appendInlines(content, source: source, reveal: reveal, into: &text, map: &map)
+                    appendInlines(content, source: source, reveal: reveal, shownImageURLs: shownImageURLs, into: &text, map: &map)
                 }
             case .code(let open, let content, let close):
                 if inlineRevealed(inline, reveal: reveal) {
@@ -435,12 +464,21 @@ public struct MarkdownDisplay: Equatable, Sendable {
             case .link(let labelOpen, let label, let labelClose, let url, let close):
                 if inlineRevealed(inline, reveal: reveal) {
                     appendSource(labelOpen, source: source, into: &text, map: &map)
-                    appendInlines(label, source: source, reveal: reveal, into: &text, map: &map)
+                    appendInlines(label, source: source, reveal: reveal, shownImageURLs: shownImageURLs, into: &text, map: &map)
                     appendSource(labelClose, source: source, into: &text, map: &map)
                     appendSource(url, source: source, into: &text, map: &map)
                     appendSource(close, source: source, into: &text, map: &map)
                 } else {
-                    appendInlines(label, source: source, reveal: reveal, into: &text, map: &map)
+                    appendInlines(label, source: source, reveal: reveal, shownImageURLs: shownImageURLs, into: &text, map: &map)
+                }
+            case .image(let alt, _):
+                let altText = String(source[alt])
+                if shownImageURLs.contains(altText),
+                   altText.hasPrefix("http://") || altText.hasPrefix("https://") {
+                    appendSource(alt, source: source, into: &text, map: &map)
+                } else {
+                    let offset = utf16Offset(of: alt.lowerBound, in: source) ?? 0
+                    appendMapped("\u{FFFC}", sourceOffset: offset, into: &text, map: &map)
                 }
             }
         }
@@ -492,16 +530,33 @@ public struct MarkdownDisplay: Equatable, Sendable {
                         close: close
                     )
                     walkInlines(label)
+                case .image(let alt, let url):
+                    let altText = String(source[alt])
+                    let wholeImage = displaySlice == "\u{FFFC}"
+                        || (displaySlice == altText && (altText.hasPrefix("http://") || altText.hasPrefix("https://")))
+                    guard wholeImage else { break }
+                    let anchor = offset(alt.lowerBound)
+                    guard lo <= anchor, hi > anchor else { break }
+                    if let bang = source.index(alt.lowerBound, offsetBy: -2, limitedBy: source.startIndex),
+                       let close = source.index(url.upperBound, offsetBy: 1, limitedBy: source.endIndex) {
+                        lo = min(lo, offset(bang))
+                        hi = max(hi, offset(close))
+                    }
                 }
             }
         }
         func walkBlocks(_ blocks: [MarkdownBlock]) {
             for block in blocks {
-                if case .image(let alt, _) = block.kind, displaySlice == "\u{FFFC}" {
-                    let anchor = offset(alt.lowerBound)
-                    if lo <= anchor && hi > anchor {
-                        lo = min(lo, offset(block.source.lowerBound))
-                        hi = max(hi, offset(block.source.upperBound))
+                if case .image(let alt, _) = block.kind {
+                    let altText = String(source[alt])
+                    let wholeImage = displaySlice == "\u{FFFC}"
+                        || (displaySlice == altText && (altText.hasPrefix("http://") || altText.hasPrefix("https://")))
+                    if wholeImage {
+                        let anchor = offset(alt.lowerBound)
+                        if lo <= anchor && hi > anchor {
+                            lo = min(lo, offset(block.source.lowerBound))
+                            hi = max(hi, offset(block.source.upperBound))
+                        }
                     }
                 }
                 walkInlines(block.inlines)
@@ -540,6 +595,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
             return labelOpen.upperBound..<labelClose.lowerBound
         case .math(_, let latex, _):
             return latex
+        case .image(let alt, _):
+            return alt
         }
     }
 
@@ -591,6 +648,8 @@ public struct MarkdownDisplay: Equatable, Sendable {
             return close.upperBound
         case .link(_, _, _, _, let close):
             return close.upperBound
+        case .image(_, let url):
+            return url.upperBound
         }
     }
 

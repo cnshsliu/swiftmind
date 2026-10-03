@@ -182,7 +182,7 @@ public enum MarkdownSegmenter {
                 mathRows = 0
                 continue
             }
-            if standaloneImage(line) != nil {
+            if imagesOnlyLine(line) {
                 height += imageHeight
                 continue
             }
@@ -276,6 +276,27 @@ public enum MarkdownSegmenter {
         } else {
             merged.append(.text(s))
         }
+    }
+
+    /// A line of one or more `![alt](url)` tokens and nothing else. Those
+    /// pictures share one row; the row is `imageHeight` tall, not one row each.
+    private static func imagesOnlyLine(_ line: String) -> Bool {
+        var rest = Substring(line.trimmingCharacters(in: .whitespaces))
+        guard rest.hasPrefix("![") else { return false }
+        var found = false
+        while !rest.isEmpty {
+            guard let close = rest.firstIndex(of: ")"),
+                  let bracket = rest.firstIndex(of: "]"),
+                  bracket < close,
+                  rest.index(after: bracket) < rest.endIndex,
+                  rest[rest.index(after: bracket)] == "("
+            else { return false }
+            let urlStart = rest.index(after: rest.index(after: bracket))
+            guard urlStart < close else { return false }
+            found = true
+            rest = rest[rest.index(after: close)...]
+        }
+        return found
     }
 
     /// `![alt](url)` alone on a line (after trimming). alt may be empty; the

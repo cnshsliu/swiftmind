@@ -5,8 +5,14 @@ enum NoteCardMeasurer {
     /// Height in points of the rendered note at `width`, using the same view
     /// as the card. Zero means the host could not measure.
     @MainActor
-    static func height(markdown: String, width: CGFloat, fontSize: CGFloat, maxImageHeight: CGFloat) -> CGFloat {
-        let root = MarkdownTextView(markdown: markdown, fontSize: fontSize, maxImageHeight: maxImageHeight)
+    static func height(
+        markdown: String, width: CGFloat, fontSize: CGFloat, maxImageHeight: CGFloat,
+        noteAssets: NoteAssetStore? = nil
+    ) -> CGFloat {
+        let root = MarkdownTextView(
+            markdown: markdown, fontSize: fontSize, maxImageHeight: maxImageHeight,
+            noteAssets: noteAssets
+        )
             .padding(10)
             .frame(width: width, alignment: .topLeading)
             .fixedSize(horizontal: false, vertical: true)

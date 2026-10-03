@@ -15,7 +15,7 @@ final class MapDocument: ObservableObject, Identifiable {
         case brain
     }
 
-    let kind: Kind
+    private(set) var kind: Kind
     var id: String { kind == .brain ? "brain" : (url?.standardizedFileURL.path ?? "") }
     var url: URL? { if case .mapFile(let u) = kind { return u } else { return nil } }
     var isBrain: Bool { kind == .brain }
@@ -48,8 +48,10 @@ final class MapDocument: ObservableObject, Identifiable {
         guard let html = String(data: data, encoding: .utf8) else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        let map = try HTMLCodec.decode(html)
-        session = DocumentSession(map: map)
+        var map = try HTMLCodec.decode(html)
+        let assets = NoteAssetStore(documentURL: fileURL)
+        let migrated = assets.extractEmbeddedImages(from: &map)
+        session = DocumentSession(map: map, noteAssets: assets)
         if !isUITesting, let saved = viewStateStore.viewport(for: map.id) {
             session.viewport = saved
         } else {
@@ -61,6 +63,9 @@ final class MapDocument: ObservableObject, Identifiable {
         accessRoot = library.startAccessingForMap(fileURL)
         wireSession()
         startWatching(url: fileURL)
+        // Old notes stored pictures as base64. The rewritten map is already
+        // in memory; persist the files and the short paths.
+        if migrated { save() }
     }
 
     /// The My Brain vault navigator session.
@@ -69,6 +74,19 @@ final class MapDocument: ObservableObject, Identifiable {
         session = DocumentSession(map: BrainMapBuilder.build(library: library))
         session.isBrainMode = true
         wireSession()
+        installBrainFoldHook()
+    }
+
+    private func installBrainFoldHook() {
+        session.onBrainFold = { [weak self] nodeID, folded in
+            guard let self,
+                  let node = self.session.store.map.node(id: nodeID),
+                  let path = BrainMapBuilder.path(of: node),
+                  let kind = BrainMapBuilder.kind(of: node),
+                  kind == .folder || kind == .vault else { return }
+            self.library.setFolded(path: path, folded: folded)
+            self.refreshBrain()
+        }
     }
 
     private func wireSession() {
@@ -104,21 +122,82 @@ final class MapDocument: ObservableObject, Identifiable {
 
     // MARK: - Save / autosave
 
-    func save() {
-        guard !isBrain, let url else { return }
+    /// Rename the file to `baseName.swiftmind.html` in the same folder, and
+    /// rename the assets directory to match. Returns nil when the name is
+    /// already the file name. Throws if the move fails; note paths are put back.
+    func renameFile(to baseName: String) throws -> URL? {
+        guard let source = url else { return nil }
+        let directory = source.deletingLastPathComponent()
+        let stem = MindMapBundle.sanitizedBaseName(baseName)
+        let preview = MindMapBundle.uniqueMapURL(in: directory, baseName: stem, excluding: source)
+        if MindMapBundle.canonicalPath(preview) == MindMapBundle.canonicalPath(source) {
+            return nil
+        }
+        let oldFolder = NoteAssets.folderName(forDocumentFileName: source.lastPathComponent)
+        let newFolder = NoteAssets.folderName(forDocumentFileName: preview.lastPathComponent)
+        suppressAutosave = true
+        defer { suppressAutosave = false }
+        if oldFolder != newFolder {
+            session.replaceInNotes(from: oldFolder + "/", to: newFolder + "/")
+        }
+        guard save() else {
+            if oldFolder != newFolder {
+                session.replaceInNotes(from: newFolder + "/", to: oldFolder + "/")
+            }
+            return nil
+        }
+        do {
+            let destination = try MindMapBundle.transfer(
+                mapURL: source,
+                to: directory,
+                baseName: fileStem(preview),
+                move: true
+            )
+            relocate(to: destination)
+            return destination
+        } catch {
+            if oldFolder != newFolder {
+                session.replaceInNotes(from: newFolder + "/", to: oldFolder + "/")
+                _ = save()
+            }
+            throw error
+        }
+    }
+
+    private func relocate(to newURL: URL) {
+        kind = .mapFile(newURL)
+        session.noteAssets.relocate(to: newURL)
+        startWatching(url: newURL)
+        objectWillChange.send()
+    }
+
+    private func fileStem(_ url: URL) -> String {
+        var name = url.lastPathComponent
+        let suffix = ".swiftmind.html"
+        if name.lowercased().hasSuffix(suffix) {
+            name = String(name.dropLast(suffix.count))
+        }
+        return name
+    }
+
+    @discardableResult
+    func save() -> Bool {
+        guard !isBrain, let url else { return false }
         // If the file on disk no longer matches what we last read/wrote, an
         // external process (agent CLI) changed it — reload instead of clobbering.
         if let onDisk = try? Data(contentsOf: url),
            let lastKnownFileHash, onDisk.hashValue != lastKnownFileHash {
             reloadIfExternallyChanged()
-            return
+            return false
         }
         do {
+            try session.noteAssets.flush()
             let html = try HTMLCodec.encode(session.exportMap(), includeSkin: true)
             let data = Data(html.utf8)
             try data.write(to: url, options: .atomic)
             lastKnownFileHash = data.hashValue
             library.lastMapURL = url
+            return true
         } catch {
             // A map we can read but not write (e.g. outside the sandbox via a
             // launch-event handoff) must not stay "last map": every launch
@@ -130,6 +209,7 @@ final class MapDocument: ObservableObject, Identifiable {
                 library.removeRecentMap(url)
             }
             session.showToast("Save failed: \(error.localizedDescription)", kind: .error)
+            return false
         }
     }
 
