@@ -32,6 +32,9 @@ final class AppModel: ObservableObject {
     /// URL instead of spawning a duplicate.
     var openWindowAction: OpenWindowAction?
 
+    /// My Brain copy/move sheet. Nil when the sheet is closed.
+    @Published var mapTransfer: MapTransferRequest?
+
     private var didBootstrap = false
     private let isUITesting = ProcessInfo.processInfo.arguments.contains("-uitesting")
 
@@ -227,16 +230,30 @@ final class AppModel: ObservableObject {
     /// One My Brain window for the whole app.
     func showBrain() {
         if let brain = documents["brain"] {
+            connectBrain(brain)
             setActiveDocument(brain)
         } else {
             let brain = MapDocument(brain: library)
-            brain.onBrainStructureChanged = { [weak brain] in
-                brain?.refreshBrain()
-            }
+            connectBrain(brain)
             register(brain)
             library.lastMode = .brain
         }
         openWindowAction?(id: "brain")
+    }
+
+    /// Double-click and Return in My Brain open a map or fold a folder.
+    /// The canvas calls `session.activatePrimary()`; without this hook that
+    /// call does nothing.
+    private func connectBrain(_ brain: MapDocument) {
+        brain.onBrainStructureChanged = { [weak brain] in
+            brain?.refreshBrain()
+        }
+        brain.session.onPrimaryActivate = { [weak self, weak brain] in
+            guard let self, let brain,
+                  let id = brain.session.store.selection.primary,
+                  let node = brain.session.store.map.node(id: id) else { return }
+            self.activate(node: node)
+        }
     }
 
     /// The window root resolved its URL (restored window, or creation raced
@@ -262,11 +279,12 @@ final class AppModel: ObservableObject {
 
     /// The brain window root asking for its document.
     func resolveBrainDocument() -> MapDocument {
-        if let brain = documents["brain"] { return brain }
-        let brain = MapDocument(brain: library)
-        brain.onBrainStructureChanged = { [weak brain] in
-            brain?.refreshBrain()
+        if let brain = documents["brain"] {
+            connectBrain(brain)
+            return brain
         }
+        let brain = MapDocument(brain: library)
+        connectBrain(brain)
         register(brain)
         return brain
     }
@@ -275,6 +293,15 @@ final class AppModel: ObservableObject {
         documents[document.id] = document
         setActiveDocument(document)
         hasOpenedLaunchWindow = true
+    }
+
+    private func fileStem(of url: URL) -> String {
+        var name = url.lastPathComponent
+        let suffix = ".swiftmind.html"
+        if name.lowercased().hasSuffix(suffix) {
+            name = String(name.dropLast(suffix.count))
+        }
+        return name
     }
 
     private func documentID(for url: URL) -> String {
@@ -352,6 +379,56 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Copy or move `source` into `directory` under `baseName`, pictures included.
+    /// A move of an open map saves and drops that window's document first.
+    func transferMap(from source: URL, to directory: URL, baseName: String, move: Bool) {
+        for vault in library.vaultURLs {
+            _ = library.startAccessing(vault)
+        }
+        let sourceID = documentID(for: source)
+        if let document = documents[sourceID] {
+            document.persistNow()
+            // CLOSE BEFORE THE FILES MOVE. MapDocument.close() persists to
+            // the OLD url — called after the move it resurrects the source
+            // html (Lucas's half-moved state: B.html + B.assets in place,
+            // A.html back from the dead, A.assets gone forever). Closing
+            // first means nothing is left alive that can write A back.
+            document.close()
+            documents[sourceID] = nil
+            if activeDocument === document {
+                activeDocument = documents.values.first
+            }
+        }
+        do {
+            let destination = try MindMapBundle.transfer(
+                mapURL: source, to: directory, baseName: baseName, move: move
+            )
+            if move { library.removeRecentMap(source) }
+            if library.lastMapURL?.standardizedFileURL == source.standardizedFileURL, move {
+                library.lastMapURL = destination
+            }
+            library.recordRecentMap(destination)
+            documents["brain"]?.refreshBrain()
+            mapTransfer = nil
+            let verb = move ? "Moved" : "Copied"
+            toast("\(verb) to \(destination.deletingLastPathComponent().lastPathComponent)/\(destination.lastPathComponent)", kind: .success)
+            let stem = fileStem(of: destination)
+            // A move must NOT auto-open the destination map — move 完就完了
+            // (Lucas). The title still follows the new file stem; fixed in
+            // the file itself for moves AND copies alike.
+            if var map = try? HTMLCodec.decode(String(contentsOf: destination, encoding: .utf8)),
+                      map.title != stem {
+                map.title = stem
+                if let html = try? HTMLCodec.encode(map, includeSkin: true) {
+                    try? Data(html.utf8).write(to: destination, options: .atomic)
+                }
+            }
+        } catch {
+            let verb = move ? "move" : "copy"
+            toast("Could not \(verb) the map: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
     /// New map in the selected brain folder/vault, or default library.
     func createMapNearSelection() {
         if let brain = documents["brain"],
@@ -389,6 +466,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Drop a folder from My Brain. The directory and its maps stay on disk.
+    func detachVault(_ url: URL) {
+        library.removeVault(url: url)
+        documents["brain"]?.refreshBrain()
+        toast("Removed from My Brain. The folder is still on disk.", kind: .info)
+    }
+
     func addVaultPanel() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -416,6 +500,32 @@ final class AppModel: ObservableObject {
 
     func saveCurrentMap() {
         activeDocument?.save()
+    }
+
+    /// The sidebar map name is the file name. Renames the html file and the
+    /// assets folder beside it, and keeps this window pointed at the new path.
+    func renameMapFile(for document: MapDocument, to baseName: String) {
+        guard let oldURL = document.url else { return }
+        let oldID = documentID(for: oldURL)
+        do {
+            guard let destination = try document.renameFile(to: baseName) else { return }
+            documents[oldID] = nil
+            documents[documentID(for: destination)] = document
+            library.removeRecentMap(oldURL)
+            library.recordRecentMap(destination)
+            if library.lastMapURL?.standardizedFileURL == oldURL.standardizedFileURL {
+                library.lastMapURL = destination
+            }
+            documents["brain"]?.refreshBrain()
+            NotificationCenter.default.post(
+                name: .swiftMindMapFileRenamed,
+                object: nil,
+                userInfo: ["old": oldURL.path, "new": destination.path]
+            )
+            toast("Renamed file to \(destination.lastPathComponent)", kind: .success)
+        } catch {
+            toast("Could not rename the file: \(error.localizedDescription)", kind: .error)
+        }
     }
 
     // MARK: - Navigation from brain nodes
