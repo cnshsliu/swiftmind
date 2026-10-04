@@ -9,6 +9,17 @@ private final class NoteEditorDraft: ObservableObject {
     var text: String = ""
 }
 
+/// Pointer location that does not invalidate the canvas on every mouse move.
+private final class CanvasPointer {
+    var location: CGPoint?
+}
+
+/// Note-card measurement callback. A class so the card layer can call the
+/// canvas without becoming a new value on every pan frame.
+private final class NoteMeasureSink {
+    var measure: (String, NodeID) -> Void = { _, _ in }
+}
+
 struct MapCanvasView: View {
     @ObservedObject var session: DocumentSession
     @Environment(\.colorScheme) private var colorScheme
@@ -29,27 +40,55 @@ struct MapCanvasView: View {
     /// Base pan offset captured at drag gesture begin.
     @State private var panBase: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
+    /// Pan and zoom drawn by this view. Kept here so a drag frame does not
+    /// publish the session and rebuild the sidebar and inspector.
+    @State private var liveOffset: CGSize = .zero
+    @State private var liveScale: CGFloat = 1
+    /// Last pointer, not view state. Mouse moves must not rebuild the canvas.
+    @State private var pointer = CanvasPointer()
+    /// Node under the pointer. Changes only when the hit node changes.
+    @State private var hoveredID: NodeID?
+    /// Formula badges. Recomputed when the map changes, not on pan or hover.
+    @State private var formulaCache: [NodeID: FormulaValue] = [:]
+    /// Markdown last measured for each expanded note, so unrelated edits
+    /// do not rebuild every card.
+    @State private var measuredNoteDocs: [NodeID: String] = [:]
+    /// Wheel offset of expanded note cards. Kept here so scrolling a card
+    /// does not publish the session.
+    @State private var noteCardScroll: [NodeID: NoteCardScrollState] = [:]
+    @State private var noteMeasureSink = NoteMeasureSink()
 
-    private var scale: CGFloat { CGFloat(session.viewport.scale) }
+    private var scale: CGFloat { liveScale }
 
     private var offset: CGSize {
-        get {
-            CGSize(width: session.viewport.offset.x, height: session.viewport.offset.y)
-        }
+        get { liveOffset }
         nonmutating set {
             // Interactive pan limit (drag + scroll): the viewport never shows
             // blank space beyond the content — panning stops flush at the
             // content edges. Glitched huge deltas clamp to the same boundary.
             var candidate = session.viewport
             candidate.offset = Point2D(x: Double(newValue.width), y: Double(newValue.height))
-            session.setCanvasOffset(
-                candidate.panClampedOffset(
-                    contentBounds: session.store.snapshot().bounds,
-                    viewWidth: Double(canvasSize.width),
-                    viewHeight: Double(canvasSize.height)
-                )
+            let clamped = candidate.panClampedOffset(
+                contentBounds: session.store.snapshot().bounds,
+                viewWidth: Double(canvasSize.width),
+                viewHeight: Double(canvasSize.height)
             )
+            let drawn = CGSize(width: clamped.x, height: clamped.y)
+            if drawn != liveOffset { liveOffset = drawn }
+            let point = Point2D(x: clamped.x, y: clamped.y)
+            if session.viewport.offset != point {
+                session.setCanvasOffset(point)
+            }
         }
+    }
+
+    private func syncLiveViewport() {
+        liveScale = CGFloat(session.viewport.scale)
+        liveOffset = CGSize(width: session.viewport.offset.x, height: session.viewport.offset.y)
+    }
+
+    private func refreshFormulaCache() {
+        formulaCache = session.store.formulaResults()
     }
 
     // MARK: Drag reparent / pin / pan
@@ -70,8 +109,6 @@ struct MapCanvasView: View {
     @FocusState private var editFieldFocused: Bool
     /// Canvas must be key-view focused for Return / Delete to work.
     @FocusState private var canvasFocused: Bool
-    /// View-space pointer location for hover → Return selects + edits that node.
-    @State private var hoverLocation: CGPoint?
     /// Fallback when SwiftUI focus does not deliver key events to the canvas.
     @State private var keyMonitor: Any?
     @State private var scrollMonitor: Any?
@@ -167,17 +204,72 @@ struct MapCanvasView: View {
         let _ = session.contentRevision
         let _ = session.selectionRevision
         let snapshot = session.store.snapshot()
-        let formulaResults = session.store.formulaResults()
-        let hoverID = hoveredNodeID(in: snapshot)
+        let formulaResults = formulaCache
+        let hoverID = hoveredID
 
         let base = GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                // Drawing only — Canvas path fills are not always hit-testable; text is.
-                // Keep pointer events on a full-size clear layer so hover/tap use the node rect.
-                Canvas { context, size in
-                    draw(snapshot: snapshot, formulaResults: formulaResults, hoverID: hoverID, context: &context, size: size)
+                // The node picture is independent of pan. A drag only moves it.
+                // Huge maps fall back to drawing into the visible view.
+                let pictureBounds = vectorPictureBounds(snapshot.bounds)
+                let pictureOrigin = self.pictureOrigin(bounds: pictureBounds, viewSize: geo.size)
+                if vectorPictureIsStable(pictureBounds) {
+                    RedrawGate(
+                        key: PictureKey(
+                            contentRevision: session.contentRevision,
+                            selectionRevision: session.selectionRevision,
+                            hoverID: hoverID,
+                            scale: scale,
+                            colorScheme: colorScheme,
+                            editingNodeID: editingNodeID,
+                            drawingNodeID: drawingNodeID,
+                            dropTargetID: dropTargetID,
+                            dragNodeID: dragNodeID,
+                            isPinDragging: isPinDragging,
+                            ghost: reparentGhostCenter,
+                            pin: isPinDragging ? dragCurrentLocation : nil,
+                            formulaCount: formulaResults.count
+                        ),
+                        content: Canvas { context, _ in
+                            var context = context
+                            draw(
+                                snapshot: snapshot,
+                                formulaResults: formulaResults,
+                                hoverID: hoverID,
+                                context: &context,
+                                cameraTranslate: CGPoint(
+                                    x: -pictureBounds.x * Double(scale),
+                                    y: -pictureBounds.y * Double(scale)
+                                )
+                            )
+                        }
+                        .frame(
+                            width: CGFloat(max(pictureBounds.width * Double(scale), 1)),
+                            height: CGFloat(max(pictureBounds.height * Double(scale), 1))
+                        )
+                        .allowsHitTesting(false)
+                    )
+                    .equatable()
+                    .fixedSize()
+                    .offset(x: pictureOrigin.x, y: pictureOrigin.y)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                } else {
+                    Canvas { context, size in
+                        var context = context
+                        draw(
+                            snapshot: snapshot,
+                            formulaResults: formulaResults,
+                            hoverID: hoverID,
+                            context: &context,
+                            cameraTranslate: CGPoint(
+                                x: size.width / 2 + offset.width,
+                                y: size.height / 2 + offset.height
+                            )
+                        )
+                    }
+                    .allowsHitTesting(false)
                 }
-                .allowsHitTesting(false)
 
                 // Full canvas hit surface: hover + gestures use geometric node frames, not glyphs.
                 Color.clear
@@ -185,13 +277,16 @@ struct MapCanvasView: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let point):
-                            hoverLocation = point
+                            pointer.location = point
+                            let next = hitTest(point, snapshot: snapshot, viewSize: geo.size)
+                            if next != hoveredID { hoveredID = next }
                             session.rememberCanvasPointer(
                                 overCanvas: true,
                                 viewPoint: Point2D(x: Double(point.x), y: Double(point.y))
                             )
                         case .ended:
-                            hoverLocation = nil
+                            pointer.location = nil
+                            if hoveredID != nil { hoveredID = nil }
                             session.rememberCanvasPointer(overCanvas: false, viewPoint: nil)
                         }
                     }
@@ -214,9 +309,7 @@ struct MapCanvasView: View {
 
                 // Below the edit overlay: editing a title must not sit behind a card.
                 // The card under the on-card editor hides (no double text).
-                ForEach(snapshot.nodes.filter { $0.isNoteExpanded && $0.id != onCardEditingNodeID }) { visual in
-                    noteCard(for: visual, viewSize: geo.size)
-                }
+                noteCardsLayer(bounds: pictureBounds, origin: pictureOrigin, viewSize: geo.size)
 
                 if let editorID = noteEditorNodeID,
                    let visual = snapshot.nodes.first(where: { $0.id == editorID }) {
@@ -261,14 +354,19 @@ struct MapCanvasView: View {
             .onAppear {
                 canvasSize = geo.size
                 session.rememberCanvasLayout(width: Double(geo.size.width), height: Double(geo.size.height))
+                syncLiveViewport()
                 healRestoredViewport(viewSize: geo.size)
                 fitViewportIfNeeded()
+                syncLiveViewport()
+                refreshFormulaCache()
+                consumeCanvasPaletteRequest()
             }
             // Bootstrap swaps in a new session (with the saved viewport
             // restored) AFTER this view first appeared — heal then too.
             .onChange(of: ObjectIdentifier(session)) { _, _ in
                 healRestoredViewport(viewSize: canvasSize)
                 fitViewportIfNeeded()
+                syncLiveViewport()
             }
             .onChange(of: geo.size) { _, newSize in
                 canvasSize = newSize
@@ -279,8 +377,14 @@ struct MapCanvasView: View {
             // Any zoom change (pinch, ⌘-scroll, menu) can strand the view at
             // the edges — re-apply the never-blank pan clamp. Only touches
             // the offset, never the scale, so this cannot re-trigger itself.
-            .onChange(of: session.viewport.scale) { _, _ in
-                offset = offset
+            .onChange(of: session.viewportScale) { _, _ in
+                syncLiveViewport()
+            }
+            .onChange(of: session.contentRevision) { _, _ in
+                refreshFormulaCache()
+            }
+            .onChange(of: session.canvasPaletteRequest) { _, _ in
+                consumeCanvasPaletteRequest()
             }
             // Focus target for keyboard: Return = rename, Delete = remove (non-root).
             .focusable()
@@ -290,8 +394,7 @@ struct MapCanvasView: View {
                 guard editingNodeID == nil, noteEditorNodeID == nil, drawingNodeID == nil else { return .ignored }
                 if session.isBrainMode {
                     // Brain: select under pointer, then open map / toggle folder.
-                    if let hover = hoverLocation,
-                       let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
+                    if let id = hoveredID {
                         session.select(id)
                     }
                     session.activatePrimary()
@@ -648,8 +751,11 @@ struct MapCanvasView: View {
             if event.modifierFlags.contains(.command) {
                 session.handleCommandScroll(
                     deltaY: Double(event.deltaY),
-                    precise: event.hasPreciseScrollingDeltas
+                    precise: event.hasPreciseScrollingDeltas,
+                    publishScale: false
                 )
+                syncLiveViewport()
+                session.scheduleViewportScalePublish()
             } else {
                 session.commandScrollRemainder = 0
                 let dx = Double(event.scrollingDeltaX)
@@ -690,8 +796,7 @@ struct MapCanvasView: View {
         let root = session.store.map.root.id
         var ids = session.store.selection.selectedIDs.filter { $0 != root }
         if ids.isEmpty,
-           let hover = hoverLocation,
-           let hovered = hitTest(hover, snapshot: session.store.snapshot(), viewSize: canvasSize),
+           let hovered = hoveredID,
            hovered != root {
             // No focus — Delete applies to the node under the pointer.
             ids = [hovered]
@@ -836,6 +941,22 @@ struct MapCanvasView: View {
 
     // MARK: - Hover / visibility
 
+    private func consumeCanvasPaletteRequest() {
+        guard let request = session.canvasPaletteRequest else { return }
+        session.canvasPaletteRequest = nil
+        switch request {
+        case .rename(let id):
+            let snapshot = session.store.snapshot()
+            if let id {
+                beginTitleEdit(nodeID: id, snapshot: snapshot)
+            } else {
+                beginTitleEditPreferringHover(snapshot: snapshot)
+            }
+        case .toggleFollow:
+            toggleFollowMode()
+        }
+    }
+
     /// F toggles follow mode: every selection/layout change re-centers the
     /// active node instead of just nudging it into the safe margin.
     private func toggleFollowMode() {
@@ -877,11 +998,6 @@ struct MapCanvasView: View {
             offset = target
             panBase = target
         }
-    }
-
-    private func hoveredNodeID(in snapshot: MapSnapshot) -> NodeID? {
-        guard let hover = hoverLocation, canvasSize.width > 0 else { return nil }
-        return hitTest(hover, snapshot: snapshot, viewSize: canvasSize)
     }
 
     /// A viewport restored from saved preferences can strand the map entirely
@@ -1026,9 +1142,9 @@ struct MapCanvasView: View {
         formulaResults: [NodeID: FormulaValue],
         hoverID: NodeID?,
         context: inout GraphicsContext,
-        size: CGSize
+        cameraTranslate: CGPoint
     ) {
-        context.translateBy(x: size.width / 2 + offset.width, y: size.height / 2 + offset.height)
+        context.translateBy(x: cameraTranslate.x, y: cameraTranslate.y)
         context.scaleBy(x: scale, y: scale)
 
         func drawCentered(_ text: Text, in rect: CGRect, context: inout GraphicsContext) {
@@ -1297,7 +1413,7 @@ struct MapCanvasView: View {
         if isPinDragging,
            let loc = dragCurrentLocation,
            scale > 0 {
-            let mapPt = mapPoint(from: loc, viewSize: size)
+            let mapPt = mapPoint(from: loc, viewSize: canvasSize)
             let pinPreview = Text(Image(systemName: "pin.fill"))
                 .font(.system(size: 14))
                 .foregroundColor(.orange)
@@ -1379,48 +1495,50 @@ struct MapCanvasView: View {
             }
     }
 
-    /// Read-only rendered markdown card for an expanded node. Hit-testing is
-    /// off so canvas selection/gestures keep working through the card; wheel
-    /// scrolling over an overflowing card is handled by the canvas scroll
-    /// monitor (`scrollNoteCard`), which shifts the content inside the clip.
-    @ViewBuilder
-    private func noteCard(for visual: NodeVisual, viewSize: CGSize) -> some View {
-        let frame = viewFrame(for: visual.frame, viewSize: viewSize)
-        let document = noteCardDocument(for: visual.id, fallbackTitle: visual.text)
-        let scroll = session.noteCardScroll[visual.id]?.offset ?? 0
-        // Draw at map size (fixed 12pt, fixed wrap), then scale the whole
-        // picture with the zoom. The visible lines stay the same at every zoom.
-        let mapWidth = CGFloat(visual.frame.width)
-        let mapHeight = CGFloat(visual.frame.height)
-        MarkdownTextView(
-            markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight,
-            noteAssets: session.noteAssets
+    /// Expanded note cards in map space, scaled and panned with the picture.
+    /// Equality ignores pan, so a drag does not rebuild each text view.
+    private func noteCardsLayer(bounds: Rect2D, origin: CGPoint, viewSize: CGSize) -> some View {
+        let hidden = onCardEditingNodeID
+        let cards = snapshotNodesForNotes(hidden: hidden)
+        var documents: [NodeID: String] = [:]
+        documents.reserveCapacity(cards.count)
+        for visual in cards {
+            documents[visual.id] = noteCardDocument(for: visual.id, fallbackTitle: visual.text)
+        }
+        let live = session.liveNoteDocument
+        noteMeasureSink.measure = { markdown, id in
+            updateMeasuredNoteCardHeight(markdown, for: id)
+        }
+        return NoteCardLayer(
+            contentRevision: session.contentRevision,
+            hiddenID: hidden,
+            liveID: live?.nodeID,
+            liveText: live?.document,
+            mediaImageHeight: mediaImageHeight,
+            colorScheme: colorScheme,
+            scrolls: noteCardScroll,
+            nodes: cards,
+            documents: documents,
+            mapOriginX: bounds.x,
+            mapOriginY: bounds.y,
+            noteAssets: session.noteAssets,
+            measure: noteMeasureSink
         )
-            .equatable()
-            .padding(10)
-            .offset(y: -scroll)
-            .frame(width: mapWidth, height: mapHeight, alignment: .topLeading)
-            .clipped()
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
-            )
-            .scaleEffect(scale, anchor: .center)
-            .frame(width: frame.width, height: frame.height)
-            .position(x: frame.midX, y: frame.midY)
-            .allowsHitTesting(false)
-            .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
-            .onAppear {
-                updateMeasuredNoteCardHeight(document, for: visual.id)
-            }
-            .onChange(of: document) { _, updated in
-                updateMeasuredNoteCardHeight(updated, for: visual.id)
-            }
-            // dispatch clears measured heights; the same document must be measured again.
-            .onChange(of: session.contentRevision) { _, _ in
-                updateMeasuredNoteCardHeight(document, for: visual.id)
-            }
+        .equatable()
+        .frame(
+            width: CGFloat(max(bounds.width, 1)),
+            height: CGFloat(max(bounds.height, 1)),
+            alignment: .topLeading
+        )
+        .fixedSize()
+        .scaleEffect(scale, anchor: .topLeading)
+        .offset(x: origin.x, y: origin.y)
+        .frame(width: viewSize.width, height: viewSize.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+
+    private func snapshotNodesForNotes(hidden: NodeID?) -> [NodeVisual] {
+        session.store.snapshot().nodes.filter { $0.isNoteExpanded && $0.id != hidden }
     }
 
     /// Measures the card at its map width and 12pt type, and stores that
@@ -1430,6 +1548,7 @@ struct MapCanvasView: View {
     /// `session`, not the store; this is view state and must not mark the file dirty.
     @MainActor
     private func updateMeasuredNoteCardHeight(_ markdown: String, for id: NodeID) {
+        if measuredNoteDocs[id] == markdown, session.store.noteCardHeights[id] != nil { return }
         let measured = NoteCardMeasurer.height(
             markdown: markdown,
             width: CGFloat(session.store.layoutConfig.expandedNoteWidth),
@@ -1438,6 +1557,7 @@ struct MapCanvasView: View {
             noteAssets: session.noteAssets
         )
         guard measured > 0 else { return }
+        measuredNoteDocs[id] = markdown
         let revision = session.store.contentRevision
         session.store.updateMeasuredNoteHeight(Double(measured), for: id)
         guard session.store.contentRevision != revision else { return }
@@ -1495,19 +1615,19 @@ struct MapCanvasView: View {
         let overflow = max(0, noteCardContentHeight(for: id) - CGFloat(visual.frame.height))
         guard overflow > 0 else { return }
         let document = noteCardDocument(for: id, fallbackTitle: visual.text)
-        let current = session.noteCardScroll[id]
+        let current = noteCardScroll[id]
         let base = current?.document == document ? current?.offset ?? 0 : 0
         // The wheel reports screen points. The card is laid out in map points
         // and then scaled, so one screen point moves 1/scale map points.
         let next = min(max(0, base - deltaY / scale), overflow)
-        session.noteCardScroll[id] = NoteCardScrollState(offset: next, document: document)
+        noteCardScroll[id] = NoteCardScrollState(offset: next, document: document)
     }
 
     /// Card scroll offsets die with the card (collapsed or deleted) and reset
     /// to the top when the note is re-committed (document mismatch).
     private func resetStaleNoteCardScrolls() {
-        guard !session.noteCardScroll.isEmpty else { return }
-        var next = session.noteCardScroll
+        guard !noteCardScroll.isEmpty else { return }
+        var next = noteCardScroll
         var changed = false
         for (id, state) in next {
             guard let node = session.store.map.node(id: id), node.isNoteExpanded else {
@@ -1521,7 +1641,7 @@ struct MapCanvasView: View {
                 changed = true
             }
         }
-        if changed { session.noteCardScroll = next }
+        if changed { noteCardScroll = next }
     }
 
     private func handleRenameNotification(_ note: Notification) {
@@ -2050,6 +2170,33 @@ struct MapCanvasView: View {
         .accessibilityIdentifier("sketchEditor")
     }
 
+    /// Content bounds plus a margin so strokes are not clipped off the picture.
+    private func vectorPictureBounds(_ raw: Rect2D) -> Rect2D {
+        let safe = Rect2D(
+            x: raw.x,
+            y: raw.y,
+            width: max(raw.width, 1),
+            height: max(raw.height, 1)
+        )
+        return safe.inset(by: -32)
+    }
+
+    /// A picture larger than this is drawn live into the window instead of
+    /// retained as one layer. Keeps a huge map from allocating a giant texture.
+    private func vectorPictureIsStable(_ bounds: Rect2D) -> Bool {
+        let width = bounds.width * Double(scale)
+        let height = bounds.height * Double(scale)
+        return width >= 1 && height >= 1 && width <= 5_000 && height <= 5_000 && width * height <= 8_000_000
+    }
+
+    /// View-space top-left of `bounds` under the current pan and zoom.
+    private func pictureOrigin(bounds: Rect2D, viewSize: CGSize) -> CGPoint {
+        CGPoint(
+            x: bounds.x * Double(scale) + Double(viewSize.width) / 2 + Double(offset.width),
+            y: bounds.y * Double(scale) + Double(viewSize.height) / 2 + Double(offset.height)
+        )
+    }
+
     private func viewFrame(for mapFrame: Rect2D, viewSize: CGSize) -> CGRect {
         let x = mapFrame.x * Double(scale) + Double(viewSize.width) / 2 + Double(offset.width)
         let y = mapFrame.y * Double(scale) + Double(viewSize.height) / 2 + Double(offset.height)
@@ -2067,8 +2214,7 @@ struct MapCanvasView: View {
 
     /// ⌘E: prefer node under pointer; else primary selection.
     private func beginEditPreferringHover(snapshot: MapSnapshot) {
-        if let hover = hoverLocation,
-           let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
+        if let id = hoveredID {
             beginEdit(nodeID: id, snapshot: snapshot)
             return
         }
@@ -2082,8 +2228,7 @@ struct MapCanvasView: View {
 
     /// Return / Rename: prefer node under pointer; else primary selection.
     private func beginTitleEditPreferringHover(snapshot: MapSnapshot) {
-        if let hover = hoverLocation,
-           let id = hitTest(hover, snapshot: snapshot, viewSize: canvasSize) {
+        if let id = hoveredID {
             beginTitleEdit(nodeID: id, snapshot: snapshot)
             return
         }
@@ -2402,7 +2547,7 @@ struct MapCanvasView: View {
                 }
                 let next = Double(magnifyBase) * Double(value.magnification)
                 let anchor: Point2D = {
-                    if let hover = hoverLocation {
+                    if let hover = pointer.location {
                         return Point2D(x: Double(hover.x), y: Double(hover.y))
                     }
                     return Point2D(x: Double(canvasSize.width) / 2, y: Double(canvasSize.height) / 2)
@@ -2411,12 +2556,15 @@ struct MapCanvasView: View {
                     next,
                     around: anchor,
                     width: Double(canvasSize.width),
-                    height: Double(canvasSize.height)
+                    height: Double(canvasSize.height),
+                    publishScale: false
                 )
+                syncLiveViewport()
             }
             .onEnded { _ in
                 magnifyBase = scale
                 magnifyGestureActive = false
+                session.publishViewportScale()
             }
     }
 
@@ -2513,6 +2661,117 @@ struct MapCanvasView: View {
         }
         return nil
     }
+
+    /// Node under the pointer at menu-open time. The pointer itself is not
+    /// view state; hover highlight updates only when the node changes.
+    private func hoveredNodeID(in snapshot: MapSnapshot) -> NodeID? {
+        if let point = pointer.location {
+            return hitTest(point, snapshot: snapshot, viewSize: canvasSize)
+        }
+        return hoveredID
+    }
+}
+
+/// What the retained map picture depends on. Pan is not here.
+private struct PictureKey: Equatable {
+    var contentRevision: UInt64
+    var selectionRevision: UInt64
+    var hoverID: NodeID?
+    var scale: CGFloat
+    var colorScheme: ColorScheme
+    var editingNodeID: NodeID?
+    var drawingNodeID: NodeID?
+    var dropTargetID: NodeID?
+    var dragNodeID: NodeID?
+    var isPinDragging: Bool
+    var ghost: CGPoint?
+    var pin: CGPoint?
+    var formulaCount: Int
+}
+
+/// Skips rebuilding `content` when `key` is unchanged. Pan is not part of the
+/// key, so a drag keeps the last drawing and only the outer offset moves.
+private struct RedrawGate<Content: View>: View, Equatable {
+    var key: PictureKey
+    var content: Content
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.key == rhs.key }
+
+    var body: some View { content }
+}
+
+/// Expanded note cards laid out in map space. Pan and zoom are applied by
+/// the parent, so those frames do not rebuild the text views.
+private struct NoteCardLayer: View, Equatable {
+    var contentRevision: UInt64
+    var hiddenID: NodeID?
+    var liveID: NodeID?
+    var liveText: String?
+    var mediaImageHeight: CGFloat
+    var colorScheme: ColorScheme
+    var scrolls: [NodeID: NoteCardScrollState]
+    var nodes: [NodeVisual]
+    var documents: [NodeID: String]
+    var mapOriginX: Double
+    var mapOriginY: Double
+    var noteAssets: NoteAssetStore
+    var measure: NoteMeasureSink
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.contentRevision == rhs.contentRevision
+            && lhs.hiddenID == rhs.hiddenID
+            && lhs.liveID == rhs.liveID
+            && lhs.liveText == rhs.liveText
+            && lhs.mediaImageHeight == rhs.mediaImageHeight
+            && lhs.colorScheme == rhs.colorScheme
+            && lhs.scrolls == rhs.scrolls
+    }
+
+    var body: some View {
+        let _ = colorScheme
+        ZStack(alignment: .topLeading) {
+            ForEach(nodes) { visual in
+                card(visual)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func card(_ visual: NodeVisual) -> some View {
+        let document = documents[visual.id] ?? ""
+        let scroll = scrolls[visual.id]?.offset ?? 0
+        let mapWidth = CGFloat(visual.frame.width)
+        let mapHeight = CGFloat(visual.frame.height)
+        MarkdownTextView(
+            markdown: document, fontSize: 12, maxImageHeight: mediaImageHeight,
+            noteAssets: noteAssets
+        )
+        .equatable()
+        .padding(10)
+        .offset(y: -scroll)
+        .frame(width: mapWidth, height: mapHeight, alignment: .topLeading)
+        .clipped()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+        .position(
+            x: CGFloat(visual.frame.midX - mapOriginX),
+            y: CGFloat(visual.frame.midY - mapOriginY)
+        )
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("noteCard-\(visual.id.rawValue)")
+        .onAppear {
+            measure.measure(document, visual.id)
+        }
+        .onChange(of: document) { _, updated in
+            measure.measure(updated, visual.id)
+        }
+        .onChange(of: contentRevision) { _, _ in
+            measure.measure(document, visual.id)
+        }
+    }
 }
 
 // swiftMindToggleNoteEditor / swiftMindToggleNoteExpansion / swiftMindRenameNode
@@ -2532,6 +2791,8 @@ extension Notification.Name {
     static let swiftMindRenameNode = Notification.Name("swiftMindRenameNode")
     static let swiftMindToggleNoteExpansion = Notification.Name("swiftMindToggleNoteExpansion")
     static let swiftMindToggleSketch = Notification.Name("swiftMindToggleSketch")
+    static let swiftMindPresentSearch = Notification.Name("swiftMind.presentSearch")
+    static let swiftMindToggleInspector = Notification.Name("swiftMind.toggleInspector")
 }
 
 private extension Notification.Name {

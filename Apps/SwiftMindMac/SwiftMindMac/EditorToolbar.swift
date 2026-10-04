@@ -53,7 +53,7 @@ struct EditorToolbar: ToolbarContent {
                     Label("Zoom Out", systemImage: "minus.magnifyingglass")
                 }
                 .help("Zoom Out (⌘-)")
-                .disabled(session.viewport.isAtMinScale)
+                .disabled(session.viewportScale <= CanvasViewport.minScale + 1e-12)
                 .accessibilityIdentifier("toolbarZoomOut")
 
                 Button {
@@ -62,7 +62,7 @@ struct EditorToolbar: ToolbarContent {
                     Label("Zoom In", systemImage: "plus.magnifyingglass")
                 }
                 .help("Zoom In (⌘+)")
-                .disabled(session.viewport.isAtMaxScale)
+                .disabled(session.viewportScale >= CanvasViewport.maxScale - 1e-12)
                 .accessibilityIdentifier("toolbarZoomIn")
 
                 Button {
@@ -71,7 +71,7 @@ struct EditorToolbar: ToolbarContent {
                     Label("Actual Size", systemImage: "1.magnifyingglass")
                 }
                 .help("Actual Size (⌘0)")
-                .disabled(session.viewport.isActualSize)
+                .disabled(abs(session.viewportScale - 1) < 1e-9)
                 .accessibilityIdentifier("toolbarActualSize")
 
                 Button(action: onCommands) {

@@ -247,6 +247,13 @@ private struct SessionWorkspace: View {
                 onWillClose: { appModel.documentWindowClosed(document) }
             )
         )
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindPresentSearch)) { _ in
+            guard !session.isBrainMode else { return }
+            searchPresented = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .swiftMindToggleInspector)) { _ in
+            inspectorPresented.toggle()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .swiftMindDetachVault)) { note in
             guard session.isBrainMode, let path = note.userInfo?["path"] as? String else { return }
             appModel.detachVault(URL(fileURLWithPath: path))

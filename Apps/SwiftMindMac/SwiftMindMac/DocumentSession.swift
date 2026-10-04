@@ -9,21 +9,21 @@ final class DocumentSession: ObservableObject {
     /// Selection-only — redraw selection without rewriting the document.
     @Published private(set) var selectionRevision: UInt64 = 0
     @Published var viewMode: ViewMode = .map
+    /// One-shot canvas action from the command palette. The canvas consumes
+    /// it on appear or when it is already showing.
+    @Published var canvasPaletteRequest: CanvasPaletteRequest?
     @Published private(set) var toast: StatusToast?
 
     /// Live floating-editor draft (virtual-H1 document) while the note editor
     /// is open; rendered views prefer it over the stored model values.
     @Published var liveNoteDocument: (nodeID: NodeID, document: String)?
 
-    /// Per-node wheel-scroll offset for overflowing expanded note cards. The
-    /// cards stay hit-test-transparent (taps fall through to selection), so
-    /// the canvas wheel monitor drives this. View state — not persisted, not
-    /// undoable; the document snapshot detects re-commits so a stale offset
-    /// resets when the note changes.
-    @Published var noteCardScroll: [NodeID: NoteCardScrollState] = [:]
-
     /// Canvas pan/zoom. View-state only — not persisted, not undoable.
-    @Published var viewport = CanvasViewport()
+    /// Offset changes do not publish: the canvas keeps its own pan state so
+    /// dragging does not rebuild the sidebar and inspector every frame.
+    var viewport = CanvasViewport()
+    /// Published only when the zoom changes, so toolbar enablement stays current.
+    @Published private(set) var viewportScale: Double = 1
     /// Set when the map had no saved viewport: the canvas zooms to fit the
     /// whole map on first layout, then clears this.
     var needsInitialFit = false
@@ -50,9 +50,18 @@ final class DocumentSession: ObservableObject {
     let noteAssets: NoteAssetStore
 
     private var toastClearTask: Task<Void, Never>?
+    /// One sleeper for a burst of trackpad zoom. Publishing scale every tick
+    /// rebuilds the sidebar and inspector.
+    private var scalePublishTask: Task<Void, Never>?
+    private var scalePublishGeneration: UInt64 = 0
 
     /// Back-compat for views that observe a single tick.
     var revision: UInt64 { contentRevision &+ selectionRevision }
+
+    enum CanvasPaletteRequest: Equatable {
+        case rename(NodeID?)
+        case toggleFollow
+    }
 
     enum ViewMode: String, CaseIterable, Identifiable {
         case map
@@ -186,17 +195,20 @@ final class DocumentSession: ObservableObject {
     }
 
     func setCanvasOffset(_ offset: Point2D) {
-        var next = viewport
-        next.offset = offset
-        viewport = next
+        viewport.offset = offset
         onViewportChanged?()
     }
 
-    func setCanvasScale(_ scale: Double, around viewPoint: Point2D, width: Double, height: Double) {
+    func setCanvasScale(
+        _ scale: Double,
+        around viewPoint: Point2D,
+        width: Double,
+        height: Double,
+        publishScale: Bool = true
+    ) {
         var next = viewport
         next.setScale(scale, anchorView: viewPoint, viewWidth: width, viewHeight: height)
-        viewport = next
-        onViewportChanged?()
+        adoptViewport(next, publishScale: publishScale)
     }
 
     func panCanvas(by delta: Point2D) {
@@ -206,29 +218,71 @@ final class DocumentSession: ObservableObject {
         onViewportChanged?()
     }
 
-    func zoomIn() {
-        applyZoomStep(.in)
+    func replaceViewport(_ next: CanvasViewport) {
+        adoptViewport(next)
     }
 
-    func zoomOut() {
-        applyZoomStep(.out)
+    private func adoptViewport(_ next: CanvasViewport, publishScale: Bool = true) {
+        viewport = next
+        if publishScale {
+            viewportScale = next.scale
+        }
+        onViewportChanged?()
     }
 
-    func handleCommandScroll(deltaY: Double, precise: Bool) {
+    /// Toolbar reads `viewportScale`. Continuous zoom updates the canvas
+    /// directly and publishes once the gesture settles.
+    func publishViewportScale() {
+        if viewportScale != viewport.scale {
+            viewportScale = viewport.scale
+        }
+    }
+
+    func scheduleViewportScalePublish() {
+        scalePublishGeneration &+= 1
+        let generation = scalePublishGeneration
+        if scalePublishTask != nil { return }
+        scalePublishTask = Task { @MainActor in
+            var seen = generation
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                if Task.isCancelled { break }
+                if scalePublishGeneration == seen {
+                    publishViewportScale()
+                    break
+                }
+                seen = scalePublishGeneration
+            }
+            scalePublishTask = nil
+            if scalePublishGeneration != seen {
+                scheduleViewportScalePublish()
+            }
+        }
+    }
+
+    func zoomIn(publishScale: Bool = true) {
+        applyZoomStep(.in, publishScale: publishScale)
+    }
+
+    func zoomOut(publishScale: Bool = true) {
+        applyZoomStep(.out, publishScale: publishScale)
+    }
+
+    func handleCommandScroll(deltaY: Double, precise: Bool, publishScale: Bool = true) {
         guard !isBrainMode else { return }
         if precise {
             commandScrollRemainder += deltaY
             while commandScrollRemainder >= 1 {
                 commandScrollRemainder -= 1
-                zoomIn()
+                zoomIn(publishScale: publishScale)
             }
             while commandScrollRemainder <= -1 {
                 commandScrollRemainder += 1
-                zoomOut()
+                zoomOut(publishScale: publishScale)
             }
         } else {
-            if deltaY > 0 { zoomIn() }
-            else if deltaY < 0 { zoomOut() }
+            if deltaY > 0 { zoomIn(publishScale: publishScale) }
+            else if deltaY < 0 { zoomOut(publishScale: publishScale) }
         }
     }
 
@@ -241,8 +295,7 @@ final class DocumentSession: ObservableObject {
             viewWidth: lastCanvasWidth,
             viewHeight: lastCanvasHeight
         )
-        viewport = next
-        onViewportChanged?()
+        adoptViewport(next)
     }
 
     /// Fit the whole map into the view (Zoom to Fit / first open of a map
@@ -255,11 +308,10 @@ final class DocumentSession: ObservableObject {
             viewHeight: lastCanvasHeight
         )
         guard next != viewport else { return }
-        viewport = next
-        onViewportChanged?()
+        adoptViewport(next)
     }
 
-    private func applyZoomStep(_ step: ZoomStep) {
+    private func applyZoomStep(_ step: ZoomStep, publishScale: Bool = true) {
         guard !isBrainMode else { return }
         var next = viewport
         next.zoomByStepping(
@@ -268,8 +320,7 @@ final class DocumentSession: ObservableObject {
             viewWidth: lastCanvasWidth,
             viewHeight: lastCanvasHeight
         )
-        viewport = next
-        onViewportChanged?()
+        adoptViewport(next, publishScale: publishScale)
     }
 
     private func zoomAnchor() -> Point2D {
@@ -334,7 +385,8 @@ final class DocumentSession: ObservableObject {
     }
 }
 
-/// Scroll state of one expanded note card (see `DocumentSession.noteCardScroll`).
+/// Scroll state of one expanded note card. Owned by the canvas, not the
+/// session, so a wheel tick does not republish the sidebar and inspector.
 struct NoteCardScrollState: Equatable {
     /// Offset in map points, applied before the card is scaled with the zoom.
     var offset: CGFloat

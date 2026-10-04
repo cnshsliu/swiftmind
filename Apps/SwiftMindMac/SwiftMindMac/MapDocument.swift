@@ -29,6 +29,8 @@ final class MapDocument: ObservableObject, Identifiable {
     private var saveTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var viewportTask: Task<Void, Never>?
+    /// Bumped on every pan/zoom tick. One sleeper persists after the burst.
+    private var viewportGeneration: UInt64 = 0
     private var accessRoot: URL?
     /// Hash of the file content we last read or wrote — watcher events whose
     /// content matches are our own saves and are ignored.
@@ -53,7 +55,7 @@ final class MapDocument: ObservableObject, Identifiable {
         let migrated = assets.extractEmbeddedImages(from: &map)
         session = DocumentSession(map: map, noteAssets: assets)
         if !isUITesting, let saved = viewStateStore.viewport(for: map.id) {
-            session.viewport = saved
+            session.replaceViewport(saved)
         } else {
             // Never seen this map: open with the whole map in view.
             // The canvas performs the fit once it knows its size.
@@ -227,11 +229,24 @@ final class MapDocument: ObservableObject, Identifiable {
 
     private func scheduleViewportPersist() {
         guard !isBrain, url != nil else { return }
-        viewportTask?.cancel()
+        viewportGeneration &+= 1
+        let generation = viewportGeneration
+        if viewportTask != nil { return }
         viewportTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled else { return }
-            self.persistViewport()
+            var seen = generation
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                if Task.isCancelled { break }
+                if viewportGeneration == seen {
+                    self.persistViewport()
+                    break
+                }
+                seen = viewportGeneration
+            }
+            viewportTask = nil
+            if viewportGeneration != seen {
+                self.scheduleViewportPersist()
+            }
         }
     }
 

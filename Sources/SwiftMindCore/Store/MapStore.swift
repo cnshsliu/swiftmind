@@ -35,6 +35,11 @@ public final class MapStore {
     /// Geometry-only snapshot (selection flags cleared). Invalidated on content change.
     private var cachedGeometry: MapSnapshot?
     private var cachedForContentRevision: UInt64 = .max
+    /// Selection flags applied. Pan and hover call `snapshot()` every event;
+    /// rebuilding the node array each time allocates on the hot path.
+    private var cachedDisplay: MapSnapshot?
+    private var cachedDisplayContent: UInt64 = .max
+    private var cachedDisplaySelection: UInt64 = .max
 
     public init(map: MindMap) {
         self.map = map
@@ -42,9 +47,19 @@ public final class MapStore {
     }
 
     /// Layout with selection applied. Selection-only changes reuse geometry cache.
+    /// Repeated calls at the same revisions return the cached value (array is
+    /// copy-on-write) so pan and scroll do not allocate a node per frame.
     public func snapshot() -> MapSnapshot {
-        let geometry = geometrySnapshot()
-        return geometry.applying(selection: selection)
+        if let cachedDisplay,
+           cachedDisplayContent == contentRevision,
+           cachedDisplaySelection == selectionRevision {
+            return cachedDisplay
+        }
+        let applied = geometrySnapshot().applying(selection: selection)
+        cachedDisplay = applied
+        cachedDisplayContent = contentRevision
+        cachedDisplaySelection = selectionRevision
+        return applied
     }
 
     /// Replace the parser's expanded-note height guess for one relayout.
@@ -250,6 +265,9 @@ public final class MapStore {
     private func invalidateGeometry() {
         cachedGeometry = nil
         cachedForContentRevision = .max
+        cachedDisplay = nil
+        cachedDisplayContent = .max
+        cachedDisplaySelection = .max
     }
 }
 
